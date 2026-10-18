@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::http::Request;
 use axum::middleware;
-use axum::routing::get;
+use axum::routing::{any, get};
 use axum::{Json, Router};
 use shared::api::Health;
 use tower::ServiceBuilder;
@@ -11,6 +11,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::config::Config;
 use crate::error::{ApiError, attach_request_id};
+use crate::web;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -32,10 +33,14 @@ pub fn router(state: AppState) -> Router {
         )
     });
 
-    Router::new()
+    let router = Router::new()
         .route("/healthz", get(healthz))
         .nest("/api", Router::new().fallback(not_found))
         .nest("/auth", Router::new().fallback(not_found))
+        // nest() does not match the empty tail, so the bare-slash forms need explicit routes
+        .route("/api/", any(not_found))
+        .route("/auth/", any(not_found))
+        .fallback_service(web::service(&state.config.web_dir))
         .with_state(state)
         .layer(
             ServiceBuilder::new()
@@ -43,7 +48,8 @@ pub fn router(state: AppState) -> Router {
                 .layer(trace)
                 .layer(PropagateRequestIdLayer::x_request_id())
                 .layer(middleware::from_fn(attach_request_id)),
-        )
+        );
+    web::security_headers(router)
 }
 
 async fn healthz() -> Json<Health> {
