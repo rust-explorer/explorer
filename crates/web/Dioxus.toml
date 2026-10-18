@@ -1,0 +1,7 @@
+[application]
+name = "explorer"
+tailwind_input = "tailwind.css"
+tailwind_output = "assets/tailwind.css"
+
+[web.app]
+title = "Explorer"
