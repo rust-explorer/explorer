@@ -22,6 +22,33 @@ impl ApiError {
         }
     }
 
+    #[must_use]
+    pub fn unauthenticated() -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            code: "unauthenticated",
+            message: "Authentication required".to_owned(),
+        }
+    }
+
+    #[must_use]
+    pub fn forbidden() -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code: "forbidden",
+            message: "Access denied".to_owned(),
+        }
+    }
+
+    #[must_use]
+    pub fn csrf_rejected() -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code: "csrf_rejected",
+            message: "Cross-origin request rejected".to_owned(),
+        }
+    }
+
     /// The cause is logged, never returned to the client.
     #[must_use]
     pub fn internal(err: impl std::fmt::Display) -> Self {

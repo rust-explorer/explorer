@@ -104,7 +104,9 @@ async fn boom() -> ApiError {
 async fn internal_error_is_generic_and_carries_request_id() {
     let dir = tempfile::tempdir().unwrap();
     let extra: Router<AppState> = Router::new().route("/api/_boom", axum::routing::get(boom));
-    let app = router_with(common::state_with_web_dir(dir.path()).await, extra);
+    let app = router_with(common::state_with_web_dir(dir.path()).await, extra)
+        .await
+        .unwrap();
     let res = app.oneshot(get("/api/_boom")).await.unwrap();
     assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
     let id = res.headers()["x-request-id"].to_str().unwrap().to_owned();

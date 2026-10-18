@@ -30,6 +30,9 @@ humantime = "2.4"
 secrecy = "0.10"
 tempfile = "3"
 thiserror = "2"
+time = "0.3"
+tower-sessions = { version = "0.14", default-features = false, features = ["axum-core"] }
+tower-sessions-sqlx-store = { version = "0.15", default-features = false, features = ["sqlite"] }
 url = "2.5"
 
 [workspace.lints.clippy]

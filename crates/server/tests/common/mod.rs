@@ -31,7 +31,7 @@ pub async fn state_with_web_dir(web_dir: &Path) -> AppState {
 }
 
 pub async fn app_with_web_dir(web_dir: &Path) -> axum::Router {
-    router(state_with_web_dir(web_dir).await)
+    router(state_with_web_dir(web_dir).await).await.unwrap()
 }
 
 pub fn get(uri: &str) -> Request<Body> {

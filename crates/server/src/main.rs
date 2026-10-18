@@ -2,13 +2,14 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::process::ExitCode;
 use std::sync::Arc;
 
+use axum::Router;
 use explorer_server::app::{AppState, router};
 use explorer_server::config::Config;
 use explorer_server::db;
 use explorer_server::healthcheck;
+use explorer_server::session;
 use explorer_server::telemetry;
 use explorer_server::web::check_bundle;
-use sqlx::SqlitePool;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -54,7 +55,20 @@ async fn main() -> ExitCode {
         }
     };
 
-    match serve(config, pool).await {
+    let state = AppState {
+        config: Arc::new(config),
+        db: pool.clone(),
+    };
+    let app = match router(state).await {
+        Ok(app) => app,
+        Err(err) => {
+            tracing::error!(error = %err, "session store unavailable");
+            return ExitCode::from(2);
+        }
+    };
+    let _cleanup = session::spawn_expired_cleanup(pool);
+
+    match serve(app).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             tracing::error!(error = %err, "server failed");
@@ -73,11 +87,7 @@ async fn run_healthcheck() -> ExitCode {
     }
 }
 
-async fn serve(config: Config, db: SqlitePool) -> std::io::Result<()> {
-    let app = router(AppState {
-        config: Arc::new(config),
-        db,
-    });
+async fn serve(app: Router) -> std::io::Result<()> {
     let listener = TcpListener::bind(LISTEN_ADDR).await?;
     tracing::info!(addr = LISTEN_ADDR, "listening");
     axum::serve(listener, app)
