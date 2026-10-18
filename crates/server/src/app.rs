@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::http::Request;
 use axum::middleware;
-use axum::routing::get;
+use axum::routing::{any, get};
 use axum::{Json, Router};
 use shared::api::Health;
 use tower::ServiceBuilder;
@@ -37,6 +37,9 @@ pub fn router(state: AppState) -> Router {
         .route("/healthz", get(healthz))
         .nest("/api", Router::new().fallback(not_found))
         .nest("/auth", Router::new().fallback(not_found))
+        // nest() does not match the empty tail, so the bare-slash forms need explicit routes
+        .route("/api/", any(not_found))
+        .route("/auth/", any(not_found))
         .fallback_service(web::service(&state.config.web_dir))
         .with_state(state)
         .layer(

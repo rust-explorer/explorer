@@ -71,7 +71,7 @@ async fn unknown_client_route_falls_back_to_index() {
 #[tokio::test]
 async fn api_and_auth_routes_do_not_fall_back() {
     let dir = bundle();
-    for uri in ["/api/x", "/auth/x", "/api", "/auth"] {
+    for uri in ["/api/x", "/auth/x", "/api", "/auth", "/api/", "/auth/"] {
         let res = app_with_web_dir(dir.path())
             .oneshot(get(uri))
             .await
