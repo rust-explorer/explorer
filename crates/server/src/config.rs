@@ -123,6 +123,11 @@ impl Config {
             }
         };
 
+        let log_filter = get(VAR_LOG).unwrap_or_else(|| "info".to_owned());
+        if let Err(reason) = validate_log_filter(&log_filter) {
+            errors.push(invalid(VAR_LOG, reason));
+        }
+
         let path = |var: &str, default: &str| PathBuf::from(get(var).as_deref().unwrap_or(default));
 
         match (
@@ -153,7 +158,7 @@ impl Config {
                 },
                 session_ttl,
                 log: LogConfig {
-                    filter: get(VAR_LOG).unwrap_or_else(|| "info".to_owned()),
+                    filter: log_filter,
                     format,
                 },
                 data_dir: path(VAR_DATA_DIR, "/data"),
@@ -174,6 +179,28 @@ fn invalid(var: &'static str, reason: impl Into<String>) -> ConfigError {
         var,
         reason: reason.into(),
     }
+}
+
+fn validate_log_filter(value: &str) -> Result<(), String> {
+    const LEVELS: [&str; 6] = ["off", "error", "warn", "info", "debug", "trace"];
+    let is_level = |s: &str| LEVELS.iter().any(|l| l.eq_ignore_ascii_case(s));
+    for directive in value.split(',').map(str::trim) {
+        let valid = match directive.split_once('=') {
+            None => is_level(directive),
+            Some((target, level)) => {
+                !target.is_empty() && !target.contains(['[', ']']) && is_level(level)
+            }
+        };
+        if !valid {
+            return Err(format!(
+                "invalid directive `{directive}`, expected a level ({}) or `target=level`",
+                LEVELS.join("|")
+            ));
+        }
+    }
+    tracing_subscriber::EnvFilter::try_new(value)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 fn parse_http_url(var: &'static str, value: &str) -> Result<Url, ConfigError> {
@@ -442,6 +469,41 @@ mod tests {
     fn parses_session_ttl() {
         let cfg = Config::from_lookup(lookup(&with(&[("EXPLORER_SESSION_TTL", "12h")]))).unwrap();
         assert_eq!(cfg.session_ttl, Duration::from_secs(12 * 3600));
+    }
+
+    #[test]
+    fn rejects_invalid_log_filter() {
+        for bad in [
+            "debgu",
+            "info,,",
+            "explorer_server=debgu",
+            "=debug",
+            "a=b=c",
+        ] {
+            let errs = errors(&with(&[("EXPLORER_LOG", bad)]));
+            assert!(
+                matches!(
+                    errs.as_slice(),
+                    [ConfigError::Invalid {
+                        var: "EXPLORER_LOG",
+                        ..
+                    }]
+                ),
+                "{bad} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_valid_log_filters() {
+        for good in [
+            "info",
+            "explorer_server=debug,tower_http=info",
+            "warn,explorer_server=trace",
+        ] {
+            let config = Config::from_lookup(lookup(&with(&[("EXPLORER_LOG", good)]))).unwrap();
+            assert_eq!(config.log.filter, good);
+        }
     }
 
     #[test]
