@@ -16,7 +16,7 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
     #[error(
-        "{path} is not writable (owner uid {owner_uid}, gid {owner_gid}; running as uid {uid}, \
+        "{path} is not writable (owner {owner}; running as uid {uid}, \
          gid {gid}): {source}; check the volume mount and the container `user:`",
         path = path.display(),
         uid = rustix::process::geteuid().as_raw(),
@@ -24,8 +24,7 @@ pub enum DbError {
     )]
     NotWritable {
         path: PathBuf,
-        owner_uid: u32,
-        owner_gid: u32,
+        owner: String,
         source: io::Error,
     },
     #[error("cannot open database: {0}")]
@@ -67,11 +66,13 @@ fn check_writable(dir: &Path) -> Result<(), DbError> {
 }
 
 fn not_writable(path: &Path, source: io::Error) -> DbError {
-    let (owner_uid, owner_gid) = std::fs::metadata(path).map_or((0, 0), |m| (m.uid(), m.gid()));
+    let owner = std::fs::metadata(path).map_or_else(
+        |_| "unknown".to_owned(),
+        |m| format!("uid {}, gid {}", m.uid(), m.gid()),
+    );
     DbError::NotWritable {
         path: path.to_path_buf(),
-        owner_uid,
-        owner_gid,
+        owner,
         source,
     }
 }

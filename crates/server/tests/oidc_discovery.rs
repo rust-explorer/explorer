@@ -7,7 +7,6 @@ use explorer_server::oidc::{Oidc, SigninError, VerifiedIdentity};
 use fake_oidc::{FakeOidc, Outage};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
-use url::Url;
 
 #[tokio::test]
 async fn discovers_fake_provider() {
