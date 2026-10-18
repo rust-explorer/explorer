@@ -1,4 +1,6 @@
+use std::fs::OpenOptions;
 use std::io;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -6,19 +8,26 @@ use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 
 const DB_FILE: &str = "explorer.db";
+const WAL_FILE: &str = "explorer.db-wal";
+const SHM_FILE: &str = "explorer.db-shm";
 const WRITE_TEST_FILE: &str = ".write-test";
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
     #[error(
-        "config directory {dir} is not writable (uid {uid}, gid {gid}): {source}; \
-         check the volume mount and the container `user:`",
-        dir = dir.display(),
+        "{path} is not writable (owner uid {owner_uid}, gid {owner_gid}; running as uid {uid}, \
+         gid {gid}): {source}; check the volume mount and the container `user:`",
+        path = path.display(),
         uid = rustix::process::geteuid().as_raw(),
         gid = rustix::process::getegid().as_raw(),
     )]
-    NotWritable { dir: PathBuf, source: io::Error },
+    NotWritable {
+        path: PathBuf,
+        owner_uid: u32,
+        owner_gid: u32,
+        source: io::Error,
+    },
     #[error("cannot open database: {0}")]
     Open(#[from] sqlx::Error),
     #[error("cannot run database migrations: {0}")]
@@ -39,12 +48,30 @@ pub async fn open(config_dir: &Path) -> Result<SqlitePool, DbError> {
     Ok(pool)
 }
 
+/// Fails early, with an actionable message, instead of surfacing `SQLite`'s "readonly database".
 fn check_writable(dir: &Path) -> Result<(), DbError> {
     let probe = dir.join(WRITE_TEST_FILE);
     std::fs::File::create(&probe)
         .and_then(|_| std::fs::remove_file(&probe))
-        .map_err(|source| DbError::NotWritable {
-            dir: dir.to_path_buf(),
-            source,
-        })
+        .map_err(|source| not_writable(dir, source))?;
+    for name in [DB_FILE, WAL_FILE, SHM_FILE] {
+        let path = dir.join(name);
+        match OpenOptions::new().write(true).open(&path) {
+            Err(source) if source.kind() != io::ErrorKind::NotFound => {
+                return Err(not_writable(&path, source));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn not_writable(path: &Path, source: io::Error) -> DbError {
+    let (owner_uid, owner_gid) = std::fs::metadata(path).map_or((0, 0), |m| (m.uid(), m.gid()));
+    DbError::NotWritable {
+        path: path.to_path_buf(),
+        owner_uid,
+        owner_gid,
+        source,
+    }
 }
