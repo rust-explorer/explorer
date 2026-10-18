@@ -35,8 +35,8 @@ Because the cookie is `Secure`, Explorer must be served over HTTPS.
 `SameSite=Lax` is the first layer. In addition, every request other than `GET`, `HEAD` and
 `OPTIONS` must carry an `Origin` (or, failing that, `Referer`) header whose origin equals
 the origin of `EXPLORER_PUBLIC_URL`; otherwise the server answers 403 `csrf_rejected`.
-Login and callback are `GET` requests protected by the `state` parameter, which is
-bound to the session and usable once.
+Login is a harmless `GET` that only starts a sign-in; the callback is protected by the
+`state` parameter, which is bound to the session and usable once.
 
 ## Open redirects
 
@@ -65,4 +65,5 @@ The client secret can be supplied as a file (`EXPLORER_OIDC_CLIENT_SECRET_FILE`)
 never logged. Sign-in failures log a reason and the provider's error text (truncated);
 rejected cross-origin requests log the offending origin (truncated). Tokens, codes,
 session ids and the client secret are not logged. Provider requests do not follow
-redirects, and discovery failures are retried but never trusted partially.
+redirects, and discovery failures are retried. A discovery document that fails
+validation (for example an issuer mismatch) stops startup; it is never used.

@@ -8,6 +8,8 @@ Explorer ships as a single Docker image (`linux/amd64`). You need:
 - Docker with Compose.
 - An OIDC provider. [PocketID](https://pocket-id.org) is the documented and tested
   example; any compliant provider that can put group names in a claim works.
+  The provider's TLS certificate must be publicly trusted (private CAs are not supported
+  yet).
 - A reverse proxy terminating TLS in front of the container. The example uses
   [GoDoxy](https://github.com/yusing/godoxy); any reverse proxy works.
 
@@ -40,11 +42,9 @@ of the user's groups in the `groups` claim when the `groups` scope is requested
 else is needed. To check what Explorer will receive, use the client's OIDC Data Preview.
 If your provider uses another claim name, set `EXPLORER_OIDC_GROUPS_CLAIM`.
 
-Explorer sends `https://files.example.com/` (with a trailing slash) as the post-logout
-redirect. PocketID's documentation does not say whether it treats it the same as the URL
-without the slash; if signing out ends on a provider error page, add that variant as a
-second logout callback URL
-([Callback URLs](https://pocket-id.org/docs/advanced/callback-url-wildcards)).
+Register exactly `https://files.example.com` (no trailing slash) as the logout callback
+URL: Explorer sends that string as the post-logout redirect, and the provider compares it
+literally.
 
 Other providers: the client needs the callback URL above and a groups claim. If the
 provider has no end-session endpoint, signing out only ends the Explorer session.
@@ -122,8 +122,9 @@ docker compose logs -f explorer
 
 On success the log shows the version, the effective UID/GID and `listening` on
 `0.0.0.0:8080`. At startup Explorer contacts the issuer; if it is unreachable it retries
-10 times, 3 seconds apart (so Explorer and PocketID can start together), then exits. If the configuration is incomplete or invalid, the container exits with
-status 2 and prints one line per problem, for example:
+10 times, 3 seconds apart (so Explorer and PocketID can start together), then exits.
+If the configuration is incomplete or invalid, the container exits with status 2 and
+prints one line per problem, for example:
 
 ```
 EXPLORER_PUBLIC_URL is required
@@ -145,10 +146,11 @@ the details (look for `sign-in failed` with the same `reason`).
 
 | Reason | Meaning | Fix |
 |---|---|---|
-| `provider_error` | The provider returned an error instead of a code. | Read the log line's `error`. Typical causes: the user cancelled, or the provider rejected the request (for example an unregistered callback URL). |
+| `provider_error` | The provider returned an error instead of a code. | Read the log line's `error`. Typical causes: the user cancelled, or the provider refused this user or client (`access_denied`). |
 | `state_mismatch` | The sign-in was expired, replayed, forged, or belongs to another browser tab. | Retry from the start. Check cookies are not blocked and `EXPLORER_PUBLIC_URL` is the URL in the address bar (the session cookie is `Secure`, so HTTPS is required). |
 | `exchange_failed` | The token endpoint rejected the code, or could not be reached. | Check the client ID and secret, that the client is confidential, and that the container can reach the issuer. |
-| `invalid_token` | The ID token failed verification (signature, issuer, audience, expiry or nonce). | Check `EXPLORER_OIDC_ISSUER` matches the provider's issuer exactly, the client ID, and the clocks of both hosts. |
+| `invalid_token` | The ID token failed verification (signature, issuer, audience, expiry or nonce). | Check `EXPLORER_OIDC_ISSUER` matches the provider's issuer exactly, the client ID, and the clocks of both hosts. If you rotated the provider's signing keys, restart Explorer. |
+| Signing out stops on PocketID's own sign-out page | The logout callback URL does not match exactly. | Register `https://files.example.com` with no trailing slash (step 1). |
 | `missing_groups_claim` | The groups claim is absent or not an array of strings. | Make sure the `groups` scope is released to the client and, for another provider, set `EXPLORER_OIDC_GROUPS_CLAIM`. |
 
 Signing in successfully but landing on `/access-denied` means the user is not in
