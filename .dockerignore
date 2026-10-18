@@ -1,0 +1,13 @@
+.git
+.github
+.superpowers
+target
+docs
+*.md
+!README.md
+.env
+.env.*
+docker-compose*.yml
+Dockerfile
+.dockerignore
+crates/web/assets/tailwind.css

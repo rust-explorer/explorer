@@ -1,0 +1,19 @@
+# Copy to docker-compose.yml and adapt. See docs/installation.md.
+services:
+  explorer:
+    image: ghcr.io/fabienlege/explorer:latest
+    container_name: explorer
+    restart: unless-stopped
+    # UID:GID that owns your files on the host (`id -u`, `id -g`)
+    user: "1000:1000"
+    env_file: .env
+    volumes:
+      - ./config:/config
+      # Every directory mounted under /data is a volume shown in Explorer
+      - /srv/media:/data/media
+      - /srv/documents:/data/documents
+    labels:
+      # GoDoxy: https://docs.godoxy.dev/docs/godoxy/getting-started/Configuring-Routes
+      proxy.aliases: files.example.com
+      proxy.#1.port: "8080"
+      proxy.#1.healthcheck.path: /healthz
