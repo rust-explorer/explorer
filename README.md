@@ -2,7 +2,7 @@
 
 Self-hosted web file manager written in Rust (Axum server, Dioxus web UI).
 
-**Status: work in progress.** Sign-in with OIDC works (tested with PocketID); file management is not implemented yet.
+**Status: work in progress.** Sign-in with OIDC works; file management is not implemented yet.
 
 ## Quick start
 

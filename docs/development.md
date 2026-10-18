@@ -66,8 +66,8 @@ EXPLORER_WEB_DIR=target/dx/explorer-web/release/web/public \
 cargo run -p explorer-server
 ```
 
-The session cookie is `Secure`; browsers accept it on `localhost` over plain HTTP, but not
-on other hostnames. The fake provider is for development and tests only.
+The session cookie is `Secure`; Chrome and Firefox accept it on `localhost` over plain HTTP
+(Safari does not), and no browser does on other hostnames. The fake provider is for development and tests only.
 
 ## Checks
 
