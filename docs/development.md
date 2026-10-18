@@ -51,8 +51,29 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-`cargo xtask ci` will run the same checks plus the Docker build in a single command, and
-CI will call it; until it lands, run the commands above.
+Or run everything in one command:
+
+```sh
+cargo xtask ci              # the checks above, `dx build --release`, then `docker build -t explorer:ci .`
+cargo xtask ci --no-docker  # skip the Docker build
+```
+
+Steps run in order and stop at the first failure. The `dx build` step is skipped with a
+notice if `dx` is not installed. `dx` must run before any clippy or build of the web crate
+for the `wasm32` target, because it generates `tailwind.css`; the host-target checks above
+do not need it.
+
+## CI
+
+GitHub Actions run the same checks (`cargo xtask ci --no-docker`) on pull requests and
+pushes to `main`, and `release.yml` publishes `ghcr.io/fabienlege/explorer` on `v*` tags.
+
+- CI is informative. No required status checks are configured; run `cargo xtask ci`
+  locally before opening a pull request.
+- Minutes budget: Actions are free for a public repository. While the repository is
+  private, the free quota applies and a $0 spending limit stops jobs once it is used up.
+- Never add a self-hosted runner. Pull requests from forks would execute their code on
+  that machine.
 
 ## Docker image
 

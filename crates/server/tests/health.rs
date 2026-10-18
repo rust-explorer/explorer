@@ -59,3 +59,36 @@ async fn unknown_api_route_returns_json_404() {
     assert_eq!(body.code, "not_found");
     assert_eq!(body.request_id, Some(id));
 }
+
+async fn id_for_incoming(incoming: &str) -> String {
+    let (app, _dir) = app();
+    let req = Request::get("/healthz")
+        .header("x-request-id", incoming)
+        .body(Body::empty())
+        .unwrap();
+    let res = app.oneshot(req).await.unwrap();
+    res.headers()["x-request-id"].to_str().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn overlong_request_id_is_replaced() {
+    let incoming = "a".repeat(129);
+    let id = id_for_incoming(&incoming).await;
+    assert_ne!(id, incoming);
+    assert_eq!(id.len(), 36);
+}
+
+#[tokio::test]
+async fn request_id_with_invalid_chars_is_replaced() {
+    for incoming in ["has space", "<script>", ""] {
+        let id = id_for_incoming(incoming).await;
+        assert_ne!(id, incoming);
+        assert_eq!(id.len(), 36);
+    }
+}
+
+#[tokio::test]
+async fn request_id_at_length_limit_is_preserved() {
+    let incoming = "a".repeat(128);
+    assert_eq!(id_for_incoming(&incoming).await, incoming);
+}
