@@ -1,0 +1,60 @@
+use dioxus::prelude::*;
+use dioxus_i18n::t;
+
+use crate::components::{Notice, Shell};
+
+/// Maps the server's reason code to a message id; unknown codes never reach the UI verbatim.
+pub fn message_key(reason: &str) -> &'static str {
+    match reason {
+        "provider_error" => "signin-error-provider-error",
+        "state_mismatch" => "signin-error-state-mismatch",
+        "exchange_failed" => "signin-error-exchange-failed",
+        "invalid_token" => "signin-error-invalid-token",
+        "missing_groups_claim" => "signin-error-missing-groups-claim",
+        _ => "signin-error-unknown",
+    }
+}
+
+#[component]
+pub fn SigninError(reason: String) -> Element {
+    rsx! {
+        Shell {
+            Notice {
+                title: t!("signin-error-title"),
+                message: t!(message_key(&reason)),
+                a {
+                    href: "/auth/login",
+                    class: "rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500",
+                    {t!("try-again")}
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_known_reason_has_its_own_message() {
+        for reason in [
+            "provider_error",
+            "state_mismatch",
+            "exchange_failed",
+            "invalid_token",
+            "missing_groups_claim",
+        ] {
+            assert_eq!(
+                message_key(reason),
+                format!("signin-error-{}", reason.replace('_', "-"))
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_reasons_get_a_generic_message() {
+        assert_eq!(message_key(""), "signin-error-unknown");
+        assert_eq!(message_key("<script>"), "signin-error-unknown");
+    }
+}
