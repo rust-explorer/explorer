@@ -17,7 +17,7 @@ use tracing::Level;
 use crate::config::Config;
 use crate::error::{ApiError, attach_request_id};
 use crate::oidc::Oidc;
-use crate::{csrf, session, web};
+use crate::{auth, csrf, session, web};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -62,8 +62,13 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
 
     let router = extra
         .route("/healthz", get(healthz))
-        .nest("/api", Router::new().fallback(not_found))
-        .nest("/auth", Router::new().fallback(not_found))
+        .nest(
+            "/api",
+            Router::new()
+                .route("/me", get(auth::me))
+                .fallback(not_found),
+        )
+        .nest("/auth", auth::routes().fallback(not_found))
         // nest() does not match the empty tail, so the bare-slash forms need explicit routes
         .route("/api/", any(not_found))
         .route("/auth/", any(not_found))
