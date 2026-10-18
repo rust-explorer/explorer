@@ -163,8 +163,8 @@ impl Oidc {
         Self::discover_using(cfg, public_url, &http_client()?).await
     }
 
-    /// Retries transient failures (provider down or answering 5xx), so Explorer survives the
-    /// provider starting at the same time. Configuration errors fail on the first attempt.
+    /// Retries transient failures (provider or its proxy down or answering garbage), so Explorer
+    /// survives the provider starting at the same time. Configuration errors fail at once.
     pub async fn discover_with_retry(
         cfg: &OidcConfig,
         public_url: &Url,
@@ -310,6 +310,7 @@ impl Oidc {
             .name()
             .and_then(|n| n.get(None))
             .map(|n| n.to_string())
+            .filter(|n| !n.is_empty())
             .or_else(|| claims.preferred_username().map(|u| u.to_string()))
             .filter(|n| !n.is_empty())
             .unwrap_or_else(|| sub.clone());
@@ -365,12 +366,13 @@ fn http_client() -> Result<reqwest::Client, OidcError> {
         .map_err(|err| OidcError::HttpClient(error_chain(&err)))
 }
 
+/// A reverse proxy in front of a restarting provider can answer anything (404, 502, an HTML
+/// maintenance page), so only errors that come from the configuration itself are final.
 fn is_transient<E: StdError>(err: &DiscoveryError<E>) -> bool {
-    match err {
-        DiscoveryError::Request(_) => true,
-        DiscoveryError::Response(status, ..) => status.is_server_error(),
-        _ => false,
-    }
+    !matches!(
+        err,
+        DiscoveryError::Validation(_) | DiscoveryError::UrlParse(_) | DiscoveryError::Other(_)
+    )
 }
 
 fn parse_groups(value: &Value) -> Option<Vec<String>> {
@@ -440,20 +442,21 @@ mod tests {
     }
 
     #[test]
-    fn only_transport_and_server_errors_are_transient() {
+    fn everything_but_configuration_errors_is_transient() {
         type E = DiscoveryError<std::io::Error>;
-        let status = openidconnect::http::StatusCode::from_u16;
+        let response = |code| {
+            E::Response(
+                openidconnect::http::StatusCode::from_u16(code).unwrap(),
+                vec![],
+                String::new(),
+            )
+        };
         assert!(is_transient(&E::Request(std::io::Error::other("down"))));
-        assert!(is_transient(&E::Response(
-            status(503).unwrap(),
-            vec![],
-            String::new()
-        )));
-        assert!(!is_transient(&E::Response(
-            status(404).unwrap(),
-            vec![],
-            String::new()
-        )));
+        assert!(is_transient(&response(503)));
+        assert!(is_transient(&response(404)));
+        assert!(is_transient(&response(200)));
         assert!(!is_transient(&E::Validation("issuer".into())));
+        assert!(!is_transient(&E::UrlParse(url::ParseError::EmptyHost)));
+        assert!(!is_transient(&E::Other("prepare request".into())));
     }
 }

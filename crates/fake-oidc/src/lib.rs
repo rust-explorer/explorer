@@ -1,14 +1,14 @@
 //! In-process `OpenID Connect` provider for tests and local manual runs. Never shipped.
 #![allow(clippy::missing_panics_doc)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use axum::{Form, Json, Router};
 use base64::Engine;
@@ -59,6 +59,27 @@ struct Inner {
     access_tokens: HashMap<String, String>,
     next_claims: Option<Value>,
     next_userinfo: Option<Value>,
+    discovery_outage: VecDeque<Outage>,
+}
+
+/// What a reverse proxy typically answers while the provider behind it restarts.
+#[derive(Debug, Clone, Copy)]
+pub enum Outage {
+    NotFound,
+    MaintenancePage,
+    BadGateway,
+}
+
+impl IntoResponse for Outage {
+    fn into_response(self) -> Response {
+        match self {
+            Self::NotFound => (StatusCode::NOT_FOUND, "404 page not found").into_response(),
+            Self::MaintenancePage => {
+                Html("<html><body>Service is restarting</body></html>").into_response()
+            }
+            Self::BadGateway => (StatusCode::BAD_GATEWAY, "502 Bad Gateway").into_response(),
+        }
+    }
 }
 
 struct Authorization {
@@ -116,6 +137,11 @@ impl FakeOidc {
     /// A `null` value removes the claim.
     pub fn next_userinfo(&self, claims: Value) {
         self.shared.lock().next_userinfo = Some(claims);
+    }
+
+    /// Answers the next discovery requests with these failures, one per request, in order.
+    pub fn discovery_outage(&self, outages: impl IntoIterator<Item = Outage>) {
+        self.shared.lock().discovery_outage.extend(outages);
     }
 
     /// Records what the browser would send to `/authorize` and returns the authorization code.
@@ -193,7 +219,10 @@ fn router(shared: Arc<Shared>) -> Router {
         .with_state(shared)
 }
 
-async fn discovery(State(shared): State<Arc<Shared>>) -> Json<Value> {
+async fn discovery(State(shared): State<Arc<Shared>>) -> Response {
+    if let Some(outage) = shared.lock().discovery_outage.pop_front() {
+        return outage.into_response();
+    }
     let issuer = &shared.issuer;
     Json(json!({
         "issuer": issuer,
@@ -212,6 +241,7 @@ async fn discovery(State(shared): State<Arc<Shared>>) -> Json<Value> {
         "scopes_supported": ["openid", "profile", "email", "groups"],
         "claims_supported": ["sub", "name", "preferred_username", "email", "groups"],
     }))
+    .into_response()
 }
 
 async fn jwks() -> Json<Value> {

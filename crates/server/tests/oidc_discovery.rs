@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use explorer_server::oidc::{Oidc, SigninError, VerifiedIdentity};
-use fake_oidc::FakeOidc;
+use fake_oidc::{FakeOidc, Outage};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 use url::Url;
@@ -58,16 +58,54 @@ async fn retry_succeeds_when_provider_comes_up_late() {
         FakeOidc::start_on(TcpListener::bind(addr).await.unwrap())
     });
 
+    let started = Instant::now();
     let result = Oidc::discover_with_retry(
         &config.oidc,
         &config.public_url,
-        5,
+        8,
         Duration::from_millis(300),
     )
     .await;
 
     let _fake = late.await.unwrap();
     result.unwrap();
+    assert!(started.elapsed() >= Duration::from_secs(1));
+}
+
+#[tokio::test]
+async fn retry_survives_proxy_errors_while_provider_restarts() {
+    let fake = FakeOidc::start().await;
+    let config = common::config("/unused", &fake.issuer());
+    let outages = || {
+        [
+            Outage::NotFound,
+            Outage::MaintenancePage,
+            Outage::BadGateway,
+        ]
+    };
+
+    fake.discovery_outage(outages());
+    let result = Oidc::discover_with_retry(
+        &config.oidc,
+        &config.public_url,
+        3,
+        Duration::from_millis(10),
+    )
+    .await;
+    assert!(
+        result.is_err(),
+        "three failures must exhaust three attempts"
+    );
+
+    fake.discovery_outage(outages());
+    Oidc::discover_with_retry(
+        &config.oidc,
+        &config.public_url,
+        4,
+        Duration::from_millis(10),
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -159,6 +197,12 @@ async fn name_falls_back_to_preferred_username_then_sub() {
     .await
     .unwrap();
     assert_eq!(identity.name, fake_oidc::SUBJECT);
+}
+
+#[tokio::test]
+async fn empty_name_falls_back_to_preferred_username() {
+    let identity = sign_in(json!({ "name": "" }), json!({})).await.unwrap();
+    assert_eq!(identity.name, "test");
 }
 
 #[tokio::test]
