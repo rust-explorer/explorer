@@ -13,6 +13,7 @@ use shared::api::{LogoutResponse, Me};
 use tower_sessions::Session;
 
 use crate::app::AppState;
+use crate::csrf;
 use crate::error::ApiError;
 use crate::oidc::PendingLogin;
 
@@ -207,7 +208,10 @@ async fn logout(
         .map_err(ApiError::internal)?;
     session.flush().await.map_err(ApiError::internal)?;
     let redirect_to = id_token
-        .and_then(|token| state.oidc.end_session_url(&token, &state.config.public_url))
+        .and_then(|token| {
+            let after = csrf::public_origin(&state.config.public_url);
+            state.oidc.end_session_url(&token, &after)
+        })
         .map_or_else(|| "/".to_owned(), String::from);
     Ok(Json(LogoutResponse { redirect_to }))
 }

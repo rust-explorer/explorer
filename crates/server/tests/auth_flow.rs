@@ -423,10 +423,7 @@ async fn logout_clears_session_and_returns_end_session_url() {
     );
     let query: HashMap<String, String> = url.query_pairs().into_owned().collect();
     assert_eq!(query["id_token_hint"].split('.').count(), 3);
-    assert_eq!(
-        query["post_logout_redirect_uri"],
-        format!("{}/", common::PUBLIC_URL)
-    );
+    assert_eq!(query["post_logout_redirect_uri"], common::PUBLIC_URL);
     assert_eq!(h.me_status(&mut jar).await, StatusCode::UNAUTHORIZED);
     assert_eq!(
         h.me_status(&mut signed_in.clone()).await,
