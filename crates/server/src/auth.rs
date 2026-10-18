@@ -169,6 +169,12 @@ async fn callback(
             "access denied: not in the allowed group"
         );
         session.flush().await.map_err(ApiError::internal)?;
+        // Without a user, but with the token, so that signing out also ends the provider
+        // session and the next sign-in can pick another account.
+        session
+            .insert(ID_TOKEN_KEY, identity.id_token)
+            .await
+            .map_err(ApiError::internal)?;
         return Ok(see_other(ACCESS_DENIED_PATH));
     }
 
