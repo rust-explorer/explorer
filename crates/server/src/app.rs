@@ -23,6 +23,11 @@ pub struct AppState {
 }
 
 pub fn router(state: AppState) -> Router {
+    router_with(state, Router::new())
+}
+
+/// Like [`router`], with `extra` routes served inside the same middleware stack.
+pub fn router_with(state: AppState, extra: Router<AppState>) -> Router {
     let trace = TraceLayer::new_for_http()
         .make_span_with(|req: &Request<_>| {
             let request_id = req
@@ -43,7 +48,7 @@ pub fn router(state: AppState) -> Router {
                 .latency_unit(LatencyUnit::Millis),
         );
 
-    let router = Router::new()
+    let router = extra
         .route("/healthz", get(healthz))
         .nest("/api", Router::new().fallback(not_found))
         .nest("/auth", Router::new().fallback(not_found))

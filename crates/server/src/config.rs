@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::ffi::OsString;
 use std::fmt;
 use std::io;
 use std::path::PathBuf;
@@ -22,6 +24,22 @@ const VAR_DATA_DIR: &str = "EXPLORER_DATA_DIR";
 const VAR_CONFIG_DIR: &str = "EXPLORER_CONFIG_DIR";
 const VAR_WEB_DIR: &str = "EXPLORER_WEB_DIR";
 
+const ALL_VARS: [&str; 13] = [
+    VAR_PUBLIC_URL,
+    VAR_ISSUER,
+    VAR_CLIENT_ID,
+    VAR_CLIENT_SECRET,
+    VAR_CLIENT_SECRET_FILE,
+    VAR_ALLOWED_GROUP,
+    VAR_GROUPS_CLAIM,
+    VAR_SESSION_TTL,
+    VAR_LOG,
+    VAR_LOG_FORMAT,
+    VAR_DATA_DIR,
+    VAR_CONFIG_DIR,
+    VAR_WEB_DIR,
+];
+
 #[derive(Debug)]
 pub struct Config {
     /// Scheme, host and optional port only; no path, no trailing slash beyond the root.
@@ -36,7 +54,8 @@ pub struct Config {
 
 #[derive(Debug)]
 pub struct OidcConfig {
-    pub issuer: Url,
+    /// Exactly as configured: discovery compares it byte-for-byte with the provider's issuer.
+    pub issuer: String,
     pub client_id: String,
     pub client_secret: SecretString,
     pub allowed_group: String,
@@ -84,15 +103,44 @@ impl std::error::Error for ConfigErrors {}
 
 impl Config {
     pub fn from_env() -> Result<Self, ConfigErrors> {
-        Self::from_lookup(|key| std::env::var(key).ok())
+        Self::from_os_lookup(|key| std::env::var_os(key))
     }
 
     pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> Result<Self, ConfigErrors> {
-        let get = |key: &str| lookup(key).filter(|v| !v.is_empty());
+        Self::from_os_lookup(|key| lookup(key).map(OsString::from))
+    }
+
+    pub fn from_os_lookup(lookup: impl Fn(&str) -> Option<OsString>) -> Result<Self, ConfigErrors> {
         let mut errors = Vec::new();
+        let mut values = HashMap::new();
+        for var in ALL_VARS {
+            match lookup(var).map(OsString::into_string) {
+                None => {}
+                Some(Ok(value)) => {
+                    values.insert(var, value);
+                }
+                Some(Err(_)) => errors.push(invalid(var, "value is not valid UTF-8")),
+            }
+        }
+        let non_utf8: Vec<&str> = errors
+            .iter()
+            .filter_map(|e| match e {
+                ConfigError::Invalid { var, .. } => Some(*var),
+                _ => None,
+            })
+            .collect();
+        Self::from_values(|key| values.get(key).cloned(), errors, &non_utf8)
+    }
+
+    fn from_values(
+        lookup: impl Fn(&str) -> Option<String>,
+        mut errors: Vec<ConfigError>,
+        non_utf8: &[&str],
+    ) -> Result<Self, ConfigErrors> {
+        let get = |key: &str| lookup(key).filter(|v| !v.is_empty());
         let mut required = |var: &'static str| {
             let value = get(var);
-            if value.is_none() {
+            if value.is_none() && !non_utf8.contains(&var) {
                 errors.push(ConfigError::Missing(var));
             }
             value
@@ -104,7 +152,7 @@ impl Config {
         let allowed_group = required(VAR_ALLOWED_GROUP);
 
         let public_url = public_url.and_then(|v| collect(&mut errors, parse_public_url(&v)));
-        let issuer = issuer.and_then(|v| collect(&mut errors, parse_issuer(&v)));
+        let issuer = issuer.and_then(|v| collect(&mut errors, parse_issuer(v)));
         let client_secret = collect(&mut errors, read_client_secret(&get));
 
         let session_ttl = match get(VAR_SESSION_TTL) {
@@ -227,8 +275,9 @@ fn parse_public_url(value: &str) -> Result<Url, ConfigError> {
     Ok(url)
 }
 
-fn parse_issuer(value: &str) -> Result<Url, ConfigError> {
-    parse_http_url(VAR_ISSUER, value)
+fn parse_issuer(value: String) -> Result<String, ConfigError> {
+    parse_http_url(VAR_ISSUER, &value)?;
+    Ok(value)
 }
 
 fn parse_session_ttl(value: &str) -> Result<Duration, ConfigError> {
@@ -309,7 +358,7 @@ mod tests {
     fn loads_valid_config_with_defaults() {
         let cfg = Config::from_lookup(lookup(&valid())).unwrap();
         assert_eq!(cfg.public_url.as_str(), "https://files.example.com/");
-        assert_eq!(cfg.oidc.issuer.as_str(), "https://auth.example.com/");
+        assert_eq!(cfg.oidc.issuer, "https://auth.example.com");
         assert_eq!(cfg.oidc.client_id, "explorer");
         assert_eq!(cfg.oidc.client_secret.expose_secret(), "s3cret");
         assert_eq!(cfg.oidc.allowed_group, "explorer-users");
@@ -451,6 +500,41 @@ mod tests {
                 ..
             }]
         ));
+    }
+
+    #[test]
+    fn issuer_is_kept_verbatim() {
+        for input in ["https://id.example.com", "https://id.example.com/"] {
+            let cfg =
+                Config::from_lookup(lookup(&with(&[("EXPLORER_OIDC_ISSUER", input)]))).unwrap();
+            assert_eq!(cfg.oidc.issuer, input);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_value_is_reported_invalid() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let map: HashMap<String, String> = valid()
+            .into_iter()
+            .filter(|(k, _)| *k != "EXPLORER_PUBLIC_URL")
+            .map(|(k, v)| (k.to_owned(), v.to_owned()))
+            .collect();
+        let errs = Config::from_os_lookup(|key| match key {
+            "EXPLORER_PUBLIC_URL" => Some(OsString::from_vec(vec![0x68, 0xff, 0xfe])),
+            _ => map.get(key).map(OsString::from),
+        })
+        .unwrap_err()
+        .0;
+        assert!(
+            matches!(
+                errs.as_slice(),
+                [ConfigError::Invalid { var: "EXPLORER_PUBLIC_URL", reason }] if reason.contains("UTF-8")
+            ),
+            "{errs:?}"
+        );
     }
 
     #[test]
