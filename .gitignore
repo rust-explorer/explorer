@@ -1,3 +1,5 @@
 .superpowers/
 .env
 /target/
+docker-compose.override.yml
+/crates/web/assets/tailwind.css

@@ -1,0 +1,16 @@
+[package]
+name = "explorer-server"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "explorer"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
