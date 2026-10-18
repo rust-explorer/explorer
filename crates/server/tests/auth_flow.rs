@@ -373,6 +373,22 @@ async fn expired_or_wrong_audience_token_is_invalid_token() {
 }
 
 #[tokio::test]
+async fn token_signed_with_an_unpublished_key_is_invalid_token() {
+    let h = Harness::new().await;
+    let mut jar = Jar::default();
+    let url = h.login(&mut jar, None).await;
+    h.fake.sign_next_with_rogue_key();
+    let code = h.fake.approve(&url).unwrap();
+
+    let res = h
+        .callback(&mut jar, &[("code", &code), ("state", &state_of(&url))])
+        .await;
+
+    assert_signin_error(&res, "invalid_token");
+    assert_eq!(h.me_status(&mut jar).await, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn unknown_code_is_exchange_failed() {
     let h = Harness::new().await;
     let mut jar = Jar::default();
