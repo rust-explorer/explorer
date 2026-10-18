@@ -4,6 +4,7 @@ use std::sync::Arc;
 use explorer_server::app::{AppState, router};
 use explorer_server::config::Config;
 use explorer_server::telemetry;
+use explorer_server::web::check_bundle;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -25,6 +26,11 @@ async fn main() -> ExitCode {
         gid = rustix::process::getgid().as_raw(),
         "starting explorer"
     );
+
+    if let Err(err) = check_bundle(&config.web_dir) {
+        tracing::error!(error = %err, "invalid web bundle");
+        return ExitCode::from(2);
+    }
 
     match serve(config).await {
         Ok(()) => ExitCode::SUCCESS,

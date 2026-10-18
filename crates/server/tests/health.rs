@@ -1,37 +1,15 @@
-use std::sync::Arc;
+mod common;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
-use explorer_server::app::{AppState, router};
-use explorer_server::config::Config;
+use common::get;
 use http_body_util::BodyExt;
 use shared::api::{ErrorBody, Health};
 use tower::ServiceExt;
 
 fn app() -> (axum::Router, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().to_str().unwrap().to_owned();
-    let config = Config::from_lookup(|key| {
-        let value = match key {
-            "EXPLORER_PUBLIC_URL" => "https://files.example.com",
-            "EXPLORER_OIDC_ISSUER" => "https://id.example.com",
-            "EXPLORER_OIDC_CLIENT_ID" => "explorer",
-            "EXPLORER_OIDC_CLIENT_SECRET" => "secret",
-            "EXPLORER_ALLOWED_GROUP" => "explorer-users",
-            "EXPLORER_DATA_DIR" | "EXPLORER_CONFIG_DIR" | "EXPLORER_WEB_DIR" => &path,
-            _ => return None,
-        };
-        Some(value.to_owned())
-    })
-    .unwrap();
-    let state = AppState {
-        config: Arc::new(config),
-    };
-    (router(state), dir)
-}
-
-fn get(uri: &str) -> Request<Body> {
-    Request::get(uri).body(Body::empty()).unwrap()
+    (common::app_with_web_dir(dir.path()), dir)
 }
 
 #[tokio::test]
