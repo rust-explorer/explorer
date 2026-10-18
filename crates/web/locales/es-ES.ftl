@@ -1,0 +1,3 @@
+app-name = Explorer
+app-tagline = Tus archivos, en tu servidor.
+loading = Cargando…
