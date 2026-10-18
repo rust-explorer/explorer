@@ -13,3 +13,7 @@ name = "shared"
 [lints]
 workspace = true
 
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
