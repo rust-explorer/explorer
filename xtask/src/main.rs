@@ -50,7 +50,14 @@ const WEB_BUILD: Step = Step {
 const DOCKER_BUILD: Step = Step {
     name: "docker build",
     program: "docker",
-    args: &["build", "-t", "explorer:ci", "."],
+    args: &[
+        "build",
+        "--platform",
+        "linux/amd64",
+        "-t",
+        "explorer:ci",
+        ".",
+    ],
 };
 
 fn main() -> ExitCode {
