@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
+use axum::extract::Request as AxumRequest;
 use axum::http::Request;
-use axum::middleware;
+use axum::middleware::{self, Next};
+use axum::response::Response;
 use axum::routing::{any, get};
 use axum::{Json, Router};
 use shared::api::Health;
@@ -44,6 +46,7 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
         .layer(
             ServiceBuilder::new()
+                .layer(middleware::from_fn(drop_invalid_request_id))
                 .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
                 .layer(trace)
                 .layer(PropagateRequestIdLayer::x_request_id())
@@ -61,4 +64,25 @@ async fn healthz() -> Json<Health> {
 
 async fn not_found() -> ApiError {
     ApiError::not_found()
+}
+
+const MAX_REQUEST_ID_LEN: usize = 128;
+
+fn is_valid_request_id(id: &[u8]) -> bool {
+    (1..=MAX_REQUEST_ID_LEN).contains(&id.len())
+        && id
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// Removes a client-supplied request id that fails validation so `SetRequestIdLayer` generates one.
+async fn drop_invalid_request_id(mut request: AxumRequest, next: Next) -> Response {
+    let invalid = request
+        .headers()
+        .get("x-request-id")
+        .is_some_and(|v| !is_valid_request_id(v.as_bytes()));
+    if invalid {
+        request.headers_mut().remove("x-request-id");
+    }
+    next.run(request).await
 }
