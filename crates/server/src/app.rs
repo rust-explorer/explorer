@@ -7,6 +7,7 @@ use axum::response::Response;
 use axum::routing::{any, get};
 use axum::{Json, Router};
 use shared::api::Health;
+use sqlx::SqlitePool;
 use tower::ServiceBuilder;
 use tower_http::LatencyUnit;
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
@@ -20,6 +21,7 @@ use crate::web;
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
+    pub db: SqlitePool,
 }
 
 pub fn router(state: AppState) -> Router {

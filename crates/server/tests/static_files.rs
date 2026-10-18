@@ -24,6 +24,7 @@ async fn body_string(res: axum::response::Response) -> String {
 async fn serves_index_at_root() {
     let dir = bundle();
     let res = app_with_web_dir(dir.path())
+        .await
         .oneshot(get("/"))
         .await
         .unwrap();
@@ -36,6 +37,7 @@ async fn serves_index_at_root() {
 async fn serves_asset_with_immutable_cache() {
     let dir = bundle();
     let res = app_with_web_dir(dir.path())
+        .await
         .oneshot(get("/assets/app-abc.js"))
         .await
         .unwrap();
@@ -50,6 +52,7 @@ async fn serves_asset_with_immutable_cache() {
 async fn missing_asset_is_404_not_index() {
     let dir = bundle();
     let res = app_with_web_dir(dir.path())
+        .await
         .oneshot(get("/assets/missing.js"))
         .await
         .unwrap();
@@ -60,6 +63,7 @@ async fn missing_asset_is_404_not_index() {
 async fn unknown_client_route_falls_back_to_index() {
     let dir = bundle();
     let res = app_with_web_dir(dir.path())
+        .await
         .oneshot(get("/media/Films"))
         .await
         .unwrap();
@@ -73,6 +77,7 @@ async fn api_and_auth_routes_do_not_fall_back() {
     let dir = bundle();
     for uri in ["/api/x", "/auth/x", "/api", "/auth", "/api/", "/auth/"] {
         let res = app_with_web_dir(dir.path())
+            .await
             .oneshot(get(uri))
             .await
             .unwrap();
@@ -91,6 +96,7 @@ async fn security_headers_present() {
     let dir = bundle();
     for uri in ["/", "/assets/app-abc.js", "/api/x", "/healthz"] {
         let res = app_with_web_dir(dir.path())
+            .await
             .oneshot(get(uri))
             .await
             .unwrap();
