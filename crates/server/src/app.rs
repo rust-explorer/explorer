@@ -8,8 +8,10 @@ use axum::routing::{any, get};
 use axum::{Json, Router};
 use shared::api::Health;
 use tower::ServiceBuilder;
+use tower_http::LatencyUnit;
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
-use tower_http::trace::TraceLayer;
+use tower_http::trace::{DefaultOnResponse, TraceLayer};
+use tracing::Level;
 
 use crate::config::Config;
 use crate::error::{ApiError, attach_request_id};
@@ -21,19 +23,25 @@ pub struct AppState {
 }
 
 pub fn router(state: AppState) -> Router {
-    let trace = TraceLayer::new_for_http().make_span_with(|req: &Request<_>| {
-        let request_id = req
-            .headers()
-            .get("x-request-id")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or_default();
-        tracing::info_span!(
-            "request",
-            method = %req.method(),
-            path = %req.uri().path(),
-            request_id,
-        )
-    });
+    let trace = TraceLayer::new_for_http()
+        .make_span_with(|req: &Request<_>| {
+            let request_id = req
+                .headers()
+                .get("x-request-id")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or_default();
+            tracing::info_span!(
+                "request",
+                method = %req.method(),
+                path = %req.uri().path(),
+                request_id,
+            )
+        })
+        .on_response(
+            DefaultOnResponse::new()
+                .level(Level::INFO)
+                .latency_unit(LatencyUnit::Millis),
+        );
 
     let router = Router::new()
         .route("/healthz", get(healthz))
