@@ -1,0 +1,99 @@
+<style>
+  .mk{font-family:Inter,system-ui,sans-serif;font-size:12px;color:#1f2937;background:#f8fafc;border-radius:10px;overflow:hidden;border:1px solid #e5e7eb;display:flex;flex-direction:column;position:relative}
+  .mk *{box-sizing:border-box}
+  .mk .top{display:flex;align-items:center;gap:8px;padding:8px 10px;background:#fff;border-bottom:1px solid #eef0f3}
+  .mk .crumb{color:#6b7280}.mk .crumb b{color:#111827}
+  .mk .btn{background:#4f46e5;color:#fff;border-radius:6px;padding:4px 9px;font-weight:600;font-size:11px;white-space:nowrap}
+  .mk .ghost{border:1px solid #e5e7eb;border-radius:6px;padding:4px 8px;color:#374151;font-size:11px;background:#fff;white-space:nowrap}
+  .mk .search{flex:1;background:#f1f5f9;border-radius:6px;padding:5px 8px;color:#94a3b8}
+  .mk .side{width:130px;background:#fff;border-right:1px solid #eef0f3;padding:10px 8px}
+  .mk .side .t{font-size:10px;text-transform:uppercase;color:#9ca3af;letter-spacing:.05em;margin:6px 4px}
+  .mk .side .i{padding:5px 6px;border-radius:6px;color:#374151}
+  .mk .side .i.on{background:#eef2ff;color:#4338ca;font-weight:600}
+  .mk table{width:100%;border-collapse:collapse}
+  .mk td,.mk th{padding:6px 8px;text-align:left;border-bottom:1px solid #f1f5f9;white-space:nowrap}
+  .mk th{font-weight:500;color:#9ca3af;font-size:11px}
+  .mk tr.sel td{background:#eef2ff}
+  .mk .up{position:absolute;right:10px;bottom:10px;width:220px;background:#fff;border:1px solid #e5e7eb;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.12);padding:8px 10px;font-size:11px}
+  .mk .bar{height:4px;background:#e5e7eb;border-radius:2px;margin:4px 0 6px}
+  .mk .bar span{display:block;height:4px;background:#4f46e5;border-radius:2px}
+  .mk .ctx{position:absolute;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.12);padding:4px;font-size:11px;width:140px}
+  .mk .ctx div{padding:5px 8px;border-radius:5px}
+  .mk .ctx div:hover{background:#f1f5f9}
+  .phone{width:220px;height:420px;border-radius:26px;border:6px solid #111827;margin:0 auto}
+</style>
+
+<h2>Direction A, version détaillée</h2>
+<p class="subtitle">J'y ai ajouté quelques éléments de mon choix. Dis-moi dans le terminal ce qui te va et ce qui ne te va pas.</p>
+
+<div class="split" style="align-items:flex-start">
+  <div class="mockup" style="flex:2.2">
+    <div class="mockup-header">Ordinateur</div>
+    <div class="mockup-body">
+      <div class="mk" style="height:400px">
+        <div class="top"><span style="font-weight:700">▣ Explorer</span><span class="search">Rechercher dans media…</span><span class="ghost">☰ Liste · ▦ Grille</span><span class="ghost">＋ Dossier</span><span class="btn">↑ Uploader</span><span style="width:24px;height:24px;border-radius:50%;background:#c7d2fe;display:inline-flex;align-items:center;justify-content:center;font-weight:700;color:#3730a3">F</span></div>
+        <div style="display:flex;flex:1;min-height:0">
+          <div class="side">
+            <div class="t">Volumes</div>
+            <div class="i on">🗄 media</div><div class="i">🗄 documents</div><div class="i">🗄 backups</div>
+            <div class="t">Favoris</div>
+            <div class="i">⭐ Photos 2026</div>
+            <div style="position:absolute;bottom:12px;left:14px;width:110px;font-size:10px;color:#9ca3af">media · 1,2 To libres<div class="bar"><span style="width:68%;background:#a5b4fc"></span></div></div>
+          </div>
+          <div style="flex:1;padding:8px 10px;overflow:hidden;position:relative">
+            <div class="crumb" style="margin-bottom:6px">media › <b>Films</b></div>
+            <table>
+              <tr><th style="width:22px"></th><th>Nom ↑</th><th>Taille</th><th>Modifié</th></tr>
+              <tr><td>☐</td><td>📁 Séries</td><td>—</td><td>hier</td></tr>
+              <tr class="sel"><td>☑</td><td>🎬 Dune.Part.Two.mkv</td><td>9,8 Go</td><td>12 oct.</td></tr>
+              <tr class="sel"><td>☑</td><td>🎬 Arrival.mkv</td><td>4,1 Go</td><td>3 sept.</td></tr>
+              <tr><td>☐</td><td>📄 sous-titres.srt</td><td>82 Ko</td><td>3 sept.</td></tr>
+              <tr><td>☐</td><td>🖼 affiche.jpg</td><td>1,2 Mo</td><td>1 sept.</td></tr>
+            </table>
+            <div style="margin-top:8px;display:inline-flex;gap:6px;align-items:center;background:#111827;color:#fff;border-radius:8px;padding:5px 8px;font-size:11px">2 sélectionnés · <span>⬇</span><span>✂ Déplacer</span><span>🗑</span></div>
+            <div class="ctx" style="top:58px;left:200px"><div>👁 Aperçu</div><div>⬇ Télécharger</div><div>✎ Renommer</div><div>✂ Déplacer vers…</div><div>⧉ Copier vers…</div><div style="color:#dc2626">🗑 Supprimer</div></div>
+          </div>
+        </div>
+        <div class="up">
+          <div style="display:flex;justify-content:space-between;font-weight:600"><span>Uploads (2)</span><span style="color:#9ca3af">— ✕</span></div>
+          <div style="margin-top:6px">Interstellar.mkv</div><div class="bar"><span style="width:62%"></span></div>
+          <div style="color:#9ca3af;font-size:10px;margin-top:-3px">6,1 / 9,8 Go · 48 Mo/s · reprise possible</div>
+          <div style="margin-top:6px">notes.txt <span style="color:#16a34a">✓</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup" style="flex:1">
+    <div class="mockup-header">Téléphone</div>
+    <div class="mockup-body">
+      <div class="mk phone">
+        <div class="top"><span>☰</span><span class="crumb" style="flex:1">media › <b>Films</b></span><span>⌕</span></div>
+        <div style="flex:1;overflow:hidden">
+          <table>
+            <tr><td>📁 Séries<div style="color:#9ca3af;font-size:10px">hier</div></td><td style="text-align:right;color:#9ca3af">⋯</td></tr>
+            <tr><td>🎬 Dune.Part.Two.mkv<div style="color:#9ca3af;font-size:10px">9,8 Go · 12 oct.</div></td><td style="text-align:right;color:#9ca3af">⋯</td></tr>
+            <tr><td>🎬 Arrival.mkv<div style="color:#9ca3af;font-size:10px">4,1 Go · 3 sept.</div></td><td style="text-align:right;color:#9ca3af">⋯</td></tr>
+            <tr><td>📄 sous-titres.srt<div style="color:#9ca3af;font-size:10px">82 Ko</div></td><td style="text-align:right;color:#9ca3af">⋯</td></tr>
+            <tr><td>🖼 affiche.jpg<div style="color:#9ca3af;font-size:10px">1,2 Mo</div></td><td style="text-align:right;color:#9ca3af">⋯</td></tr>
+          </table>
+        </div>
+        <div style="position:absolute;right:12px;bottom:14px;width:42px;height:42px;border-radius:50%;background:#4f46e5;color:#fff;font-size:20px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px rgba(79,70,229,.4)">＋</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:16px">
+  <h3>Ce que j'ai ajouté</h3>
+  <ul>
+    <li><b>Bascule liste / grille</b> : la grille de vignettes de B, utile pour les dossiers de photos.</li>
+    <li><b>Sélection multiple</b> avec une barre d'actions groupées (télécharger, déplacer, supprimer).</li>
+    <li><b>Clic droit / menu ⋯</b> avec les actions sur un fichier.</li>
+    <li><b>Panneau d'uploads flottant</b> (repris de C) : on continue à naviguer pendant qu'un fichier de 10 Go monte.</li>
+    <li><b>Glisser-déposer</b> de fichiers depuis l'ordinateur n'importe où dans la liste (non visible sur la maquette).</li>
+    <li>Espace libre du volume en bas de la barre latérale, favoris, avatar (déconnexion).</li>
+    <li>Mobile : barre latérale dans le menu ☰, bouton ＋ pour uploader ou créer un dossier.</li>
+    <li>Thème clair/sombre qui suit le réglage du système.</li>
+  </ul>
+</div>
