@@ -14,3 +14,12 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+
+[dependencies]
+humantime = { workspace = true }
+secrecy = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -10,6 +10,11 @@ repository = "https://github.com/fabienlege/explorer"
 
 [workspace.dependencies]
 dioxus = { version = "0.7.10", default-features = false }
+humantime = "2.4"
+secrecy = "0.10"
+tempfile = "3"
+thiserror = "2"
+url = "2.5"
 
 [workspace.lints.clippy]
 pedantic = { level = "warn", priority = -1 }
