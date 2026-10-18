@@ -1,0 +1,14 @@
+[package]
+name = "explorer-web"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license-file.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+dioxus = { workspace = true, features = ["web"] }
