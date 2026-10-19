@@ -52,10 +52,6 @@ pub fn download_url(volume: &str, path: &str) -> String {
     files_url("download", volume, path)
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "Task 8 adds the folder download links")
-)]
 pub fn zip_url(volume: &str, path: &str) -> String {
     files_url("zip", volume, path)
 }

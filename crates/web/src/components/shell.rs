@@ -56,6 +56,12 @@ pub fn Shell(user: Option<Me>, sidebar: Option<Element>, children: Element) -> E
     };
 
     let has_sidebar = sidebar.is_some();
+    // With a sidebar the content scrolls inside the frame, so lists can size themselves to it.
+    let frame_height = if has_sidebar {
+        "h-dvh"
+    } else {
+        "min-h-screen md:h-screen md:min-h-0"
+    };
     let aside_class = if drawer_open() {
         "fixed inset-y-0 left-0 z-30 flex w-64 shadow-xl"
     } else {
@@ -63,7 +69,7 @@ pub fn Shell(user: Option<Me>, sidebar: Option<Element>, children: Element) -> E
     };
 
     rsx! {
-        div { class: "flex min-h-screen flex-col bg-slate-50 text-gray-800 md:h-screen md:min-h-0 dark:bg-slate-950 dark:text-slate-200",
+        div { class: "flex {frame_height} flex-col bg-slate-50 text-gray-800 dark:bg-slate-950 dark:text-slate-200",
             header {
                 inert: if drawer_open() { "true" },
                 class: "flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-900",
