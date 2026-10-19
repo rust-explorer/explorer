@@ -62,9 +62,10 @@ id -g   # GID
 
 Explorer never changes ownership itself. At startup it logs the effective UID/GID.
 
-The UID/GID decides what Explorer can see: a folder or file this user cannot read is
-listed but answers `permission denied` when opened. A volume this user cannot write to is
-shown as read-only (see step 4).
+The UID/GID decides what Explorer can see: a file this user cannot read is listed and
+fails with `permission denied` when downloaded. A folder this user cannot search shows as
+an unavailable item. A volume this user cannot write to is shown as read-only (see
+step 4).
 
 ## 3. Prepare the directory
 
@@ -100,8 +101,8 @@ Edit `docker-compose.yml`:
 
 - `user:` — the UID:GID from step 2.
 - `volumes:` — every directory mounted under `/data` becomes a volume in Explorer, named
-  after its mount point. Only mounted directories are reachable. The example mounts
-  `/srv/media` as `media` and `/srv/documents` as `documents`:
+  after its mount point. Only mounted directories are reachable. For example, to mount
+  `/srv/media` as `media` and `/srv/documents` as read-only `documents`:
 
   ```yaml
   volumes:
@@ -137,8 +138,9 @@ docker compose logs -f explorer
 ```
 
 On success the log shows the version, the effective UID/GID, one `volume found` line per
-volume (with `read_only=true` or `false`) and `listening` on `0.0.0.0:8080`. At startup Explorer contacts the issuer; if it is unreachable it retries
-10 times, 3 seconds apart (so Explorer and PocketID can start together), then exits.
+volume (with `read_only=true` or `false`) and `listening` on `0.0.0.0:8080`. At startup
+Explorer contacts the issuer; if it is unreachable it retries 10 times, 3 seconds apart
+(so Explorer and PocketID can start together), then exits.
 If the configuration is incomplete or invalid, the container exits with status 2 and
 prints one line per problem, for example:
 
@@ -187,9 +189,9 @@ Signing in successfully but landing on `/access-denied` means the user is not in
 
 A download that fails after it started cannot show an error page: the browser lists it as
 failed in its download list. The reason is in the server log (`zip aborted` names the
-path that failed; storage failures show the volume, the path and the OS error). A large
-download interrupted by the network can be resumed by the browser, as files support
-`Range` requests.
+path that failed; storage failures show the code, the volume and the path; only
+unexpected I/O failures also show the OS error). A large download interrupted by the
+network can be resumed by the browser, as files support `Range` requests.
 
 If a download is cut at a fixed time or size, check the reverse proxy's timeouts and
 buffering limits.

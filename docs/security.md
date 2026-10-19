@@ -1,7 +1,8 @@
 # Security
 
-This page describes what Explorer protects against as of the browsing and download milestone. To report
-a vulnerability, follow [SECURITY.md](../SECURITY.md); do not open a public issue.
+This page describes what Explorer protects against as of the browsing and download
+milestone. To report a vulnerability, follow [SECURITY.md](../SECURITY.md); do not open a
+public issue.
 
 ## Scope
 
@@ -112,14 +113,17 @@ the end is `416 range_not_satisfiable`.
 
 Downloads and zips are logged at `info` with the user's OIDC `sub`, the volume, the path
 and (for zips) the number of files and bytes. Listings are logged at `debug`, storage
-failures at `warn` with the OS error. File contents are never logged. The OS error of an
-unexpected I/O failure stays in the log and is not sent to the client.
+failures at `warn` with the code, the volume and the path. File contents are never logged.
+Only an unexpected I/O failure (`internal`) also logs the OS error, which is not sent to
+the client.
 
 ## Content Security Policy and headers
 
-Every response carries a CSP of `default-src 'self'; script-src 'self' 'wasm-unsafe-eval';
+Every app response carries a CSP of `default-src 'self'; script-src 'self' 'wasm-unsafe-eval';
 style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none';
 base-uri 'self'; form-action 'self'`, plus `X-Content-Type-Options` and `Referrer-Policy`.
+Download and zip responses replace that CSP with `Content-Security-Policy: sandbox` (see
+[Downloads](#downloads)).
 Sign-in did not loosen it. The provider is reached by top-level redirects only.
 
 ## Secrets and logs

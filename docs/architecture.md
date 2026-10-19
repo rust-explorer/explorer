@@ -83,7 +83,7 @@ All of them require a signed-in user. Failures use the JSON error shape with the
 | `is_a_directory` | 400 | A download of a folder; use `/files/zip`. |
 | `permission_denied` | 403 | The container user cannot read it. |
 | `outside_volume` | 403 | The path resolves outside the volume (symlink escape). |
-| `range_not_satisfiable` | 416 | The requested range cannot be satisfied (it starts past the end of the file). |
+| `range_not_satisfiable` | 416 | The requested range cannot be satisfied (it starts past the end of the file, the file is empty, or the range is `bytes=-0`). |
 
 Any other I/O failure is a 500 `internal` whose cause is only in the server log.
 
