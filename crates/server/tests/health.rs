@@ -1,8 +1,11 @@
 mod common;
 
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use common::get;
+use explorer_server::app::{AppState, router_with};
+use explorer_server::error::ApiError;
 use http_body_util::BodyExt;
 use shared::api::{ErrorBody, Health};
 use tower::ServiceExt;
@@ -91,4 +94,23 @@ async fn request_id_with_invalid_chars_is_replaced() {
 async fn request_id_at_length_limit_is_preserved() {
     let incoming = "a".repeat(128);
     assert_eq!(id_for_incoming(&incoming).await, incoming);
+}
+
+async fn boom() -> ApiError {
+    ApiError::internal("db exploded")
+}
+
+#[tokio::test]
+async fn internal_error_is_generic_and_carries_request_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let extra: Router<AppState> = Router::new().route("/api/_boom", axum::routing::get(boom));
+    let app = router_with(common::state_with_web_dir(dir.path()), extra);
+    let res = app.oneshot(get("/api/_boom")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let id = res.headers()["x-request-id"].to_str().unwrap().to_owned();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let body: ErrorBody = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body.code, "internal");
+    assert!(!body.message.contains("exploded"));
+    assert_eq!(body.request_id, Some(id));
 }

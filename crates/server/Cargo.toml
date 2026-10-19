@@ -14,7 +14,6 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
-
 [dependencies]
 axum = { workspace = true }
 explorer-shared = { workspace = true }

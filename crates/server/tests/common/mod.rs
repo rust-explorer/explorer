@@ -8,7 +8,7 @@ use axum::http::Request;
 use explorer_server::app::{AppState, router};
 use explorer_server::config::Config;
 
-pub fn app_with_web_dir(web_dir: &Path) -> axum::Router {
+pub fn state_with_web_dir(web_dir: &Path) -> AppState {
     let web = web_dir.to_str().unwrap().to_owned();
     let config = Config::from_lookup(|key| {
         let value = match key {
@@ -23,9 +23,13 @@ pub fn app_with_web_dir(web_dir: &Path) -> axum::Router {
         Some(value.to_owned())
     })
     .unwrap();
-    router(AppState {
+    AppState {
         config: Arc::new(config),
-    })
+    }
+}
+
+pub fn app_with_web_dir(web_dir: &Path) -> axum::Router {
+    router(state_with_web_dir(web_dir))
 }
 
 pub fn get(uri: &str) -> Request<Body> {
