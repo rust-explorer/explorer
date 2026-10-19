@@ -341,3 +341,40 @@ fn space_reports_nonzero_total() {
     assert!(space.total > 0);
     assert!(space.available <= space.total);
 }
+
+#[test]
+fn walk_keeps_real_dir_and_skips_dir_symlinks() {
+    let fixture = Fixture::new(|media| {
+        fs::create_dir(media.join("a")).unwrap();
+        write(&media.join("b/song.mp3"), b"music");
+        symlink("../b", media.join("a/link")).unwrap();
+        symlink("../b/song.mp3", media.join("a/track")).unwrap();
+    });
+
+    let items = fixture.media().walk(&RelPath::root()).unwrap();
+
+    let summary: Vec<_> = items
+        .iter()
+        .map(|item| match item {
+            WalkItem::Dir(path) => format!("dir {}", path.as_str()),
+            WalkItem::File { path, size, .. } => format!("file {} {size}", path.as_str()),
+        })
+        .collect();
+    assert_eq!(
+        summary,
+        ["dir a", "file a/track 5", "dir b", "file b/song.mp3 5"]
+    );
+}
+
+#[test]
+fn upward_symlink_inside_volume_is_followed() {
+    let fixture = Fixture::new(|media| {
+        fs::create_dir_all(media.join("a/b")).unwrap();
+        fs::create_dir(media.join("c")).unwrap();
+        symlink("../../c", media.join("a/b/up")).unwrap();
+    });
+
+    let entries = fixture.media().list(&rel("a/b")).unwrap();
+
+    assert_eq!(find(&entries, "up").kind, EntryKind::Dir);
+}

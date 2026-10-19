@@ -41,7 +41,7 @@ impl StorageError {
 
 /// `openat2(RESOLVE_BENEATH)` reports an escape as `EXDEV`; cap-std usually rewrites it, but not on
 /// every code path.
-fn is_escape(err: &io::Error) -> bool {
+pub(super) fn is_escape(err: &io::Error) -> bool {
     err.raw_os_error() == Some(Errno::XDEV.raw_os_error())
         || err
             .get_ref()

@@ -1,10 +1,10 @@
-use std::collections::HashSet;
 use std::io;
 use std::time::SystemTime;
 
-use cap_std::fs::{Metadata, MetadataExt, OpenOptions, OpenOptionsExt};
+use cap_std::fs::{Metadata, OpenOptions, OpenOptionsExt};
 use rustix::fs::OFlags;
 
+use super::error::is_escape;
 use super::{RelPath, StorageError, Volume};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,11 +38,9 @@ pub enum WalkItem {
     },
 }
 
-type FileId = (u64, u64);
-
 struct Entry {
     meta: EntryMeta,
-    resolved: Option<(RelPath, FileId)>,
+    path: Option<RelPath>,
 }
 
 impl EntryMeta {
@@ -79,10 +77,6 @@ fn fs_path(path: &RelPath) -> &str {
     if path.is_root() { "." } else { path.as_str() }
 }
 
-fn file_id(meta: &Metadata) -> FileId {
-    (meta.dev(), meta.ino())
-}
-
 /// Every path is resolved from the volume root with symlinks followed, so cap-std refuses any
 /// resolution that leaves the volume, whichever directory the symlink lives in.
 impl Volume {
@@ -116,7 +110,7 @@ impl Volume {
         let mut options = OpenOptions::new();
         options
             .read(true)
-            .custom_flags(OFlags::NONBLOCK.bits().cast_signed());
+            .custom_flags((OFlags::NONBLOCK | OFlags::NOCTTY).bits().cast_signed());
         let file = self
             .root
             .open_with(fs_path(path), &options)
@@ -130,32 +124,25 @@ impl Volume {
     }
 
     /// Depth-first, each directory before its contents. Entries that are neither files nor
-    /// directories are skipped, and so is a directory already visited through another symlink.
+    /// directories are skipped, and so are symlinks to directories, which also rules out cycles.
     pub fn walk(&self, dir: &RelPath) -> Result<Vec<WalkItem>, StorageError> {
         let start = self.metadata(dir)?;
         if !start.is_dir() {
             return Err(StorageError::NotADirectory(dir.clone()));
         }
-        let mut visited = HashSet::from([file_id(&start)]);
         let mut pending = Vec::new();
         self.push_children(dir, &mut pending)?;
         let mut items = Vec::new();
-        while let Some((path, meta, id)) = pending.pop() {
+        while let Some((path, meta)) = pending.pop() {
             if meta.kind == EntryKind::File {
                 items.push(WalkItem::File {
                     path,
                     size: meta.size.unwrap_or(0),
                     modified: meta.modified,
                 });
-            } else if visited.insert(id) {
+            } else {
                 self.push_children(&path, &mut pending)?;
                 items.push(WalkItem::Dir(path));
-            } else {
-                tracing::debug!(
-                    volume = self.name(),
-                    path = path.as_str(),
-                    "walk skips an already visited directory"
-                );
             }
         }
         Ok(items)
@@ -189,18 +176,21 @@ impl Volume {
             let resolved = file_name
                 .to_str()
                 .and_then(|name| dir.join(name).ok())
-                .and_then(|path| {
-                    let meta = self.root.metadata(path.as_str()).ok()?;
-                    Some((path, meta))
+                .and_then(|path| match self.root.metadata(path.as_str()) {
+                    Ok(meta) => Some((path, meta)),
+                    Err(err) => {
+                        self.log_entry_error(&path, &err);
+                        None
+                    }
                 });
             let entry = match resolved {
                 Some((path, meta)) => Entry {
                     meta: EntryMeta::from_metadata(name, &meta),
-                    resolved: Some((path, file_id(&meta))),
+                    path: Some(path),
                 },
                 None => Entry {
                     meta: EntryMeta::other(name),
-                    resolved: None,
+                    path: None,
                 },
             };
             entries.push(entry);
@@ -209,21 +199,42 @@ impl Volume {
         Ok(entries)
     }
 
+    /// Broken and escaping symlinks are expected; anything else is worth a warning.
+    fn log_entry_error(&self, path: &RelPath, err: &io::Error) {
+        if err.kind() != io::ErrorKind::NotFound && !is_escape(err) {
+            tracing::warn!(
+                volume = self.name(),
+                path = path.as_str(),
+                error = %err,
+                "cannot read entry metadata"
+            );
+        }
+    }
+
+    fn is_real_dir(&self, path: &RelPath) -> bool {
+        self.root
+            .symlink_metadata(path.as_str())
+            .is_ok_and(|meta| meta.is_dir())
+    }
+
     fn push_children(
         &self,
         dir: &RelPath,
-        pending: &mut Vec<(RelPath, EntryMeta, FileId)>,
+        pending: &mut Vec<(RelPath, EntryMeta)>,
     ) -> Result<(), StorageError> {
         for entry in self.entries(dir)?.into_iter().rev() {
-            match entry.resolved {
-                Some((path, id)) if entry.meta.kind != EntryKind::Other => {
-                    pending.push((path, entry.meta, id));
+            match entry.path {
+                Some(path)
+                    if entry.meta.kind == EntryKind::File
+                        || (entry.meta.kind == EntryKind::Dir && self.is_real_dir(&path)) =>
+                {
+                    pending.push((path, entry.meta));
                 }
                 _ => tracing::debug!(
                     volume = self.name(),
                     dir = dir.as_str(),
                     name = entry.meta.name,
-                    "walk skips an entry that is neither a file nor a directory"
+                    "walk skips a symlinked directory or an entry that is neither a file nor a directory"
                 ),
             }
         }
