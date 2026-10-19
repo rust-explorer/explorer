@@ -4,7 +4,6 @@ use dioxus::prelude::*;
 use dioxus_i18n::prelude::i18n;
 use dioxus_i18n::t;
 use shared::api::{Entry, EntryKind};
-use unic_langid::LanguageIdentifier;
 
 use super::VirtualList;
 use super::icons::{
@@ -29,7 +28,6 @@ pub fn FileTable(volume: Segment, path: Segments, entries: ReadSignal<Rc<Vec<Ent
         let _ = entries.read();
         now_ms()
     });
-    let locale = i18n().language();
     let total = rows.read().len();
     let on_sort = move |column: SortKey| sort.set(sort().toggled(column));
 
@@ -63,7 +61,6 @@ pub fn FileTable(volume: Segment, path: Segments, entries: ReadSignal<Rc<Vec<Ent
                                 path: path.clone(),
                                 entry,
                                 index,
-                                locale: locale.clone(),
                                 now: now(),
                             }
                         }
@@ -113,14 +110,8 @@ fn HeaderCell(
 }
 
 #[component]
-fn FileRow(
-    volume: Segment,
-    path: Segments,
-    entry: Entry,
-    index: usize,
-    locale: LanguageIdentifier,
-    now: i64,
-) -> Element {
+fn FileRow(volume: Segment, path: Segments, entry: Entry, index: usize, now: i64) -> Element {
+    let locale = i18n().language();
     let size = entry
         .size
         .filter(|_| entry.kind == EntryKind::File)
@@ -176,7 +167,10 @@ fn FileRow(
                         }
                     },
                     EntryKind::Other => rsx! {
-                        span { class: NAME_CLASS, {label} }
+                        span { class: NAME_CLASS,
+                            {label}
+                            span { class: "sr-only", {t!("entry-unavailable")} }
+                        }
                     },
                 }
             }

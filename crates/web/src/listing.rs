@@ -2,6 +2,8 @@ use std::cmp::Ordering;
 use std::ops::Range;
 
 use shared::api::{Entry, EntryKind};
+use unicode_normalization::UnicodeNormalization;
+use unicode_normalization::char::is_combining_mark;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SortKey {
@@ -67,44 +69,69 @@ pub fn file_type(name: &str) -> FileType {
     }
 }
 
-/// Case-insensitive, with digit runs compared by value: `file2 < file10`.
+/// Case- and accent-insensitive, with digit runs compared by value: `file2 < file10`,
+/// `École < Ezra`. Accents, then the raw text, break ties, so only equal names are `Equal`.
 pub fn natural_cmp(a: &str, b: &str) -> Ordering {
-    folded_cmp(a, b).then_with(|| a.cmp(b))
+    chars_cmp(unaccented(a), unaccented(b))
+        .then_with(|| chars_cmp(lowercase(a), lowercase(b)))
+        .then_with(|| a.cmp(b))
 }
 
-fn folded_cmp(mut a: &str, mut b: &str) -> Ordering {
+fn unaccented(text: &str) -> impl Iterator<Item = char> + '_ {
+    text.nfd()
+        .filter(|&c| !is_combining_mark(c))
+        .flat_map(char::to_lowercase)
+}
+
+fn lowercase(text: &str) -> impl Iterator<Item = char> + '_ {
+    text.chars().flat_map(char::to_lowercase)
+}
+
+fn chars_cmp<I: Iterator<Item = char>>(a: I, b: I) -> Ordering {
+    let (mut a, mut b) = (a.peekable(), b.peekable());
     loop {
-        let (Some(char_a), Some(char_b)) = (a.chars().next(), b.chars().next()) else {
-            return b.is_empty().cmp(&a.is_empty());
-        };
-        if char_a.is_ascii_digit() && char_b.is_ascii_digit() {
-            let (digits_a, rest_a) = split_digits(a);
-            let (digits_b, rest_b) = split_digits(b);
-            let value_a = digits_a.trim_start_matches('0');
-            let value_b = digits_b.trim_start_matches('0');
-            let order = value_a
-                .len()
-                .cmp(&value_b.len())
-                .then_with(|| value_a.cmp(value_b));
-            if order.is_ne() {
-                return order;
+        match (a.peek().copied(), b.peek().copied()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(char_a), Some(char_b)) if char_a.is_ascii_digit() && char_b.is_ascii_digit() => {
+                let order = number_cmp(&mut a, &mut b);
+                if order.is_ne() {
+                    return order;
+                }
             }
-            (a, b) = (rest_a, rest_b);
-        } else {
-            let order = char_a.to_lowercase().cmp(char_b.to_lowercase());
-            if order.is_ne() {
-                return order;
+            (Some(char_a), Some(char_b)) => {
+                if char_a != char_b {
+                    return char_a.cmp(&char_b);
+                }
+                a.next();
+                b.next();
             }
-            (a, b) = (&a[char_a.len_utf8()..], &b[char_b.len_utf8()..]);
         }
     }
 }
 
-fn split_digits(text: &str) -> (&str, &str) {
-    let end = text
-        .find(|c: char| !c.is_ascii_digit())
-        .unwrap_or(text.len());
-    text.split_at(end)
+/// Consumes one digit run from each side and compares their values, ignoring leading zeros.
+fn number_cmp<I: Iterator<Item = char>>(
+    a: &mut std::iter::Peekable<I>,
+    b: &mut std::iter::Peekable<I>,
+) -> Ordering {
+    while a.next_if_eq(&'0').is_some() {}
+    while b.next_if_eq(&'0').is_some() {}
+    let mut first_difference = Ordering::Equal;
+    loop {
+        match (
+            a.next_if(char::is_ascii_digit),
+            b.next_if(char::is_ascii_digit),
+        ) {
+            (None, None) => return first_difference,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(digit_a), Some(digit_b)) => {
+                first_difference = first_difference.then(digit_a.cmp(&digit_b));
+            }
+        }
+    }
 }
 
 /// Folders first in both directions; entries without the sorted value come last.
@@ -194,6 +221,17 @@ mod tests {
         assert_eq!(natural_cmp("B", "c"), Ordering::Less);
         assert_eq!(natural_cmp("Ete", "Été"), Ordering::Less);
         assert_eq!(natural_cmp("Été", "Ete"), Ordering::Greater);
+        assert_eq!(natural_cmp("École", "Ezra"), Ordering::Less);
+        assert_eq!(natural_cmp("Ezra", "Zoé"), Ordering::Less);
+        assert_eq!(natural_cmp("École", "Zoé"), Ordering::Less);
+        assert_eq!(natural_cmp("ete", "Été"), Ordering::Less);
+        assert_eq!(natural_cmp("Été 2", "ete 10"), Ordering::Less);
+        // Precomposed and decomposed spellings differ only in the raw tiebreak.
+        assert_ne!(natural_cmp("\u{e9}", "e\u{301}"), Ordering::Equal);
+        assert_eq!(
+            natural_cmp("e\u{301}", "\u{e9}"),
+            natural_cmp("\u{e9}", "e\u{301}").reverse()
+        );
         assert_eq!(
             natural_cmp("x99999999999999999999999", "x100000000000000000000000"),
             Ordering::Less
