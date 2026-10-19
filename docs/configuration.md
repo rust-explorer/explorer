@@ -36,7 +36,7 @@ expires after this much inactivity. Values above 400 days are capped at 400 days
 
 | Path | Purpose |
 |---|---|
-| `/data` | Each directory mounted under `/data` is a volume. |
+| `/data` | Each real directory mounted under `/data` is a volume, named after its mount point. Read at startup. |
 | `/config` | Explorer's state: sessions in `explorer.db` (SQLite). Must be writable by the container user; startup checks this and exits with a clear message otherwise. |
 | `/usr/share/explorer/web` | Web bundle, shipped in the image. |
 
@@ -45,7 +45,8 @@ The server listens on `0.0.0.0:8080`. These are fixed in the image.
 ### Development-only overrides
 
 For running the server outside Docker (development, tests), the paths can be overridden.
-Do not set these in a container deployment.
+Do not set these in a container deployment. `EXPLORER_DATA_DIR` is the directory scanned
+for volumes.
 
 | Variable | Default |
 |---|---|

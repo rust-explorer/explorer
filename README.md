@@ -2,11 +2,12 @@
 
 Self-hosted web file manager written in Rust (Axum server, Dioxus web UI).
 
-**Status: work in progress.** Sign-in with OIDC works; file management is not implemented yet.
+**Status: work in progress.** Sign-in with OIDC, browsing volumes and downloading files and
+folders (as zip) work. Uploads and file operations are not implemented yet.
 
 ## Quick start
 
-> You can sign in but not manage files yet, and no image is published yet; build one
+> You can browse and download but not change files yet, and no image is published yet; build one
 > locally as described in [docs/development.md](docs/development.md#docker-image).
 
 You need Docker, an OIDC provider such as [PocketID](https://pocket-id.org) and a reverse

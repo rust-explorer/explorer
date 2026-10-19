@@ -1,7 +1,7 @@
 # Installation
 
-> **Status: work in progress.** Sign-in works; file management arrives in later
-> milestones. After signing in you currently see an empty shell.
+> **Status: work in progress.** Sign-in, browsing and downloads work; uploads and file
+> operations arrive in later milestones.
 
 Explorer ships as a single Docker image (`linux/amd64`). You need:
 
@@ -62,6 +62,10 @@ id -g   # GID
 
 Explorer never changes ownership itself. At startup it logs the effective UID/GID.
 
+The UID/GID decides what Explorer can see: a folder or file this user cannot read is
+listed but answers `permission denied` when opened. A volume this user cannot write to is
+shown as read-only (see step 4).
+
 ## 3. Prepare the directory
 
 ```sh
@@ -97,8 +101,20 @@ Edit `docker-compose.yml`:
 - `user:` — the UID:GID from step 2.
 - `volumes:` — every directory mounted under `/data` becomes a volume in Explorer, named
   after its mount point. Only mounted directories are reachable. The example mounts
-  `/srv/media` as `media` and `/srv/documents` as `documents`. Mount a volume read-only
-  (`:ro`) to make it read-only in Explorer.
+  `/srv/media` as `media` and `/srv/documents` as `documents`:
+
+  ```yaml
+  volumes:
+    - ./config:/config
+    - /srv/media:/data/media
+    - /srv/documents:/data/documents:ro
+  ```
+
+  A volume is shown as read-only in Explorer when the container user cannot write to its
+  root: because of a `:ro` mount, or because of the folder's owner and permissions. Volumes
+  are discovered at startup, so restart the container after adding a mount. Symlinks
+  directly under `/data` are ignored, and symlinks inside a volume are followed only when
+  they are relative and stay inside it (see [security.md](security.md#symlinks)).
 - `labels:` — GoDoxy route for your hostname, pointing at port 8080:
 
   ```yaml
@@ -120,8 +136,8 @@ docker compose up -d
 docker compose logs -f explorer
 ```
 
-On success the log shows the version, the effective UID/GID and `listening` on
-`0.0.0.0:8080`. At startup Explorer contacts the issuer; if it is unreachable it retries
+On success the log shows the version, the effective UID/GID, one `volume found` line per
+volume (with `read_only=true` or `false`) and `listening` on `0.0.0.0:8080`. At startup Explorer contacts the issuer; if it is unreachable it retries
 10 times, 3 seconds apart (so Explorer and PocketID can start together), then exits.
 If the configuration is incomplete or invalid, the container exits with status 2 and
 prints one line per problem, for example:
@@ -131,10 +147,21 @@ EXPLORER_PUBLIC_URL is required
 EXPLORER_OIDC_ISSUER is required
 ```
 
+Two warnings are worth knowing:
+
+- `volume media is not writable by uid 1000 gid 1000; check the mount and the container
+  user:` — the volume is shown as read-only. Expected for a `:ro` mount; otherwise fix the
+  ownership of the host folder or the `user:` directive.
+- `no volumes found under /data; mount folders as /data/<name>` — nothing is mounted
+  under `/data`, so Explorer has nothing to show. If `/data` itself cannot be read, startup
+  fails with status 2 and `data directory unreadable`.
+
 The image has a built-in healthcheck (`explorer healthcheck`, which queries
 `/healthz`); `docker compose ps` shows the container as `healthy` once it is up.
 
-Then open `https://files.example.com`: you are sent to PocketID, and back once signed in.
+Then open `https://files.example.com`: you are sent to PocketID, and back once signed in,
+then to your first volume. Click a file to download it, or a folder's download button to
+get it as a zip.
 Explorer's session lives in `/config/explorer.db`, so `config/` must be writable by the
 container user; otherwise startup fails with a message naming the directory and the
 UID/GID.
@@ -155,6 +182,17 @@ the details (look for `sign-in failed` with the same `reason`).
 
 Signing in successfully but landing on `/access-denied` means the user is not in
 `EXPLORER_ALLOWED_GROUP`; the log line `access denied` lists the groups received.
+
+## Troubleshooting downloads
+
+A download that fails after it started cannot show an error page: the browser lists it as
+failed in its download list. The reason is in the server log (`zip aborted` names the
+path that failed; storage failures show the volume, the path and the OS error). A large
+download interrupted by the network can be resumed by the browser, as files support
+`Range` requests.
+
+If a download is cut at a fixed time or size, check the reverse proxy's timeouts and
+buffering limits.
 
 ## Updating
 
