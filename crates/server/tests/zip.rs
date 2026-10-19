@@ -239,6 +239,19 @@ async fn traversal_is_invalid_path() {
     assert_eq!(body.code, "invalid_path");
 }
 
+#[tokio::test]
+async fn head_is_not_allowed() {
+    let mut s = setup().await;
+    let req = axum::http::Request::builder()
+        .method("HEAD")
+        .uri("/files/zip?volume=media&path=")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let res = s.client.send(req).await;
+    assert_eq!(res.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(header_of(&res, header::ALLOW), "GET");
+}
+
 const HEAD: usize = 1 << 20;
 const TAIL: usize = 1 << 20;
 
