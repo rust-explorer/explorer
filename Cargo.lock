@@ -1521,6 +1521,7 @@ dependencies = [
  "fluent-syntax",
  "gloo-net",
  "serde",
+ "serde_json",
  "unic-langid",
  "web-sys",
 ]

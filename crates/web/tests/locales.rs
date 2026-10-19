@@ -79,3 +79,28 @@ fn all_locales_define_the_same_message_ids() {
     }
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
+
+#[test]
+fn every_api_error_code_has_a_message() {
+    let files = locale_files();
+    let (_, source) = files
+        .iter()
+        .find(|(locale, _)| locale == REFERENCE)
+        .expect("en-US.ftl exists");
+    let ids = message_ids(source);
+    let missing: Vec<_> = [
+        "volume_not_found",
+        "path_not_found",
+        "invalid_path",
+        "not_a_directory",
+        "is_a_directory",
+        "permission_denied",
+        "outside_volume",
+        "range_not_satisfiable",
+    ]
+    .iter()
+    .map(|code| format!("error-{code}"))
+    .filter(|id| !ids.contains(id))
+    .collect();
+    assert!(missing.is_empty(), "missing {missing:?}");
+}
