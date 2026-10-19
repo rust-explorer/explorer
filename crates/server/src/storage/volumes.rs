@@ -8,7 +8,6 @@ use rustix::io::Errno;
 
 pub struct Volume {
     name: String,
-    #[expect(dead_code, reason = "read by the storage operations")]
     pub(super) root: Dir,
     read_only: bool,
 }
