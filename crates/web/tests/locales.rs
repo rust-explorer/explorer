@@ -97,6 +97,8 @@ fn every_api_error_code_has_a_message() {
         "permission_denied",
         "outside_volume",
         "range_not_satisfiable",
+        "internal",
+        "forbidden",
     ]
     .iter()
     .map(|code| format!("error-{code}"))

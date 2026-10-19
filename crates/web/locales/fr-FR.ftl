@@ -48,3 +48,5 @@ error-is_a_directory = { $path } est un dossier, pas un fichier.
 error-permission_denied = Vous n'avez pas l'autorisation d'ouvrir { $path }.
 error-outside_volume = { $path } pointe hors de son volume : impossible de l'ouvrir.
 error-range_not_satisfiable = La partie demandée du fichier est hors limites.
+error-internal = Une erreur est survenue sur le serveur. Réessayez dans un instant.
+error-forbidden = Vous n'avez pas accès à cette ressource.
