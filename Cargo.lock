@@ -1425,15 +1425,18 @@ name = "explorer-server"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "base64 0.22.1",
  "explorer-shared",
- "fake-oidc",
  "http-body-util",
  "humantime",
  "openidconnect",
+ "rand 0.8.8",
+ "rsa",
  "rustix",
  "secrecy",
  "serde",
  "serde_json",
+ "sha2",
  "sqlx",
  "tempfile",
  "thiserror 2.0.21",
@@ -1468,21 +1471,6 @@ dependencies = [
  "serde",
  "unic-langid",
  "web-sys",
-]
-
-[[package]]
-name = "fake-oidc"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "rand 0.8.8",
- "rsa",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "url",
 ]
 
 [[package]]

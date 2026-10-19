@@ -1,4 +1,4 @@
-//! In-process `OpenID Connect` provider for tests and local manual runs. Never shipped.
+//! In-process `OpenID Connect` provider for the integration tests.
 #![allow(clippy::missing_panics_doc)]
 
 use std::collections::{HashMap, VecDeque};

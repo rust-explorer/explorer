@@ -41,25 +41,19 @@ cargo run -p explorer-server
 Then open <http://localhost:8080>. The server listens on port 8080; rebuild the web app
 with `dx build` after frontend changes.
 
-### Demo identity provider
+### Identity provider
 
-`.env.example` points at a real provider. For local work, run the fake one in another
-terminal:
-
-```sh
-cargo run -p fake-oidc            # optional argument: address, default 127.0.0.1:8081
-```
-
-It prints the issuer (`http://127.0.0.1:8081`), client ID (`explorer`) and secret
-(`fake-secret`), and signs in a demo user (Ada Lovelace, `ada@example.com`, group
-`explorer-users`) without asking for credentials. Point the server at it:
+Sign in through a real PocketID (or other OIDC provider) instance. Register a client as
+described in [installation](installation.md), adding `http://localhost:8080/auth/callback`
+as a callback URL and `http://localhost:8080` as a logout callback URL, then run the server
+with your values:
 
 ```sh
 set -a; . ./.env.example; set +a
 EXPLORER_PUBLIC_URL=http://localhost:8080 \
-EXPLORER_OIDC_ISSUER=http://127.0.0.1:8081 \
-EXPLORER_OIDC_CLIENT_ID=explorer \
-EXPLORER_OIDC_CLIENT_SECRET=fake-secret \
+EXPLORER_OIDC_ISSUER=https://id.example.com \
+EXPLORER_OIDC_CLIENT_ID=... \
+EXPLORER_OIDC_CLIENT_SECRET=... \
 EXPLORER_DATA_DIR=.dev/data \
 EXPLORER_CONFIG_DIR=.dev/config \
 EXPLORER_WEB_DIR=target/dx/explorer-web/release/web/public \
@@ -67,7 +61,8 @@ cargo run -p explorer-server
 ```
 
 The session cookie is `Secure`; Chrome and Firefox accept it on `localhost` over plain HTTP;
-other browsers may not. The fake provider is for development and tests only.
+other browsers may not. The integration tests use an in-process provider
+(`crates/server/tests/common/fake_oidc.rs`) and need no network.
 
 ## Checks
 

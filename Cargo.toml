@@ -36,7 +36,6 @@ tower-sessions = { version = "0.14", default-features = false, features = ["axum
 tower-sessions-sqlx-store = { version = "0.15", default-features = false, features = ["sqlite"] }
 url = "2.5"
 openidconnect = { version = "4.0.1", default-features = false, features = ["reqwest", "rustls-tls"] }
-fake-oidc = { path = "crates/fake-oidc" }
 rsa = { version = "0.9.10", features = ["sha2"] }
 sha2 = "0.10"
 base64 = "0.22"

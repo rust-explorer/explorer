@@ -36,6 +36,10 @@ openidconnect = { workspace = true }
 serde = { workspace = true }
 
 [dev-dependencies]
-fake-oidc = { workspace = true }
+axum = { workspace = true, features = ["query", "form"] }
+base64 = { workspace = true }
 http-body-util = { workspace = true }
+rand = { workspace = true }
+rsa = { workspace = true }
+sha2 = { workspace = true }
 tempfile = { workspace = true }
