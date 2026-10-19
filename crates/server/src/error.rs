@@ -10,54 +10,63 @@ pub struct ApiError {
     status: StatusCode,
     code: &'static str,
     message: String,
+    details: Option<serde_json::Value>,
 }
 
 impl ApiError {
     #[must_use]
-    pub fn not_found() -> Self {
+    pub fn new(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
         Self {
-            status: StatusCode::NOT_FOUND,
-            code: "not_found",
-            message: "Resource not found".to_owned(),
+            status,
+            code,
+            message: message.into(),
+            details: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_details(mut self, details: serde_json::Value) -> Self {
+        self.details = Some(details);
+        self
+    }
+
+    #[must_use]
+    pub fn not_found() -> Self {
+        Self::new(StatusCode::NOT_FOUND, "not_found", "Resource not found")
     }
 
     #[must_use]
     pub fn unauthenticated() -> Self {
-        Self {
-            status: StatusCode::UNAUTHORIZED,
-            code: "unauthenticated",
-            message: "Authentication required".to_owned(),
-        }
+        Self::new(
+            StatusCode::UNAUTHORIZED,
+            "unauthenticated",
+            "Authentication required",
+        )
     }
 
     #[must_use]
     pub fn forbidden() -> Self {
-        Self {
-            status: StatusCode::FORBIDDEN,
-            code: "forbidden",
-            message: "Access denied".to_owned(),
-        }
+        Self::new(StatusCode::FORBIDDEN, "forbidden", "Access denied")
     }
 
     #[must_use]
     pub fn csrf_rejected() -> Self {
-        Self {
-            status: StatusCode::FORBIDDEN,
-            code: "csrf_rejected",
-            message: "Cross-origin request rejected".to_owned(),
-        }
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "csrf_rejected",
+            "Cross-origin request rejected",
+        )
     }
 
     /// The cause is logged, never returned to the client.
     #[must_use]
     pub fn internal(err: impl std::fmt::Display) -> Self {
         tracing::error!(error = %err, "internal error");
-        Self {
-            status: StatusCode::INTERNAL_SERVER_ERROR,
-            code: "internal",
-            message: "Internal server error".to_owned(),
-        }
+        Self::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal",
+            "Internal server error",
+        )
     }
 }
 
@@ -66,7 +75,7 @@ impl IntoResponse for ApiError {
         let body = ErrorBody {
             code: self.code.to_owned(),
             message: self.message,
-            details: None,
+            details: self.details,
             request_id: None,
         };
         let mut response = (self.status, Json(body.clone())).into_response();

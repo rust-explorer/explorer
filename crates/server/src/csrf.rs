@@ -1,14 +1,13 @@
 use std::sync::Arc;
 
 use axum::extract::{Request, State};
-use axum::http::{HeaderMap, HeaderValue, Method, header};
+use axum::http::{HeaderValue, Method, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use url::Url;
 
 use crate::error::ApiError;
-
-const MAX_LOGGED_LEN: usize = 256;
+use crate::telemetry::{request_id, truncate_for_log};
 
 /// Rejects state-changing requests whose `Origin` (or, failing that, `Referer`) is not `origin`.
 pub async fn require_same_origin(
@@ -29,7 +28,9 @@ pub async fn require_same_origin(
     tracing::warn!(
         request_id = request_id(req.headers()),
         method = %req.method(),
-        offending = source.map(truncated).as_deref().unwrap_or("<none>"),
+        offending = source
+            .map(|v| truncate_for_log(&String::from_utf8_lossy(v.as_bytes())))
+            .as_deref().unwrap_or("<none>"),
         "cross-origin request rejected"
     );
     ApiError::csrf_rejected().into_response()
@@ -51,20 +52,6 @@ fn origin_of(value: &HeaderValue) -> Option<String> {
     let url = Url::parse(value.to_str().ok()?).ok()?;
     let origin = url.origin();
     origin.is_tuple().then(|| origin.ascii_serialization())
-}
-
-fn request_id(headers: &HeaderMap) -> &str {
-    headers
-        .get("x-request-id")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default()
-}
-
-fn truncated(value: &HeaderValue) -> String {
-    String::from_utf8_lossy(value.as_bytes())
-        .chars()
-        .take(MAX_LOGGED_LEN)
-        .collect()
 }
 
 #[cfg(test)]
@@ -121,11 +108,5 @@ mod tests {
         ] {
             assert!(!is_safe(&m));
         }
-    }
-
-    #[test]
-    fn logged_value_is_truncated() {
-        let long = HeaderValue::from_str(&"a".repeat(1000)).unwrap();
-        assert_eq!(truncated(&long).len(), MAX_LOGGED_LEN);
     }
 }

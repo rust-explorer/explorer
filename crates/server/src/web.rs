@@ -60,7 +60,7 @@ async fn cache_control(req: Request, next: Next) -> Response {
 
 pub fn security_headers(router: Router) -> Router {
     router
-        .layer(SetResponseHeaderLayer::overriding(
+        .layer(SetResponseHeaderLayer::if_not_present(
             header::CONTENT_SECURITY_POLICY,
             HeaderValue::from_static(CSP),
         ))

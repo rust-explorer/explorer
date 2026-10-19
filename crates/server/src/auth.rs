@@ -16,12 +16,12 @@ use crate::app::AppState;
 use crate::csrf;
 use crate::error::ApiError;
 use crate::oidc::PendingLogin;
+use crate::telemetry::{request_id, truncate_for_log};
 
 const PENDING_KEY: &str = "oidc_pending";
 const USER_KEY: &str = "user";
 const ID_TOKEN_KEY: &str = "id_token";
 const MAX_RETURN_TO_LEN: usize = 2048;
-const MAX_LOGGED_LEN: usize = 256;
 const ACCESS_DENIED_PATH: &str = "/access-denied";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -133,7 +133,7 @@ async fn callback(
         tracing::warn!(
             request_id,
             reason = "provider_error",
-            error = truncated(error),
+            error = truncate_for_log(error),
             "sign-in failed"
         );
         return Ok(signin_error("provider_error"));
@@ -224,17 +224,6 @@ fn signin_error(reason: &'static str) -> Response {
 fn see_other(location: &str) -> Response {
     let value = HeaderValue::try_from(location).unwrap_or(HeaderValue::from_static("/"));
     (StatusCode::SEE_OTHER, [(header::LOCATION, value)]).into_response()
-}
-
-fn request_id(headers: &HeaderMap) -> &str {
-    headers
-        .get("x-request-id")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or_default()
-}
-
-fn truncated(value: &str) -> String {
-    value.chars().take(MAX_LOGGED_LEN).collect()
 }
 
 #[cfg(test)]
