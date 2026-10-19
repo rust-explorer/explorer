@@ -3,6 +3,7 @@ mod common;
 use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::PathBuf;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
@@ -14,6 +15,17 @@ use shared::api::ErrorBody;
 use tempfile::TempDir;
 
 const CONTENT: &[u8] = b"0123456789abcdef";
+const MTIME_SECS: u64 = 1_700_000_000;
+const MTIME_NANOS: u32 = 123_456_789;
+
+fn mtime() -> SystemTime {
+    UNIX_EPOCH + Duration::new(MTIME_SECS, MTIME_NANOS)
+}
+
+fn expected_etag() -> String {
+    let nanos = mtime().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    format!("\"16-{nanos:x}\"")
+}
 
 struct Setup {
     client: Client,
@@ -28,7 +40,14 @@ async fn setup() -> Setup {
     let data = state.config.data_dir.clone();
     let app = router(state).await.unwrap();
     let client = Client::signed_in(app, &fake).await;
-    fs::write(data.join("media/a.bin"), CONTENT).unwrap();
+    let path = data.join("media/a.bin");
+    fs::write(&path, CONTENT).unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(mtime())
+        .unwrap();
     Setup {
         client,
         data,
@@ -93,8 +112,11 @@ async fn downloads_whole_file_as_attachment() {
     assert_eq!(header_of(&res, header::ACCEPT_RANGES), "bytes");
     assert_eq!(header_of(&res, header::CONTENT_LENGTH), "16");
     assert!(header_of(&res, header::CONTENT_DISPOSITION).contains("filename=\"a.bin\""));
-    assert!(header_of(&res, header::ETAG).starts_with("W/\"16-"));
-    assert!(res.headers().contains_key(header::LAST_MODIFIED));
+    assert_eq!(header_of(&res, header::ETAG), expected_etag());
+    assert_eq!(
+        header_of(&res, header::LAST_MODIFIED),
+        "Tue, 14 Nov 2023 22:13:20 GMT"
+    );
     assert_eq!(body_of(res).await, CONTENT);
 }
 
@@ -115,6 +137,7 @@ async fn range_from_offset_is_partial() {
     let mut s = setup().await;
     let res = ranged(&mut s.client, "bytes=5-").await;
     assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
+    assert_attachment(&res);
     assert_eq!(header_of(&res, header::CONTENT_RANGE), "bytes 5-15/16");
     assert_eq!(header_of(&res, header::CONTENT_LENGTH), "11");
     assert_eq!(body_of(res).await, &CONTENT[5..]);
@@ -143,6 +166,51 @@ async fn multi_range_sends_full_file() {
 }
 
 #[tokio::test]
+async fn oversized_suffix_is_clamped() {
+    let mut s = setup().await;
+    let res = ranged(&mut s.client, "bytes=-20").await;
+    assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(header_of(&res, header::CONTENT_RANGE), "bytes 0-15/16");
+    assert_eq!(body_of(res).await, CONTENT);
+}
+
+#[tokio::test]
+async fn multi_range_is_never_unsatisfiable() {
+    let mut s = setup().await;
+    for range in ["bytes=0-1,100-200", "bytes=4-5,0-1", "bytes=0-5,3-8"] {
+        let res = ranged(&mut s.client, range).await;
+        assert_eq!(res.status(), StatusCode::OK, "{range}");
+        assert_eq!(body_of(res).await, CONTENT);
+    }
+}
+
+#[tokio::test]
+async fn reversed_range_is_ignored() {
+    let mut s = setup().await;
+    let res = ranged(&mut s.client, "bytes=5-2").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(body_of(res).await, CONTENT);
+}
+
+#[tokio::test]
+async fn empty_file_with_range_is_416() {
+    let mut s = setup().await;
+    fs::write(s.data.join("media/empty"), b"").unwrap();
+    let uri = "/files/download?volume=media&path=empty";
+    for range in ["bytes=0-", "bytes=-5"] {
+        let res = get_with(&mut s.client, uri, &[(header::RANGE, range)]).await;
+        assert_eq!(header_of(&res, header::CONTENT_RANGE), "bytes */0");
+        assert_eq!(
+            error_of(res, StatusCode::RANGE_NOT_SATISFIABLE).await.code,
+            "range_not_satisfiable"
+        );
+    }
+    let res = s.client.get(uri).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(body_of(res).await.is_empty());
+}
+
+#[tokio::test]
 async fn unsatisfiable_range_is_416() {
     let mut s = setup().await;
     let res = ranged(&mut s.client, "bytes=100-").await;
@@ -165,10 +233,7 @@ async fn if_range_mismatch_sends_full_file() {
     let res = get_with(
         &mut s.client,
         uri,
-        &[
-            (header::RANGE, "bytes=5-"),
-            (header::IF_RANGE, "W/\"16-0\""),
-        ],
+        &[(header::RANGE, "bytes=5-"), (header::IF_RANGE, "\"16-0\"")],
     )
     .await;
     assert_eq!(res.status(), StatusCode::OK);
@@ -184,6 +249,18 @@ async fn if_range_mismatch_sends_full_file() {
     )
     .await;
     assert_eq!(res.status(), StatusCode::OK);
+
+    let res = get_with(
+        &mut s.client,
+        uri,
+        &[
+            (header::RANGE, "bytes=5-"),
+            (header::IF_RANGE, &format!("W/{etag}")),
+        ],
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK, "weak tags never match");
+    assert_eq!(body_of(res).await, CONTENT);
 
     for validator in [etag, modified] {
         let res = get_with(
@@ -272,4 +349,16 @@ async fn download_requires_login() {
         .await;
     let body = error_of(res, StatusCode::UNAUTHORIZED).await;
     assert_eq!(body.code, "unauthenticated");
+}
+
+#[tokio::test]
+async fn missing_parameters_are_invalid_path() {
+    let mut s = setup().await;
+    for uri in ["/files/download", "/files/download?volume=media"] {
+        let res = s.client.get(uri).await;
+        assert_eq!(
+            error_of(res, StatusCode::BAD_REQUEST).await.code,
+            "invalid_path"
+        );
+    }
 }
