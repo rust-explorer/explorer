@@ -41,6 +41,10 @@ rsa = { version = "0.9.10", features = ["sha2"] }
 sha2 = "0.10"
 base64 = "0.22"
 rand = "0.8"
+http-range-header = "0.4"
+tokio-util = { version = "0.7", default-features = false, features = ["io"] }
+percent-encoding = "2"
+httpdate = "1"
 
 # RSA key generation in the test harness is unbearably slow unoptimised.
 [profile.dev.package.rsa]

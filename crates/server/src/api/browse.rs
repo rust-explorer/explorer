@@ -6,11 +6,12 @@ use axum::extract::{Path, Query, State};
 use serde::Deserialize;
 use shared::api::{Entry, EntryKind, Listing, Space, VolumeInfo};
 
+use super::blocking_volume;
 use crate::app::AppState;
 use crate::auth::CurrentUser;
 use crate::authz::{Action, Policy};
 use crate::error::ApiError;
-use crate::storage::{self, RelPath, Volumes};
+use crate::storage::{self, RelPath};
 
 #[derive(Deserialize)]
 pub struct EntriesQuery {
@@ -85,24 +86,6 @@ pub async fn entries(
         path: path.as_str().to_owned(),
         entries,
     }))
-}
-
-/// Runs a blocking storage call on `volume`, which must exist.
-async fn blocking_volume<T: Send + 'static>(
-    volumes: &Arc<Volumes>,
-    volume: &str,
-    op: impl FnOnce(&storage::Volume) -> T + Send + 'static,
-) -> Result<T, ApiError> {
-    let volumes = Arc::clone(volumes);
-    let name = volume.to_owned();
-    tokio::task::spawn_blocking(move || {
-        volumes
-            .get(&name)
-            .map(op)
-            .ok_or_else(|| ApiError::volume_not_found(&name))
-    })
-    .await
-    .map_err(ApiError::internal)?
 }
 
 fn epoch_millis(time: SystemTime) -> Option<i64> {
