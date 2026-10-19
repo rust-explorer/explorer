@@ -6,6 +6,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use axum::response::Response;
+use common::client::{COOKIE, Jar};
 use common::fake_oidc::{self, FakeOidc};
 use explorer_server::app::router;
 use http_body_util::BodyExt;
@@ -14,39 +15,10 @@ use shared::api::{ErrorBody, LogoutResponse, Me};
 use tower::ServiceExt;
 use url::Url;
 
-const COOKIE: &str = "explorer_session";
-
 struct Harness {
     app: Router,
     fake: FakeOidc,
     _dir: tempfile::TempDir,
-}
-
-/// Carries the session cookie between requests the way a browser would.
-#[derive(Default, Clone)]
-struct Jar(Option<String>);
-
-impl Jar {
-    fn store(&mut self, res: &Response) {
-        for value in res.headers().get_all(header::SET_COOKIE) {
-            let value = value.to_str().unwrap();
-            let Some(pair) = value.split(';').next() else {
-                continue;
-            };
-            let Some((name, cookie)) = pair.split_once('=') else {
-                continue;
-            };
-            if name != COOKIE {
-                continue;
-            }
-            let removed = value.split("; ").any(|a| a == "Max-Age=0");
-            self.0 = (!removed).then(|| cookie.to_owned());
-        }
-    }
-
-    fn value(&self) -> Option<&str> {
-        self.0.as_deref()
-    }
 }
 
 impl Harness {

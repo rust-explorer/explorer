@@ -3,7 +3,10 @@ use axum::extract::Request;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use serde_json::json;
 use shared::api::ErrorBody;
+
+use crate::storage::{InvalidPath, StorageError};
 
 #[derive(Debug)]
 pub struct ApiError {
@@ -58,6 +61,65 @@ impl ApiError {
         )
     }
 
+    #[must_use]
+    pub fn volume_not_found(name: &str) -> Self {
+        Self::new(
+            StatusCode::NOT_FOUND,
+            "volume_not_found",
+            format!("Volume not found: {name}"),
+        )
+        .with_details(json!({ "volume": name }))
+    }
+
+    /// Maps a storage failure on `volume`, logging it; an I/O error stays out of the response.
+    #[must_use]
+    pub fn from_storage(volume: &str, err: StorageError) -> Self {
+        let (status, code, label, path) = match err {
+            StorageError::NotFound(path) => {
+                (StatusCode::NOT_FOUND, "path_not_found", "Not found: ", path)
+            }
+            StorageError::NotADirectory(path) => (
+                StatusCode::BAD_REQUEST,
+                "not_a_directory",
+                "Not a folder: ",
+                path,
+            ),
+            StorageError::IsADirectory(path) => (
+                StatusCode::BAD_REQUEST,
+                "is_a_directory",
+                "Is a folder: ",
+                path,
+            ),
+            StorageError::PermissionDenied(path) => (
+                StatusCode::FORBIDDEN,
+                "permission_denied",
+                "Permission denied on ",
+                path,
+            ),
+            StorageError::OutsideVolume(path) => {
+                tracing::warn!(
+                    volume,
+                    path = path.as_str(),
+                    "path points outside the volume"
+                );
+                let message = format!(
+                    "{} points outside the volume",
+                    display_path(volume, path.as_str())
+                );
+                return Self::new(StatusCode::FORBIDDEN, "outside_volume", message)
+                    .with_details(json!({ "volume": volume, "path": path.as_str() }));
+            }
+            StorageError::Io { path, source } => {
+                tracing::warn!(volume, path = path.as_str(), error = %source, "storage error");
+                return Self::internal(source);
+            }
+        };
+        tracing::warn!(volume, path = path.as_str(), code, "storage request failed");
+        let message = format!("{label}{}", display_path(volume, path.as_str()));
+        Self::new(status, code, message)
+            .with_details(json!({ "volume": volume, "path": path.as_str() }))
+    }
+
     /// The cause is logged, never returned to the client.
     #[must_use]
     pub fn internal(err: impl std::fmt::Display) -> Self {
@@ -67,6 +129,24 @@ impl ApiError {
             "internal",
             "Internal server error",
         )
+    }
+}
+
+impl From<InvalidPath> for ApiError {
+    fn from(err: InvalidPath) -> Self {
+        Self::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_path",
+            format!("Invalid path: {}", err.reason),
+        )
+    }
+}
+
+fn display_path(volume: &str, path: &str) -> String {
+    if path.is_empty() {
+        volume.to_owned()
+    } else {
+        format!("{volume}/{path}")
     }
 }
 

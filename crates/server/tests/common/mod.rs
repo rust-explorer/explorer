@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+pub mod client;
 pub mod fake_oidc;
 
 use std::path::Path;
@@ -39,9 +40,16 @@ pub fn config(dir: &str, issuer: &str) -> Config {
 /// State wired to a running fake provider, which must outlive any sign-in exercised against it.
 /// Creates the `media` volume under `<web_dir>/data`.
 pub async fn state_with_oidc(web_dir: &Path) -> (AppState, FakeOidc) {
+    state_with_volumes(web_dir, &["media"]).await
+}
+
+/// Like [`state_with_oidc`], with the given volumes under `<web_dir>/data`.
+pub async fn state_with_volumes(web_dir: &Path, volumes: &[&str]) -> (AppState, FakeOidc) {
     let fake = FakeOidc::start().await;
     let config = config(web_dir.to_str().unwrap(), &fake.issuer());
-    std::fs::create_dir_all(config.data_dir.join("media")).unwrap();
+    for name in volumes {
+        std::fs::create_dir_all(config.data_dir.join(name)).unwrap();
+    }
     let volumes = Volumes::discover(&config.data_dir).unwrap();
     let oidc = Oidc::discover(&config.oidc, &config.public_url)
         .await
