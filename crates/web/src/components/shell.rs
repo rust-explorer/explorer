@@ -37,13 +37,22 @@ pub fn Shell(user: Option<Me>, sidebar: Option<Element>, children: Element) -> E
         }
     });
 
+    // The toggle is inert while the drawer is open, so it can only take focus after the render.
+    let mut refocus_toggle = use_signal(|| false);
+    use_effect(move || {
+        if refocus_toggle() && !drawer_open() {
+            refocus_toggle.set(false);
+            if let Some(button) = toggle.peek().clone() {
+                spawn(async move {
+                    let _ = button.set_focus(true).await;
+                });
+            }
+        }
+    });
+
     let mut close_and_refocus = move || {
         drawer_open.set(false);
-        if let Some(button) = toggle() {
-            spawn(async move {
-                let _ = button.set_focus(true).await;
-            });
-        }
+        refocus_toggle.set(true);
     };
 
     let has_sidebar = sidebar.is_some();
@@ -55,7 +64,9 @@ pub fn Shell(user: Option<Me>, sidebar: Option<Element>, children: Element) -> E
 
     rsx! {
         div { class: "flex min-h-screen flex-col bg-slate-50 text-gray-800 md:h-screen md:min-h-0 dark:bg-slate-950 dark:text-slate-200",
-            header { class: "flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-900",
+            header {
+                inert: if drawer_open() { "true" },
+                class: "flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-900",
                 if has_sidebar {
                     button {
                         r#type: "button",
@@ -86,6 +97,9 @@ pub fn Shell(user: Option<Me>, sidebar: Option<Element>, children: Element) -> E
                     aside {
                         id: SIDEBAR_ID,
                         tabindex: "-1",
+                        role: if drawer_open() { "dialog" },
+                        aria_modal: if drawer_open() { "true" },
+                        aria_label: t!("sidebar-volumes"),
                         class: "{aside_class} flex-col overflow-y-auto border-r border-slate-200 bg-white p-3 focus:outline-none md:static md:z-auto md:flex md:w-56 md:shadow-none dark:border-slate-800 dark:bg-slate-900",
                         onmounted: move |event| drawer.set(Some(event.data())),
                         onkeydown: move |event| {
@@ -95,7 +109,11 @@ pub fn Shell(user: Option<Me>, sidebar: Option<Element>, children: Element) -> E
                         },
                         {sidebar}
                     }
-                    main { class: "min-w-0 flex-1 overflow-y-auto p-4 md:p-6", {children} }
+                    main {
+                        inert: if drawer_open() { "true" },
+                        class: "min-w-0 flex-1 overflow-y-auto p-4 md:p-6",
+                        {children}
+                    }
                 }
             } else {
                 main { class: "flex flex-1 items-center justify-center p-6", {children} }

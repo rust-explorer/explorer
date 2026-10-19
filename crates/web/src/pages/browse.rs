@@ -17,7 +17,8 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
     let mut volumes = use_resource(|| api::get_json::<Vec<VolumeInfo>>("/api/volumes"));
     let url = api::entries_url(volume.as_str(), &path.joined());
     let mut listing = use_resource(use_reactive!(|url| async move {
-        api::get_json::<Listing>(&url).await
+        let result = api::get_json::<Listing>(&url).await;
+        (url, result)
     }));
 
     let user = match me.read().clone() {
@@ -53,7 +54,9 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
         _ => rsx! {},
     };
 
-    let content = match listing.read().clone() {
+    let ready = *listing.state().read() == UseResourceState::Ready;
+    let current = current_result(listing.read().as_ref(), &url, ready);
+    let content = match current {
         Some(Ok(listing)) => rsx! {
             EntryList { volume: volume.clone(), path: path.clone(), entries: listing.entries }
         },
@@ -75,6 +78,14 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
             }
         }
     }
+}
+
+/// The fetched result, once the fetch has finished and was for `url`: after navigation the
+/// resource still holds the previous folder until the new one arrives.
+fn current_result<T: Clone>(fetched: Option<&(String, T)>, url: &str, ready: bool) -> Option<T> {
+    fetched
+        .filter(|(fetched_url, _)| ready && fetched_url == url)
+        .map(|(_, result)| result.clone())
 }
 
 #[component]
@@ -124,5 +135,27 @@ fn EntryList(volume: Segment, path: Segments, entries: Vec<Entry>) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn current_result_ignores_a_previous_or_pending_fetch() {
+        let fetched = ("/api/volumes/media/entries?path=a".to_owned(), 1);
+        let url = fetched.0.clone();
+        assert_eq!(current_result(Some(&fetched), &url, true), Some(1));
+        assert_eq!(current_result(Some(&fetched), &url, false), None);
+        assert_eq!(
+            current_result(
+                Some(&fetched),
+                "/api/volumes/media/entries?path=a%2Fb",
+                true
+            ),
+            None
+        );
+        assert_eq!(current_result::<i32>(None, &url, true), None);
     }
 }
