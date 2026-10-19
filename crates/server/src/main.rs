@@ -4,9 +4,11 @@ use std::sync::Arc;
 
 use explorer_server::app::{AppState, router};
 use explorer_server::config::Config;
+use explorer_server::db;
 use explorer_server::healthcheck;
 use explorer_server::telemetry;
 use explorer_server::web::check_bundle;
+use sqlx::SqlitePool;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -44,7 +46,15 @@ async fn main() -> ExitCode {
         return ExitCode::from(2);
     }
 
-    match serve(config).await {
+    let pool = match db::open(&config.config_dir).await {
+        Ok(pool) => pool,
+        Err(err) => {
+            tracing::error!(error = %err, "database unavailable");
+            return ExitCode::from(2);
+        }
+    };
+
+    match serve(config, pool).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => {
             tracing::error!(error = %err, "server failed");
@@ -63,9 +73,10 @@ async fn run_healthcheck() -> ExitCode {
     }
 }
 
-async fn serve(config: Config) -> std::io::Result<()> {
+async fn serve(config: Config, db: SqlitePool) -> std::io::Result<()> {
     let app = router(AppState {
         config: Arc::new(config),
+        db,
     });
     let listener = TcpListener::bind(LISTEN_ADDR).await?;
     tracing::info!(addr = LISTEN_ADDR, "listening");

@@ -7,8 +7,9 @@ use axum::body::Body;
 use axum::http::Request;
 use explorer_server::app::{AppState, router};
 use explorer_server::config::Config;
+use explorer_server::db;
 
-pub fn state_with_web_dir(web_dir: &Path) -> AppState {
+pub async fn state_with_web_dir(web_dir: &Path) -> AppState {
     let web = web_dir.to_str().unwrap().to_owned();
     let config = Config::from_lookup(|key| {
         let value = match key {
@@ -24,12 +25,13 @@ pub fn state_with_web_dir(web_dir: &Path) -> AppState {
     })
     .unwrap();
     AppState {
+        db: db::open(web_dir).await.unwrap(),
         config: Arc::new(config),
     }
 }
 
-pub fn app_with_web_dir(web_dir: &Path) -> axum::Router {
-    router(state_with_web_dir(web_dir))
+pub async fn app_with_web_dir(web_dir: &Path) -> axum::Router {
+    router(state_with_web_dir(web_dir).await)
 }
 
 pub fn get(uri: &str) -> Request<Body> {

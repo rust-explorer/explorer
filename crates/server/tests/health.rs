@@ -10,14 +10,14 @@ use http_body_util::BodyExt;
 use shared::api::{ErrorBody, Health};
 use tower::ServiceExt;
 
-fn app() -> (axum::Router, tempfile::TempDir) {
+async fn app() -> (axum::Router, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    (common::app_with_web_dir(dir.path()), dir)
+    (common::app_with_web_dir(dir.path()).await, dir)
 }
 
 #[tokio::test]
 async fn healthz_returns_ok_json() {
-    let (app, _dir) = app();
+    let (app, _dir) = app().await;
     let res = app.oneshot(get("/healthz")).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
@@ -33,7 +33,7 @@ async fn healthz_returns_ok_json() {
 
 #[tokio::test]
 async fn responses_carry_request_id() {
-    let (app, _dir) = app();
+    let (app, _dir) = app().await;
     let res = app.oneshot(get("/healthz")).await.unwrap();
     let id = res.headers().get("x-request-id").unwrap();
     assert!(!id.is_empty());
@@ -41,7 +41,7 @@ async fn responses_carry_request_id() {
 
 #[tokio::test]
 async fn incoming_request_id_is_preserved() {
-    let (app, _dir) = app();
+    let (app, _dir) = app().await;
     let req = Request::get("/healthz")
         .header("x-request-id", "abc")
         .body(Body::empty())
@@ -52,7 +52,7 @@ async fn incoming_request_id_is_preserved() {
 
 #[tokio::test]
 async fn unknown_api_route_returns_json_404() {
-    let (app, _dir) = app();
+    let (app, _dir) = app().await;
     let res = app.oneshot(get("/api/nope")).await.unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
     assert_eq!(res.headers()[header::CONTENT_TYPE], "application/json");
@@ -64,7 +64,7 @@ async fn unknown_api_route_returns_json_404() {
 }
 
 async fn id_for_incoming(incoming: &str) -> String {
-    let (app, _dir) = app();
+    let (app, _dir) = app().await;
     let req = Request::get("/healthz")
         .header("x-request-id", incoming)
         .body(Body::empty())
@@ -104,7 +104,7 @@ async fn boom() -> ApiError {
 async fn internal_error_is_generic_and_carries_request_id() {
     let dir = tempfile::tempdir().unwrap();
     let extra: Router<AppState> = Router::new().route("/api/_boom", axum::routing::get(boom));
-    let app = router_with(common::state_with_web_dir(dir.path()), extra);
+    let app = router_with(common::state_with_web_dir(dir.path()).await, extra);
     let res = app.oneshot(get("/api/_boom")).await.unwrap();
     assert_eq!(res.status(), StatusCode::INTERNAL_SERVER_ERROR);
     let id = res.headers()["x-request-id"].to_str().unwrap().to_owned();
