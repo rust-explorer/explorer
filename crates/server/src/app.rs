@@ -17,6 +17,7 @@ use tracing::Level;
 use crate::config::Config;
 use crate::error::{ApiError, attach_request_id};
 use crate::oidc::Oidc;
+use crate::storage::Volumes;
 use crate::{auth, csrf, session, web};
 
 #[derive(Clone)]
@@ -24,6 +25,7 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub db: SqlitePool,
     pub oidc: Arc<Oidc>,
+    pub volumes: Arc<Volumes>,
 }
 
 pub async fn router(state: AppState) -> Result<Router, sqlx::Error> {
