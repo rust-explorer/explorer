@@ -150,6 +150,7 @@ pub struct Queue {
     decisions: HashMap<u64, Decision>,
     last_refresh: HashMap<String, i64>,
     unrefreshed: HashSet<String>,
+    skipped: usize,
 }
 
 impl Status {
@@ -222,6 +223,7 @@ impl Queue {
     pub fn add(&mut self, plan: BatchPlan, pending: &[PendingUpload], _now_ms: i64) -> Vec<Effect> {
         let batch = self.next_batch;
         self.next_batch += 1;
+        self.skipped += plan.skipped;
         let folders = plan.folders.into_iter().map(|path| {
             let kind = Kind::Folder {
                 volume: plan.volume.clone(),
@@ -315,8 +317,23 @@ impl Queue {
             }
         }
         let mut effects = Vec::new();
+        let mut due: Vec<String> = self
+            .unrefreshed
+            .iter()
+            .filter(|volume| self.refresh_due(volume, now_ms))
+            .cloned()
+            .collect();
+        due.sort();
+        for volume in due {
+            self.refresh(volume, now_ms, &mut effects);
+        }
         self.pump(&mut effects);
         effects
+    }
+
+    /// Picked or dropped items that could not be read or named, since the last clear.
+    pub fn skipped(&self) -> usize {
+        self.skipped
     }
 
     pub fn items(&self) -> &[Item] {
@@ -339,6 +356,7 @@ impl Queue {
 
     pub fn clear_finished(&mut self) {
         self.items.retain(|item| item.status.is_active());
+        self.skipped = 0;
     }
 
     fn index(&self, key: ItemKey) -> Option<usize> {
@@ -416,10 +434,17 @@ impl Queue {
             item.attempts = 0;
         }
         item.confirmed = offset;
-        match item.upload_url.clone() {
-            Some(url) => self.advance(index, url, offset, now_ms, effects),
-            None => self.finish(index, Status::Failed(ApiFailure::Network), now_ms, effects),
+        let Some(url) = item.upload_url.clone() else {
+            self.finish(index, Status::Failed(ApiFailure::Network), now_ms, effects);
+            return;
+        };
+        if !patched && offset >= item.size() {
+            // A HEAD also reports every byte when the commit failed after the last PATCH; an
+            // empty PATCH at the end commits it, or confirms an upload already committed.
+            effects.push(item.patch(url, item.size()));
+            return;
         }
+        self.advance(index, url, offset, now_ms, effects);
     }
 
     fn advance(
@@ -536,16 +561,15 @@ impl Queue {
         self.finish(index, Status::Cancelled, now_ms, effects);
     }
 
-    /// Ends an item and refreshes its volume's listing when completions are due.
+    /// Ends an item and refreshes its volume's listing when completions are due; a throttled
+    /// completion schedules the refresh for when the throttle ends.
     fn finish(&mut self, index: usize, status: Status, now_ms: i64, effects: &mut Vec<Effect>) {
         let done = status == Status::Done;
         let item = &mut self.items[index];
         item.status = status;
         item.phase = Phase::Idle;
         let volume = item.volume().to_owned();
-        if done {
-            self.unrefreshed.insert(volume.clone());
-        }
+        let first_unrefreshed = done && self.unrefreshed.insert(volume.clone());
         if !self.unrefreshed.contains(&volume) {
             return;
         }
@@ -553,16 +577,25 @@ impl Queue {
             .items
             .iter()
             .any(|item| item.status.is_active() && item.volume() == volume);
-        let due = done
-            && self
-                .last_refresh
-                .get(&volume)
-                .is_none_or(|&last| now_ms - last >= REFRESH_EVERY_MS);
-        if idle || due {
-            self.unrefreshed.remove(&volume);
-            self.last_refresh.insert(volume.clone(), now_ms);
-            effects.push(Effect::Refresh { volume });
+        if idle || (done && self.refresh_due(&volume, now_ms)) {
+            self.refresh(volume, now_ms, effects);
+        } else if first_unrefreshed && let Some(&last) = self.last_refresh.get(&volume) {
+            effects.push(Effect::WakeAt {
+                at_ms: last + REFRESH_EVERY_MS,
+            });
         }
+    }
+
+    fn refresh_due(&self, volume: &str, now_ms: i64) -> bool {
+        self.last_refresh
+            .get(volume)
+            .is_none_or(|&last| now_ms - last >= REFRESH_EVERY_MS)
+    }
+
+    fn refresh(&mut self, volume: String, now_ms: i64, effects: &mut Vec<Effect>) {
+        self.unrefreshed.remove(&volume);
+        self.last_refresh.insert(volume.clone(), now_ms);
+        effects.push(Effect::Refresh { volume });
     }
 }
 
@@ -1179,5 +1212,116 @@ mod tests {
                 path: "Empty".into(),
             }]
         );
+    }
+
+    #[test]
+    fn head_at_full_length_confirms_with_empty_patch() {
+        let mut queue = Queue::default();
+        queue.add(plan(vec![spec("a.bin", 10)]), &[], 0);
+        let key = key(&queue, 0);
+        created(&mut queue, 0, 0);
+        fail(&mut queue, 0, server("internal"), 1);
+        assert_eq!(queue.tick(1001), [Effect::Head { key, url: url(key) }]);
+
+        let empty_patch = Effect::Patch {
+            key,
+            url: url(key),
+            offset: 10,
+            len: 0,
+        };
+        assert_eq!(
+            queue.handle(Event::HeadDone { key, offset: 10 }, 1002),
+            std::slice::from_ref(&empty_patch)
+        );
+        assert_eq!(queue.items()[0].status, Status::Uploading);
+        assert_eq!(queue.items()[0].sent, 10);
+
+        assert_eq!(
+            fail(&mut queue, 0, ApiFailure::Network, 1003),
+            [Effect::WakeAt { at_ms: 3003 }]
+        );
+        queue.tick(3003);
+        assert_eq!(
+            queue.handle(Event::HeadDone { key, offset: 10 }, 3004),
+            [empty_patch]
+        );
+        assert_eq!(
+            queue.handle(Event::Patched { key, offset: 10 }, 3005),
+            [refresh()]
+        );
+        assert_eq!(queue.items()[0].status, Status::Done);
+    }
+
+    #[test]
+    fn resumed_complete_upload_is_confirmed_before_done() {
+        let mut queue = Queue::default();
+        let mut complete = pending(Some(1000));
+        complete.offset = complete.length;
+        queue.add(plan(vec![spec("a.bin", 40 * MIB)]), &[complete], 0);
+        let key = key(&queue, 0);
+        let resumed = "/files/uploads/abc%20def".to_owned();
+        assert_eq!(
+            queue.handle(
+                Event::HeadDone {
+                    key,
+                    offset: 40 * MIB
+                },
+                1
+            ),
+            [Effect::Patch {
+                key,
+                url: resumed,
+                offset: 40 * MIB,
+                len: 0,
+            }]
+        );
+        assert_eq!(queue.items()[0].status, Status::Uploading);
+    }
+
+    #[test]
+    fn cross_device_commit_fails() {
+        let mut queue = Queue::default();
+        queue.add(files(1, 10), &[], 0);
+        created(&mut queue, 0, 0);
+        assert!(fail(&mut queue, 0, server("cross_device"), 1).is_empty());
+        assert_eq!(
+            queue.items()[0].status,
+            Status::Failed(server("cross_device"))
+        );
+        assert!(queue.tick(i64::MAX).is_empty());
+    }
+
+    #[test]
+    fn throttled_completion_refreshes_when_due() {
+        let mut queue = Queue::default();
+        queue.add(files(3, 1), &[], 0);
+        let finish = |queue: &mut Queue, index, now| {
+            created(queue, index, now);
+            let key = key(queue, index);
+            queue.handle(Event::Patched { key, offset: 1 }, now)
+        };
+        assert_eq!(finish(&mut queue, 0, 100), [refresh()]);
+        assert_eq!(finish(&mut queue, 1, 500), [Effect::WakeAt { at_ms: 2100 }]);
+        assert!(queue.is_active());
+        assert!(queue.tick(2099).is_empty());
+        assert_eq!(queue.tick(2100), [refresh()]);
+        assert!(queue.tick(5000).is_empty());
+
+        assert_eq!(finish(&mut queue, 2, 5000), [refresh()]);
+    }
+
+    #[test]
+    fn skipped_items_are_counted_until_cleared() {
+        let mut queue = Queue::default();
+        let mut batch = files(1, 1);
+        batch.skipped = 2;
+        queue.add(batch, &[], 0);
+        let mut batch = files(0, 0);
+        batch.skipped = 1;
+        queue.add(batch, &[], 0);
+        assert_eq!(queue.skipped(), 3);
+        queue.clear_finished();
+        assert_eq!(queue.skipped(), 0);
+        assert_eq!(queue.items().len(), 1);
     }
 }

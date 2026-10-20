@@ -60,6 +60,7 @@ error-upload_too_large = This file is too large to upload.
 error-invalid_upload = The server refused this upload.
 error-unsupported_tus_version = The server doesn't support this upload protocol version.
 error-unsupported_media_type = The server refused the format of this upload.
+error-cross_device = { $path } is on another filesystem than its volume, so the upload can't be saved there. An administrator can mount that folder as a volume of its own.
 upload = Upload
 upload-open = Upload files or a folder
 upload-files = Files…
@@ -80,6 +81,11 @@ uploads-retrying = Connection lost, retrying in { $seconds } s
 uploads-done = Done
 uploads-cancelled = Cancelled
 uploads-skipped = Skipped
+uploads-unreadable =
+    { $count ->
+        [one] 1 item couldn't be read and was skipped.
+       *[other] { $count } items couldn't be read and were skipped.
+    }
 conflict-title = { $name } already exists in { $folder }
 conflict-replace = Replace
 conflict-keep-both = Keep both

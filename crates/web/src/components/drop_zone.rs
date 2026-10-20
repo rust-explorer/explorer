@@ -99,9 +99,15 @@ fn start(uploads: crate::uploads::Uploads, volume: &str, path: &str, event: &Dra
     let collected = crate::uploads::drop::collect(&data);
     let (volume, path) = (volume.to_owned(), path.to_owned());
     dioxus::core::spawn_forever(async move {
-        let (files, dirs) = collected.await;
-        if !files.is_empty() || !dirs.is_empty() {
-            uploads.start_relative(&volume, &path, files, dirs);
+        let collected = collected.await;
+        if !collected.files.is_empty() || !collected.dirs.is_empty() || collected.unreadable > 0 {
+            uploads.start_relative(
+                &volume,
+                &path,
+                collected.files,
+                collected.dirs,
+                collected.unreadable,
+            );
         }
     });
 }

@@ -60,6 +60,7 @@ error-upload_too_large = Ce fichier est trop volumineux pour être uploadé.
 error-invalid_upload = Le serveur a refusé cet upload.
 error-unsupported_tus_version = Le serveur ne prend pas en charge cette version du protocole d'upload.
 error-unsupported_media_type = Le serveur a refusé le format de cet upload.
+error-cross_device = { $path } se trouve sur un autre système de fichiers que son volume, l'upload ne peut donc pas y être enregistré. Un administrateur peut monter ce dossier comme un volume à part entière.
 upload = Uploader
 upload-open = Uploader des fichiers ou un dossier
 upload-files = Fichiers…
@@ -80,6 +81,11 @@ uploads-retrying = Connexion perdue, nouvel essai dans { $seconds } s
 uploads-done = Terminé
 uploads-cancelled = Annulé
 uploads-skipped = Ignoré
+uploads-unreadable =
+    { $count ->
+        [one] 1 élément n'a pas pu être lu et a été ignoré.
+       *[other] { $count } éléments n'ont pas pu être lus et ont été ignorés.
+    }
 conflict-title = { $name } existe déjà dans { $folder }
 conflict-replace = Remplacer
 conflict-keep-both = Garder les deux

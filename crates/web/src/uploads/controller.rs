@@ -33,7 +33,10 @@ pub fn use_uploads_provider() -> Uploads {
         requests: CopyValue::new(HashMap::new()),
     });
     #[cfg(target_arch = "wasm32")]
-    use_leave_guard(uploads.queue);
+    {
+        use_leave_guard(uploads.queue);
+        use_stray_drop_guard();
+    }
     uploads
 }
 
@@ -114,7 +117,7 @@ mod browser {
     use shared::api::PendingUpload;
     use wasm_bindgen::JsCast as _;
     use wasm_bindgen::closure::Closure;
-    use web_sys::{BeforeUnloadEvent, File};
+    use web_sys::{BeforeUnloadEvent, DragEvent, File};
 
     use super::Uploads;
     use crate::api::{self, ApiFailure};
@@ -137,16 +140,18 @@ mod browser {
                     (file, relative)
                 })
                 .collect();
-            self.start_relative(volume, base, files, empty_dirs);
+            self.start_relative(volume, base, files, empty_dirs, 0);
         }
 
-        /// Like `start`, with each file's path relative to `base` given, as for a dropped tree.
+        /// Like `start`, with each file's path relative to `base` given, as for a dropped tree,
+        /// and the count of items that could not be read.
         pub fn start_relative(
             &self,
             volume: &str,
             base: &str,
             files: Vec<(File, String)>,
             empty_dirs: Vec<String>,
+            unreadable: usize,
         ) {
             let uploads = *self;
             let volume = volume.to_owned();
@@ -175,11 +180,9 @@ mod browser {
                     .map(|(file, _)| file.clone())
                     .collect();
                 let picked = picked.into_iter().map(|(_, picked)| picked).collect();
-                uploads.add(
-                    plan_batch(&volume, &base, picked, empty_dirs),
-                    &pending,
-                    kept,
-                );
+                let mut plan = plan_batch(&volume, &base, picked, empty_dirs);
+                plan.skipped += unreadable;
+                uploads.add(plan, &pending, kept);
             });
         }
 
@@ -346,7 +349,35 @@ mod browser {
             };
         });
     }
+
+    /// Files dropped outside the drop zone would otherwise open in the tab, ending the app and
+    /// its uploads. The drop zone handles its own drags first and marks them handled.
+    pub(super) fn use_stray_drop_guard() {
+        use_hook(|| {
+            let Some(window) = web_sys::window() else {
+                return;
+            };
+            let listener = Closure::<dyn Fn(DragEvent)>::new(|event: DragEvent| {
+                if event.default_prevented() {
+                    return;
+                }
+                let Some(data) = event.data_transfer() else {
+                    return;
+                };
+                if !data.types().iter().any(|kind| kind == "Files") {
+                    return;
+                }
+                event.prevent_default();
+                data.set_drop_effect("none");
+            });
+            for kind in ["dragover", "drop"] {
+                let _ = window
+                    .add_event_listener_with_callback(kind, listener.as_ref().unchecked_ref());
+            }
+            listener.forget();
+        });
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
-use browser::use_leave_guard;
+use browser::{use_leave_guard, use_stray_drop_guard};
