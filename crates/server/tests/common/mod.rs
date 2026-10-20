@@ -13,6 +13,7 @@ use explorer_server::config::Config;
 use explorer_server::db;
 use explorer_server::oidc::Oidc;
 use explorer_server::storage::Volumes;
+use explorer_server::uploads::Uploads;
 use fake_oidc::FakeOidc;
 
 pub const PUBLIC_URL: &str = "https://files.example.com";
@@ -54,8 +55,10 @@ pub async fn state_with_volumes(web_dir: &Path, volumes: &[&str]) -> (AppState, 
     let oidc = Oidc::discover(&config.oidc, &config.public_url)
         .await
         .unwrap();
+    let db = db::open(web_dir).await.unwrap();
     let state = AppState {
-        db: db::open(web_dir).await.unwrap(),
+        uploads: Arc::new(Uploads::new(db.clone())),
+        db,
         config: Arc::new(config),
         oidc: Arc::new(oidc),
         volumes: Arc::new(volumes),

@@ -18,6 +18,7 @@ use crate::config::Config;
 use crate::error::{ApiError, attach_request_id};
 use crate::oidc::Oidc;
 use crate::storage::Volumes;
+use crate::uploads::Uploads;
 use crate::{api, auth, csrf, files, session, web};
 
 #[derive(Clone)]
@@ -26,6 +27,7 @@ pub struct AppState {
     pub db: SqlitePool,
     pub oidc: Arc<Oidc>,
     pub volumes: Arc<Volumes>,
+    pub uploads: Arc<Uploads>,
 }
 
 pub async fn router(state: AppState) -> Result<Router, sqlx::Error> {

@@ -12,6 +12,7 @@ use explorer_server::oidc::Oidc;
 use explorer_server::session;
 use explorer_server::storage::Volumes;
 use explorer_server::telemetry;
+use explorer_server::uploads::{self, Uploads};
 use explorer_server::web::check_bundle;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
@@ -87,11 +88,14 @@ async fn main() -> ExitCode {
         }
     };
 
+    let volumes = Arc::new(volumes);
+    let upload_registry = Arc::new(Uploads::new(pool.clone()));
     let state = AppState {
         config: Arc::new(config),
         db: pool.clone(),
         oidc: Arc::new(oidc),
-        volumes: Arc::new(volumes),
+        volumes: Arc::clone(&volumes),
+        uploads: Arc::clone(&upload_registry),
     };
     let app = match router(state).await {
         Ok(app) => app,
@@ -101,6 +105,7 @@ async fn main() -> ExitCode {
         }
     };
     let _cleanup = session::spawn_expired_cleanup(pool);
+    let _sweeper = uploads::spawn_sweeper(upload_registry, volumes);
 
     match serve(app).await {
         Ok(()) => ExitCode::SUCCESS,
