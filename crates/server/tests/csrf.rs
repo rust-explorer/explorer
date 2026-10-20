@@ -138,3 +138,33 @@ async fn cross_site_form_post_to_logout_is_rejected() {
     let body: ErrorBody = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(body.code, "csrf_rejected");
 }
+
+#[tokio::test]
+async fn upload_and_folder_writes_need_same_origin() {
+    let id = "/files/uploads/0123456789abcdef0123456789abcdef";
+    let targets = [
+        ("POST", "/files/uploads"),
+        ("PATCH", id),
+        ("DELETE", id),
+        ("POST", "/api/volumes/media/folders"),
+    ];
+    for origin in [None, Some("https://evil.example")] {
+        for (method, uri) in targets {
+            let mut builder = Request::builder()
+                .method(method)
+                .uri(uri)
+                .header("tus-resumable", "1.0.0");
+            if let Some(origin) = origin {
+                builder = builder.header(header::ORIGIN, origin);
+            }
+            assert_rejected(builder.body(Body::empty()).unwrap()).await;
+        }
+    }
+
+    let req = Request::head(id)
+        .header("tus-resumable", "1.0.0")
+        .body(Body::empty())
+        .unwrap();
+    let res = send(req).await;
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
