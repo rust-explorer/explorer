@@ -12,8 +12,14 @@ const SIDEBAR_ID: &str = "sidebar";
 
 /// Page frame shared by every route; the user menu appears once the session is known.
 /// With a `sidebar`, the page becomes sidebar plus content, and the sidebar is a drawer below `md`.
+/// `actions` sit in the header, before the user menu.
 #[component]
-pub fn Shell(user: Option<Me>, sidebar: Option<Element>, children: Element) -> Element {
+pub fn Shell(
+    user: Option<Me>,
+    sidebar: Option<Element>,
+    actions: Option<Element>,
+    children: Element,
+) -> Element {
     let mut drawer_open = use_signal(|| false);
     let mut toggle = use_signal(|| None::<Rc<MountedData>>);
     let mut drawer = use_signal(|| None::<Rc<MountedData>>);
@@ -87,8 +93,13 @@ pub fn Shell(user: Option<Me>, sidebar: Option<Element>, children: Element) -> E
                 }
                 span { class: "inline-block size-3 rounded-sm bg-indigo-600 dark:bg-indigo-400" }
                 span { class: "font-bold text-gray-900 dark:text-white", {t!("app-name")} }
-                if let Some(user) = user {
-                    div { class: "ml-auto", UserMenu { user } }
+                div { class: "ml-auto flex items-center gap-3",
+                    if let Some(actions) = actions {
+                        {actions}
+                    }
+                    if let Some(user) = user {
+                        UserMenu { user }
+                    }
                 }
             }
             if let Some(sidebar) = sidebar {

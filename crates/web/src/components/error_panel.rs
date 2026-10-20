@@ -22,7 +22,8 @@ fn detail_path(body: &ErrorBody) -> String {
     }
 }
 
-fn message(failure: &ApiFailure) -> String {
+/// The translated message for `failure`.
+pub fn error_message(failure: &ApiFailure) -> String {
     match failure {
         ApiFailure::Network => t!("load-failed"),
         ApiFailure::Http(_) => t!("error-unknown"),
@@ -50,7 +51,7 @@ pub fn ErrorPanel(failure: ApiFailure, on_retry: EventHandler<()>) -> Element {
         section {
             role: "alert",
             class: "w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900",
-            p { class: "text-sm font-medium text-gray-900 dark:text-white", {message(&failure)} }
+            p { class: "text-sm font-medium text-gray-900 dark:text-white", {error_message(&failure)} }
             if let Some(id) = request_id {
                 p { class: "mt-2 font-mono text-xs text-slate-500 dark:text-slate-400",
                     {t!("error-reference", id: id)}

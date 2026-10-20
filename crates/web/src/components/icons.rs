@@ -142,3 +142,31 @@ pub fn ArrowDownIcon(#[props(default = "size-3.5".to_owned())] class: String) ->
         }
     }
 }
+
+#[component]
+pub fn PlusIcon(#[props(default = "size-6".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class, path { d: "M12 5v14M5 12h14" } }
+    }
+}
+
+#[component]
+pub fn MinusIcon(#[props(default = "size-4".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class, path { d: "M5 12h14" } }
+    }
+}
+
+#[component]
+pub fn CloseIcon(#[props(default = "size-4".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class, path { d: "M6 6l12 12M18 6 6 18" } }
+    }
+}
+
+#[component]
+pub fn CheckIcon(#[props(default = "size-4".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class, path { d: "m5 12 5 5L20 7" } }
+    }
+}

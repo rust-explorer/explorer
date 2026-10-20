@@ -1521,11 +1521,14 @@ dependencies = [
  "explorer-shared",
  "fluent-syntax",
  "gloo-net",
+ "gloo-timers",
  "js-sys",
  "serde",
  "serde_json",
  "unic-langid",
  "unicode-normalization",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 

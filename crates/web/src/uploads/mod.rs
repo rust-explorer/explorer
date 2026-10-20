@@ -1,7 +1,12 @@
+mod controller;
 mod plan;
 mod queue;
 mod speed;
+#[cfg(target_arch = "wasm32")]
+mod transport;
 
+pub use controller::{Revision, Uploads, use_uploads, use_uploads_provider};
+#[cfg_attr(not(target_arch = "wasm32"), allow(unused_imports))]
 pub use plan::{BatchPlan, FileSpec, PickedFile, plan_batch};
 pub use queue::{Decision, Effect, Event, Item, ItemKey, Kind, Queue, Status};
 pub use speed::SpeedMeter;
