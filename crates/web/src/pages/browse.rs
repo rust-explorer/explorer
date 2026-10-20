@@ -5,7 +5,9 @@ use dioxus_i18n::t;
 use shared::api::{Listing, Me, VolumeInfo};
 
 use crate::api;
-use crate::components::{Breadcrumb, ErrorPanel, FileTable, Shell, Sidebar, UploadButton};
+use crate::components::{
+    Breadcrumb, DropZone, ErrorPanel, FileTable, Shell, Sidebar, UploadButton,
+};
 use crate::routes::{Segment, Segments};
 use crate::uploads::Revision;
 
@@ -89,7 +91,7 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
 
     rsx! {
         Shell { user, sidebar, actions,
-            div { class: "flex h-full min-h-0 flex-col gap-4",
+            DropZone { volume: volume.as_str().to_owned(), path: path.joined(), read_only,
                 Breadcrumb { volume: volume.clone(), path: path.clone() }
                 {content}
             }

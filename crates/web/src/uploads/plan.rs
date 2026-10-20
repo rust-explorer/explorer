@@ -12,7 +12,7 @@ pub struct PickedFile {
 pub struct BatchPlan {
     pub volume: String,
     pub files: Vec<FileSpec>,
-    /// Empty folders to create, parents first.
+    /// Empty folders to create; ancestors of other folders are left out.
     pub folders: Vec<String>,
     pub skipped: usize,
 }
@@ -57,10 +57,18 @@ pub fn plan_batch(
             folders.insert(path);
         }
     }
+    let leaves: Vec<String> = folders
+        .iter()
+        .filter(|path| {
+            let prefix = format!("{path}/");
+            !folders.iter().any(|other| other.starts_with(&prefix))
+        })
+        .cloned()
+        .collect();
     BatchPlan {
         volume: volume.to_owned(),
         files: specs,
-        folders: folders.into_iter().collect(),
+        folders: leaves,
         skipped,
     }
 }
@@ -131,6 +139,23 @@ mod tests {
         );
         assert_eq!(paths(&plan), ["a.jpg", "Album/b.jpg"]);
         assert_eq!(plan.folders, ["Empty"]);
+    }
+
+    #[test]
+    fn plan_batch_creates_a_dropped_tree_of_empty_folders() {
+        let plan = plan_batch(
+            "media",
+            "Films",
+            Vec::new(),
+            vec![
+                "Empty".into(),
+                "Empty/a".into(),
+                "Empty/b".into(),
+                "Empty/b/c".into(),
+            ],
+        );
+        assert!(plan.files.is_empty());
+        assert_eq!(plan.folders, ["Films/Empty/a", "Films/Empty/b/c"]);
     }
 
     #[test]

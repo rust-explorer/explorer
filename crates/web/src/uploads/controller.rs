@@ -130,6 +130,24 @@ mod browser {
     impl Uploads {
         /// Uploads `files` into `base` of `volume`, resuming any the server already has.
         pub fn start(&self, volume: &str, base: &str, files: Vec<File>, empty_dirs: Vec<String>) {
+            let files = files
+                .into_iter()
+                .map(|file| {
+                    let relative = relative_path(&file);
+                    (file, relative)
+                })
+                .collect();
+            self.start_relative(volume, base, files, empty_dirs);
+        }
+
+        /// Like `start`, with each file's path relative to `base` given, as for a dropped tree.
+        pub fn start_relative(
+            &self,
+            volume: &str,
+            base: &str,
+            files: Vec<(File, String)>,
+            empty_dirs: Vec<String>,
+        ) {
             let uploads = *self;
             let volume = volume.to_owned();
             let base = base.to_owned();
@@ -141,8 +159,8 @@ mod browser {
                 };
                 let picked: Vec<(File, PickedFile)> = files
                     .into_iter()
-                    .map(|file| {
-                        let picked = picked_file(&file);
+                    .map(|(file, relative)| {
+                        let picked = picked_file(&file, relative);
                         (file, picked)
                     })
                     .collect();
@@ -282,12 +300,16 @@ mod browser {
         }
     }
 
-    fn picked_file(file: &File) -> PickedFile {
-        let relative = js_sys::Reflect::get(file, &"webkitRelativePath".into())
+    /// The picked folder's `webkitRelativePath`, or the bare name.
+    fn relative_path(file: &File) -> String {
+        js_sys::Reflect::get(file, &"webkitRelativePath".into())
             .ok()
             .and_then(|value| value.as_string())
             .filter(|relative| !relative.is_empty())
-            .unwrap_or_else(|| file.name());
+            .unwrap_or_else(|| file.name())
+    }
+
+    fn picked_file(file: &File, relative: String) -> PickedFile {
         #[expect(
             clippy::cast_possible_truncation,
             clippy::cast_sign_loss,

@@ -1,5 +1,6 @@
 mod breadcrumb;
 mod conflict_dialog;
+mod drop_zone;
 mod error_panel;
 mod file_table;
 pub mod icons;
@@ -14,6 +15,7 @@ mod virtual_list;
 
 pub use breadcrumb::Breadcrumb;
 pub use conflict_dialog::ConflictDialog;
+pub use drop_zone::DropZone;
 pub use error_panel::{ErrorPanel, error_message};
 pub use file_table::FileTable;
 pub use notice::Notice;
