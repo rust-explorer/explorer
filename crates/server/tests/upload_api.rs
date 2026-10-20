@@ -5,6 +5,7 @@ use std::io;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, UNIX_EPOCH};
 
@@ -15,9 +16,12 @@ use axum::response::Response;
 use common::client::{Client, json};
 use common::fake_oidc::FakeOidc;
 use explorer_server::app::router;
+use explorer_server::storage::UploadId;
+use explorer_server::uploads::Uploads;
 use serde_json::json;
 use shared::api::{ErrorBody, PendingUpload};
 use shared::tus::encode_metadata;
+use sqlx::SqlitePool;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
 
@@ -28,6 +32,8 @@ const OFFSET_STREAM: &str = "application/offset+octet-stream";
 struct Setup {
     client: Client,
     app: Router,
+    uploads: Arc<Uploads>,
+    db: SqlitePool,
     data: PathBuf,
     fake: FakeOidc,
     _dir: TempDir,
@@ -46,11 +52,15 @@ async fn setup_with(volumes: &[&str], prepare: impl FnOnce(&Path)) -> Setup {
     }
     prepare(&data);
     let (state, fake) = common::state_with_volumes(dir.path(), volumes).await;
+    let uploads = Arc::clone(&state.uploads);
+    let db = state.db.clone();
     let app = router(state).await.unwrap();
     let client = Client::signed_in(app.clone(), &fake).await;
     Setup {
         client,
         app,
+        uploads,
+        db,
         data,
         fake,
         _dir: dir,
@@ -88,6 +98,10 @@ fn clone_client(client: &Client) -> Client {
         app: client.app.clone(),
         jar: client.jar.clone(),
     }
+}
+
+fn id_of(location: &str) -> UploadId {
+    UploadId::parse(location.rsplit('/').next().unwrap()).unwrap()
 }
 
 fn content(len: usize) -> Vec<u8> {
@@ -826,4 +840,138 @@ async fn upload_routes_require_login() {
     }
     assert!(!s.media().join("x").exists());
     assert_eq!(staged_count(&s), 0);
+}
+
+#[tokio::test]
+async fn responses_outside_the_tus_router_carry_tus_resumable() {
+    let mut s = setup().await;
+    let res = s
+        .client
+        .send(
+            tus(Method::GET, "/files/uploads/")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    error(res, StatusCode::NOT_FOUND, "not_found").await;
+
+    let req = Request::post("/files/uploads")
+        .header("tus-resumable", "1.0.0")
+        .header(header::ORIGIN, "https://evil.example")
+        .body(Body::empty())
+        .unwrap();
+    error(
+        s.client.send(req).await,
+        StatusCode::FORBIDDEN,
+        "csrf_rejected",
+    )
+    .await;
+
+    let res = s.client.get("/files/uploadsx").await;
+    assert!(res.headers().get("tus-resumable").is_none());
+    let res = s.client.get("/api/uploads").await;
+    assert!(res.headers().get("tus-resumable").is_none());
+}
+
+/// A PATCH holding the lock may be committing it: the staged file is gone but the record is not
+/// an orphan yet.
+#[tokio::test]
+async fn head_keeps_a_missing_staged_file_while_locked() {
+    let mut s = setup().await;
+    let sub = me(&mut s.client).await;
+    let location = created(&mut s.client, "a.txt", 3, &[]).await;
+    let id = id_of(&location);
+    fs::remove_file(s.staging().join(id.as_str())).unwrap();
+
+    let lock = s.uploads.try_lock(&id).unwrap();
+    let res = head(&mut s.client, &location).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(offset_of(&res), 3);
+    assert_eq!(s.uploads.list_pending(&sub).await.unwrap().len(), 1);
+
+    drop(lock);
+    assert_not_found_head(&head(&mut s.client, &location).await);
+    assert!(s.uploads.list_pending(&sub).await.unwrap().is_empty());
+}
+
+async fn me(client: &mut Client) -> String {
+    let me: serde_json::Value = json(client.get("/api/me").await).await;
+    me["sub"].as_str().unwrap().to_owned()
+}
+
+#[tokio::test]
+async fn dropped_patch_keeps_the_lock_until_its_writes_finish() {
+    let mut s = setup().await;
+    let location = created(&mut s.client, "a.bin", 8, &[]).await;
+
+    let (tx, body) = channel_body();
+    let mut first_client = clone_client(&s.client);
+    let first_req = patch_request(&location, 0, body);
+    let first = tokio::spawn(async move { first_client.send(first_req).await });
+    tx.send(Ok(Bytes::from_static(b"abcd"))).await.unwrap();
+    for _ in 0..200 {
+        if offset_of(&head(&mut s.client, &location).await) == 4 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    first.abort();
+    assert!(first.await.unwrap_err().is_cancelled());
+
+    // The request is gone but its body is still open: the upload stays locked.
+    let res = patch(&mut s.client, &location, 4, b"efgh").await;
+    error(res, StatusCode::LOCKED, "upload_busy").await;
+    let res = delete(&mut s.client, &location).await;
+    error(res, StatusCode::LOCKED, "upload_busy").await;
+
+    tx.send(Ok(Bytes::from_static(b"ef"))).await.unwrap();
+    drop(tx);
+    let mut res = patch(&mut s.client, &location, 6, b"gh").await;
+    for _ in 0..200 {
+        if res.status() != StatusCode::LOCKED {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        res = patch(&mut s.client, &location, 6, b"gh").await;
+    }
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(offset_of(&res), 8);
+    assert_eq!(fs::read(s.media().join("a.bin")).unwrap(), b"abcdefgh");
+}
+
+#[tokio::test]
+async fn delete_of_a_busy_upload_is_423() {
+    let mut s = setup().await;
+    let location = created(&mut s.client, "a.txt", 3, &[]).await;
+    let lock = s.uploads.try_lock(&id_of(&location)).unwrap();
+    let res = delete(&mut s.client, &location).await;
+    error(res, StatusCode::LOCKED, "upload_busy").await;
+    assert_eq!(staged_count(&s), 1);
+
+    drop(lock);
+    let res = delete(&mut s.client, &location).await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(staged_count(&s), 0);
+}
+
+#[tokio::test]
+async fn commit_succeeds_when_marking_it_done_fails() {
+    let mut s = setup().await;
+    sqlx::query(
+        "CREATE TRIGGER no_done BEFORE UPDATE OF final_path ON uploads \
+         BEGIN SELECT RAISE(ABORT, 'refused'); END",
+    )
+    .execute(&s.db)
+    .await
+    .unwrap();
+
+    let location = created(&mut s.client, "a.txt", 3, &[]).await;
+    let res = patch(&mut s.client, &location, 0, b"abc").await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(offset_of(&res), 3);
+    assert_eq!(fs::read(s.media().join("a.txt")).unwrap(), b"abc");
+
+    let res = create(&mut s.client, "empty.txt", 0, &[]).await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    assert!(s.media().join("empty.txt").exists());
 }
