@@ -10,6 +10,8 @@ const ALREADY_EXISTS: &str = "already_exists";
 const UPLOAD_NOT_FOUND: &str = "upload_not_found";
 const UPLOAD_BUSY: &str = "upload_busy";
 const OFFSET_MISMATCH: &str = "offset_mismatch";
+/// The server's only JSON 5xx besides 507 `insufficient_storage`.
+const INTERNAL: &str = "internal";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ItemKey(pub u64);
@@ -59,6 +61,8 @@ pub struct Item {
     pub conflict: ConflictPolicy,
     phase: Phase,
     attempts: u32,
+    /// Last offset the server confirmed.
+    confirmed: u64,
     restarted: bool,
 }
 
@@ -208,7 +212,9 @@ fn is_transient(failure: &ApiFailure) -> bool {
     match failure {
         ApiFailure::Network => true,
         ApiFailure::Http(status) => *status >= 500 && *status != 507,
-        ApiFailure::Server(body) => matches!(body.code.as_str(), UPLOAD_BUSY | OFFSET_MISMATCH),
+        ApiFailure::Server(body) => {
+            matches!(body.code.as_str(), INTERNAL | UPLOAD_BUSY | OFFSET_MISMATCH)
+        }
     }
 }
 
@@ -247,6 +253,7 @@ impl Queue {
                 conflict: ConflictPolicy::Fail,
                 phase: Phase::Idle,
                 attempts: 0,
+                confirmed: 0,
                 restarted: false,
             });
         }
@@ -268,6 +275,7 @@ impl Queue {
                     let item = &mut self.items[index];
                     item.upload_url = Some(url.clone());
                     item.attempts = 0;
+                    item.confirmed = 0;
                     self.advance(index, url, 0, now_ms, &mut effects);
                 }
                 Some(index) if self.items[index].status == Status::Cancelled => {
@@ -280,14 +288,9 @@ impl Queue {
                     self.items[index].sent = sent;
                 }
             }
-            Event::Patched { key, offset } | Event::HeadDone { key, offset } => {
-                if let Some(index) = self.in_flight(key) {
-                    let item = &mut self.items[index];
-                    item.attempts = 0;
-                    if let Some(url) = item.upload_url.clone() {
-                        self.advance(index, url, offset, now_ms, &mut effects);
-                    }
-                }
+            Event::Patched { key, offset } => self.resume(key, offset, true, now_ms, &mut effects),
+            Event::HeadDone { key, offset } => {
+                self.resume(key, offset, false, now_ms, &mut effects);
             }
             Event::Failed { key, failure } => {
                 if let Some(index) = self.in_flight(key) {
@@ -396,6 +399,29 @@ impl Queue {
         }
     }
 
+    /// Continues from the server's `offset`; only a PATCH that moved it resets the backoff.
+    fn resume(
+        &mut self,
+        key: ItemKey,
+        offset: u64,
+        patched: bool,
+        now_ms: i64,
+        effects: &mut Vec<Effect>,
+    ) {
+        let Some(index) = self.in_flight(key) else {
+            return;
+        };
+        let item = &mut self.items[index];
+        if patched && offset > item.confirmed {
+            item.attempts = 0;
+        }
+        item.confirmed = offset;
+        match item.upload_url.clone() {
+            Some(url) => self.advance(index, url, offset, now_ms, effects),
+            None => self.finish(index, Status::Failed(ApiFailure::Network), now_ms, effects),
+        }
+    }
+
     fn advance(
         &mut self,
         index: usize,
@@ -449,6 +475,7 @@ impl Queue {
                 item.restarted = true;
                 item.upload_url = None;
                 item.sent = 0;
+                item.confirmed = 0;
                 effects.push(item.create());
             }
             _ => self.finish(index, Status::Failed(failure), now_ms, effects),
@@ -746,12 +773,12 @@ mod tests {
 
         assert_eq!(
             fail(&mut queue, 0, server("upload_busy"), 2000),
-            [Effect::WakeAt { at_ms: 3000 }]
+            [Effect::WakeAt { at_ms: 4000 }]
         );
-        queue.tick(3000);
+        queue.tick(4000);
         assert_eq!(
             fail(&mut queue, 0, ApiFailure::Http(502), 4000),
-            [Effect::WakeAt { at_ms: 6000 }]
+            [Effect::WakeAt { at_ms: 8000 }]
         );
     }
 
@@ -1047,5 +1074,110 @@ mod tests {
             }
         }
         assert_eq!(refreshes, [0, 900]);
+    }
+
+    #[test]
+    fn repeated_patch_failures_back_off() {
+        let mut queue = Queue::default();
+        queue.add(plan(vec![spec("a.bin", 40 * MIB)]), &[], 0);
+        let key = key(&queue, 0);
+        created(&mut queue, 0, 0);
+        let mut now = 0;
+        for delay in [1000, 2000, 4000] {
+            assert_eq!(
+                fail(&mut queue, 0, ApiFailure::Network, now),
+                [Effect::WakeAt { at_ms: now + delay }]
+            );
+            now += delay;
+            assert_eq!(queue.tick(now), [Effect::Head { key, url: url(key) }]);
+            queue.handle(Event::HeadDone { key, offset: 0 }, now);
+        }
+
+        queue.handle(
+            Event::Patched {
+                key,
+                offset: 16 * MIB,
+            },
+            now,
+        );
+        assert_eq!(
+            fail(&mut queue, 0, ApiFailure::Network, now),
+            [Effect::WakeAt { at_ms: now + 1000 }]
+        );
+    }
+
+    #[test]
+    fn server_errors_are_transient_except_507() {
+        let mut queue = Queue::default();
+        queue.add(files(3, 10), &[], 0);
+        assert_eq!(
+            fail(&mut queue, 0, server("internal"), 0),
+            [Effect::WakeAt { at_ms: 1000 }]
+        );
+        assert_eq!(
+            fail(&mut queue, 1, ApiFailure::Http(503), 0),
+            [Effect::WakeAt { at_ms: 1000 }]
+        );
+        assert!(fail(&mut queue, 2, server("insufficient_storage"), 0).is_empty());
+        assert_eq!(
+            queue.items()[2].status,
+            Status::Failed(server("insufficient_storage"))
+        );
+    }
+
+    #[test]
+    fn unauthenticated_fails() {
+        let mut queue = Queue::default();
+        queue.add(files(1, 10), &[], 0);
+        assert!(fail(&mut queue, 0, server("unauthenticated"), 0).is_empty());
+        assert_eq!(
+            queue.items()[0].status,
+            Status::Failed(server("unauthenticated"))
+        );
+    }
+
+    #[test]
+    fn offset_without_upload_url_fails() {
+        let mut queue = Queue::default();
+        queue.add(files(1, 10), &[], 0);
+        let key = key(&queue, 0);
+        queue.handle(Event::Patched { key, offset: 5 }, 0);
+        assert_eq!(queue.items()[0].status, Status::Failed(ApiFailure::Network));
+    }
+
+    #[test]
+    fn late_created_after_cancel_deletes() {
+        let mut queue = Queue::default();
+        queue.add(files(1, 10), &[], 0);
+        let key = key(&queue, 0);
+        assert_eq!(
+            queue.handle(Event::Cancel { key }, 0),
+            [Effect::Abort { key }]
+        );
+        assert_eq!(
+            created(&mut queue, 0, 1),
+            [Effect::Delete { url: url(key) }]
+        );
+        assert_eq!(queue.items()[0].status, Status::Cancelled);
+    }
+
+    #[test]
+    fn folder_retries_after_transient_failure() {
+        let mut queue = Queue::default();
+        let mut batch = files(0, 0);
+        batch.folders = vec!["Empty".into()];
+        queue.add(batch, &[], 0);
+        assert_eq!(
+            fail(&mut queue, 0, ApiFailure::Network, 0),
+            [Effect::WakeAt { at_ms: 1000 }]
+        );
+        assert_eq!(
+            queue.tick(1000),
+            [Effect::CreateFolder {
+                key: key(&queue, 0),
+                volume: "media".into(),
+                path: "Empty".into(),
+            }]
+        );
     }
 }
