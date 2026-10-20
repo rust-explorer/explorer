@@ -135,6 +135,7 @@ New error codes (JSON error shape as above):
 | `invalid_upload` | 400 | Missing or malformed `Upload-Length` or `Upload-Metadata`. |
 | `unsupported_tus_version` | 412 | `Tus-Resumable` missing or not `1.0.0`. |
 | `unsupported_media_type` | 415 | `PATCH` without `application/offset+octet-stream`. |
+| `cross_device` | 500 | The destination folder is a separate mount nested in the volume, so the staged file cannot be renamed into it. |
 
 An empty destination path (the volume root) is `invalid_path`; `is_a_directory`,
 `not_a_directory` and `permission_denied` from the table above also apply to destinations.
@@ -146,10 +147,13 @@ How an upload is stored:
    inserts a record in the `uploads` table of `explorer.db` (id, owner `sub`, volume, path,
    length, `modified`, conflict policy, timestamps).
 2. Data is written to `.explorer-uploads/<id>` at the root of the volume. The directory is
-   created on first upload with mode `0700`, the file with `0600`, both owned by the container
-   user. The final file keeps that `0600` mode. The offset reported to the client is the staged file's length, so it is right after a
-   crash. `.explorer-uploads` is not listed, not zipped, and rejected as the first component
-   of any client path (`invalid_path`, reason `reserved name`).
+   created on first upload with mode `0700`, the file with `0666` less the umask, both owned
+   by the container user; the final file keeps that mode, like any file the container
+   creates. The offset reported to the client is the staged file's length, so it is right
+   after a crash. `.explorer-uploads` is rejected as the first component of any client path
+   (`invalid_path`, reason `reserved name`). It is also recognised by device and inode, so
+   it is neither listed, zipped, read nor written through a symlink to the volume root or
+   to the directory itself (`path_not_found`).
 3. Each `PATCH` runs as its own task holding an in-memory per-upload lock, so a second
    writer gets `upload_busy`, and a client that disconnects does not leave a half-recorded
    write. A body that sends nothing for 60 seconds is treated as a disconnect; what arrived
@@ -162,16 +166,19 @@ How an upload is stored:
    folder. "Keep both" names `Film.mkv` as `Film (1).mkv`, then `(2)` and so on: the suffix
    goes before the last extension, and a name whose only dot is the first character has none
    (`.bashrc (1)`). The record then gets its `final_path`; a retried empty `PATCH` at the end
-   is answered 204, which makes the last chunk safe to resend. A zero-length upload is
-   committed by the creation request itself.
+   is answered 204, which makes the last chunk safe to resend. If the commit fails, the
+   staged file stays complete and `HEAD` reports the full length; an empty `PATCH` at the end
+   retries the commit, and the client sends one before it shows the upload as done. A
+   zero-length upload is committed by the creation request itself.
 5. The rename stays on one filesystem. A folder that is a separate mount nested inside a
-   volume cannot receive uploads: the commit fails with 500 `internal` and the log says that
-   the destination is on another filesystem than the volume. Mount such a folder as its own
-   volume.
+   volume cannot receive uploads: the commit fails with 500 `cross_device`, which the client
+   shows as failed instead of retrying, and the log says that the destination is on another
+   filesystem than the volume. Mount such a folder as its own volume.
 
 Abandoned uploads: a record not touched for 24 hours is deleted with its staged file, and
 so is a staged file older than that without a record. The sweep runs at startup and then
-every hour, and logs at `info` when it removed something.
+every hour; it logs each abandoned upload it removes at `info` (`action` = `sweep`), then
+a summary of what it removed.
 
 Logs (`info`, with `user` = the OIDC `sub`, `action`, `volume`, `path`): upload started
 (with `length`), completed (with `bytes` and `final_path`), cancelled, folder created, and
@@ -191,8 +198,10 @@ browser handles the download and shows any failure in its own download list.
 
 Uploads: the header has an Upload button (a floating "+" on narrow screens) that offers
 files or a folder, and files or folders can be dropped on the folder listing. On a read-only volume
-the controls are disabled. A panel lists the transfers with progress and per-item cancel or
-retry. The engine lives in `crates/web/src/uploads`:
+the controls are disabled. A panel lists the transfers with their progress, a cancel button
+per item, and how many dropped or picked items could not be read and were skipped; retries
+are automatic. Files dropped anywhere else in the page are ignored rather than opened by the
+browser. The engine lives in `crates/web/src/uploads`:
 
 - A file is cut into 16 MiB chunks, each sent as one `PATCH`; at most 3 files upload at
   once. Before creating an upload, the client resumes a pending one (from `GET /api/uploads`)
@@ -200,16 +209,18 @@ retry. The engine lives in `crates/web/src/uploads`:
   same file again continues from the server's offset.
 - After a transient failure (network error, 5xx other than 507, `upload_busy`,
   `offset_mismatch`) the item asks the server for its offset and retries after
-  `min(1 s x 2^(attempt-1), 30 s)`, until the user cancels. An upload the server no longer
-  knows (`upload_not_found`) is recreated from the start, once.
+  `min(1 s x 2^(attempt-1), 30 s)`, until the user cancels. A `PATCH` that reports no
+  progress for 120 seconds is aborted and counts as a network error. An upload the server no
+  longer knows (`upload_not_found`) is recreated from the start, once. When that offset is
+  the full length, an empty `PATCH` confirms the commit before the item is marked done.
 - An `already_exists` answer opens a dialog: Replace, Keep both or Cancel, with an "apply to
   all" option for the rest of the batch. Folders that already exist are merged into, never a
   conflict.
 - Folder trees are sent as their files plus a `POST .../folders` for each empty folder. The
   folder picker only exposes files, so it cannot see empty folders; drag and drop reads the
   directory entries and does create them.
-- The sidebar's free space and the listing refresh while uploads run (at most every 2 s)
-  and when they end. The browser asks for confirmation before the page is closed with
+- The sidebar's free space and the listing refresh while uploads run (at most every 2 s, and
+  within 2 s of any completion) and when they end. The browser asks for confirmation before the page is closed with
   transfers active.
 - Everything is same-origin `XHR`/`fetch`, so the CSP's `connect-src 'self'` is enough.
 

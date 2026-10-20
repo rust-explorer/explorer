@@ -201,11 +201,14 @@ Also keep in mind:
   Do not delete or rename it while uploads are running.
 - Uploads are staged inside the volume, so the final move must stay on one filesystem. If a
   folder inside a volume is a separate mount (another disk or dataset), uploads into it fail
-  with an internal error and the log says the destination is on another filesystem. Mount
-  that folder as its own volume under `/data` instead.
+  with `cross_device` ("on another filesystem than its volume") and the log says the
+  destination is on another filesystem. Mount that folder as its own volume under `/data`
+  instead.
 - A read-only volume (`:ro` mount, or not writable by the container user) cannot receive
   uploads; its upload controls are disabled and the server answers `read_only_volume`.
-- Uploaded files belong to the container user and are created with mode `0600`.
+- Uploaded files belong to the container user and get the container's umask, like any file
+  it creates (`0644` with the usual `022`). To keep them private from other host users,
+  restrict access to the volume's folder on the host.
 - The folder picker cannot see empty folders, because browsers only list files; drag and
   drop does create them.
 

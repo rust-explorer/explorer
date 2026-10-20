@@ -108,13 +108,17 @@ Names that are not valid UTF-8 are skipped with a warning.
   the volume it is destined for and moved into place with a rename relative to open
   directory handles, so no file content is copied across volumes or through a temporary
   directory elsewhere. The staging directory is opened without following symlinks and must
-  be a real directory; the staged file is created with `O_NOFOLLOW`, mode `0600`, in a
-  `0700` directory. The rename keeps the file's mode, so an uploaded file ends up `0600`
-  and owned by the container user (not readable by other host users or groups); folders
-  created by an upload get the container's umask.
-- **Reserved name.** `.explorer-uploads` is never listed or zipped, and any client path
-  whose first component is that name is rejected with `invalid_path` (reason `reserved
-  name`), so it can be neither read, written nor created through the API.
+  be a real directory; the staged file is created with `O_NOFOLLOW` in a `0700` directory,
+  so it stays private while it is incomplete. It is created with mode `0666` less the
+  container's umask and the rename keeps that mode, so an uploaded file, like the folders an
+  upload creates, gets the same permissions as any file the container creates (`0644` with
+  the usual `022` umask: readable by other host users who can reach the folder). To keep
+  uploads private, restrict access to the volume's folder on the host.
+- **Reserved name.** Any client path whose first component is `.explorer-uploads` is
+  rejected with `invalid_path` (reason `reserved name`). The volume root and the staging
+  directory are also recognised by device and inode, so a symlink inside the volume that
+  points to the root or to the staging directory does not reach it either: it is never
+  listed or zipped, and reading or writing through such a path is `path_not_found`.
 - **Ownership.** An upload belongs to the OIDC `sub` that created it. Looking it up, resuming
   it, appending to it or cancelling it as another user is a 404 `upload_not_found`; the
   upload id is 128 random bits and is not a capability on its own. `GET /api/uploads` lists
