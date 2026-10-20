@@ -24,7 +24,7 @@ pub fn keep_both_name(name: &str, n: u32) -> String {
 }
 
 /// `a/b/c` → `a`, `a/b`, `a/b/c`.
-fn prefixes(path: &RelPath) -> Vec<RelPath> {
+pub(super) fn prefixes(path: &RelPath) -> Vec<RelPath> {
     let mut prefixes: Vec<RelPath> = Vec::new();
     for component in path.as_str().split('/').filter(|c| !c.is_empty()) {
         let parent = prefixes.last().cloned().unwrap_or_else(RelPath::root);
@@ -40,6 +40,7 @@ fn prefixes(path: &RelPath) -> Vec<RelPath> {
 /// confined by cap-std; renames then only take a `Dir` handle and a single name on each side.
 impl Volume {
     pub fn create_dir_all(&self, dir: &RelPath) -> Result<(), StorageError> {
+        self.refuse_reserved(dir)?;
         for prefix in prefixes(dir) {
             match self.is_dir_at(&prefix)? {
                 Some(true) => {}
@@ -66,6 +67,7 @@ impl Volume {
         let Some(parent) = path.parent() else {
             return Err(StorageError::IsADirectory(path.clone()));
         };
+        self.refuse_reserved(path)?;
         for prefix in prefixes(&parent) {
             match self.is_dir_at(&prefix)? {
                 Some(true) => {}
@@ -124,6 +126,7 @@ impl Volume {
         let (Some(parent), Some(name)) = (dest.parent(), dest.file_name()) else {
             return Err(StorageError::IsADirectory(dest.clone()));
         };
+        self.refuse_reserved(dest)?;
         self.create_dir_all(&parent)?;
         let parent_dir = self
             .root
@@ -143,7 +146,7 @@ impl Volume {
                 return Err(StorageError::IsADirectory(dest.clone()));
             }
             rustix::fs::renameat(&staging.dir, id.as_str(), &parent_dir, name)
-                .map_err(|err| self.rename_error(dest, err))?;
+                .map_err(|err| rename_error(dest, err))?;
             return Ok(dest.clone());
         }
 
@@ -175,7 +178,7 @@ impl Volume {
                     return Ok(target);
                 }
                 Err(Errno::EXIST) => {}
-                Err(err) => return Err(self.rename_error(&target, err)),
+                Err(err) => return Err(rename_error(&target, err)),
             }
         }
         Err(StorageError::AlreadyExists(dest.clone()))
@@ -189,23 +192,15 @@ impl Volume {
             Err(err) => Err(StorageError::from_io(path, err)),
         }
     }
+}
 
-    /// Both sides are plain names under open `Dir` handles, so `EXDEV` here is a mount point
-    /// nested in the volume, not an escape.
-    fn rename_error(&self, path: &RelPath, err: Errno) -> StorageError {
-        if err == Errno::XDEV {
-            tracing::warn!(
-                volume = self.name(),
-                path = path.as_str(),
-                "the destination is on another filesystem than the volume"
-            );
-            return StorageError::Io {
-                path: path.clone(),
-                source: err.into(),
-            };
-        }
-        StorageError::from_io(path, err.into())
+/// Both sides are plain names under open `Dir` handles, so `EXDEV` here is a mount point nested
+/// in the volume, not an escape.
+fn rename_error(path: &RelPath, err: Errno) -> StorageError {
+    if err == Errno::XDEV {
+        return StorageError::CrossDevice(path.clone());
     }
+    StorageError::from_io(path, err.into())
 }
 
 fn staging_error(err: Errno) -> StorageError {

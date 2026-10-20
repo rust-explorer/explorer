@@ -201,6 +201,19 @@ impl ApiError {
                 return Self::new(StatusCode::FORBIDDEN, "outside_volume", message)
                     .with_details(json!({ "volume": volume, "path": path.as_str() }));
             }
+            StorageError::CrossDevice(path) => {
+                tracing::warn!(
+                    volume,
+                    path = path.as_str(),
+                    "the destination is on another filesystem than the volume; mount it as its own volume"
+                );
+                let message = format!(
+                    "{} is on another filesystem than the volume",
+                    display_path(volume, path.as_str())
+                );
+                return Self::new(StatusCode::INTERNAL_SERVER_ERROR, "cross_device", message)
+                    .with_details(json!({ "volume": volume, "path": path.as_str() }));
+            }
             StorageError::Io { path, source } => {
                 tracing::warn!(volume, path = path.as_str(), error = %source, "storage error");
                 return Self::internal(source);
@@ -275,4 +288,24 @@ pub async fn attach_request_id(request: Request, next: Next) -> Response {
         HeaderValue::from_static("application/json"),
     );
     (parts, Json(body)).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::RelPath;
+
+    #[test]
+    fn cross_device_is_not_internal() {
+        let err = ApiError::from_storage(
+            "media",
+            StorageError::CrossDevice(RelPath::parse("Mounted/a.txt").unwrap()),
+        );
+        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(err.code, "cross_device");
+        assert_eq!(
+            err.details,
+            Some(json!({ "volume": "media", "path": "Mounted/a.txt" }))
+        );
+    }
 }

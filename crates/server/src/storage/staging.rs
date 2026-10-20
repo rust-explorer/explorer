@@ -47,12 +47,14 @@ fn map_err(err: io::Error) -> StorageError {
 }
 
 impl Staging {
+    /// Created `0o666` less the umask, like any new file: the `0700` directory keeps it private
+    /// until the rename, and the uploaded file keeps that mode.
     pub fn create(&self, id: &UploadId) -> Result<std::fs::File, StorageError> {
         let mut options = OpenOptions::new();
         options
             .write(true)
             .create_new(true)
-            .mode(0o600)
+            .mode(0o666)
             .custom_flags(OFlags::NOFOLLOW.bits().cast_signed());
         let file = self.dir.open_with(id.as_str(), &options).map_err(map_err)?;
         Ok(file.into_std())
