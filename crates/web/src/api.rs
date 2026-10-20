@@ -56,6 +56,16 @@ pub fn zip_url(volume: &str, path: &str) -> String {
     files_url("zip", volume, path)
 }
 
+#[allow(dead_code)]
+pub fn upload_url(id: &str) -> String {
+    format!("/files/uploads/{}", encode_component(id))
+}
+
+#[allow(dead_code)]
+pub fn folders_url(volume: &str) -> String {
+    format!("/api/volumes/{}/folders", encode_component(volume))
+}
+
 fn files_url(action: &str, volume: &str, path: &str) -> String {
     format!(
         "/files/{action}?volume={}&path={}",
