@@ -1,6 +1,9 @@
 const MAX_PATH_LEN: usize = 4096;
 const MAX_COMPONENT_LEN: usize = 255;
 
+/// Where uploads are staged, at each volume root; no `RelPath` can start with it.
+pub const STAGING_DIR: &str = ".explorer-uploads";
+
 /// A volume-relative path whose components are all plain names: no `.`, `..`, NUL or control characters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelPath(String);
@@ -39,6 +42,9 @@ impl RelPath {
             }
             components.push(component);
         }
+        if components.first() == Some(&STAGING_DIR) {
+            return Err(invalid("reserved name"));
+        }
         Ok(Self(components.join("/")))
     }
 
@@ -60,6 +66,18 @@ impl RelPath {
     #[must_use]
     pub fn is_root(&self) -> bool {
         self.0.is_empty()
+    }
+
+    /// `None` for the root.
+    #[must_use]
+    pub fn parent(&self) -> Option<Self> {
+        if self.is_root() {
+            return None;
+        }
+        Some(match self.0.rsplit_once('/') {
+            Some((parent, _)) => Self(parent.to_owned()),
+            None => Self::root(),
+        })
     }
 
     /// Appends a single entry name, validated like any other path.
@@ -147,5 +165,38 @@ mod tests {
         let max_path = "a/".repeat(2047) + "bc";
         assert_eq!(max_path.len(), 4096);
         assert!(RelPath::parse(&max_path).is_ok());
+    }
+
+    #[test]
+    fn rel_path_rejects_staging_dir() {
+        for raw in [
+            ".explorer-uploads",
+            ".explorer-uploads/x",
+            "/.explorer-uploads",
+        ] {
+            assert!(RelPath::parse(raw).is_err(), "{raw:?}");
+        }
+        assert_eq!(
+            RelPath::parse(".explorer-uploads/x").unwrap_err().reason,
+            "reserved name"
+        );
+        assert!(RelPath::root().join(STAGING_DIR).is_err());
+        for raw in [
+            "a/.explorer-uploads",
+            ".explorer-uploads2",
+            "x/.explorer-uploads/y",
+        ] {
+            assert!(RelPath::parse(raw).is_ok(), "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn rel_path_parent() {
+        assert_eq!(
+            RelPath::parse("a/b").unwrap().parent(),
+            Some(RelPath::parse("a").unwrap())
+        );
+        assert_eq!(RelPath::parse("a").unwrap().parent(), Some(RelPath::root()));
+        assert_eq!(RelPath::root().parent(), None);
     }
 }

@@ -5,6 +5,7 @@ use cap_std::fs::{Metadata, OpenOptions, OpenOptionsExt};
 use rustix::fs::OFlags;
 
 use super::error::is_escape;
+use super::path::STAGING_DIR;
 use super::{RelPath, StorageError, Volume};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,7 +74,7 @@ impl EntryMeta {
     }
 }
 
-fn fs_path(path: &RelPath) -> &str {
+pub(super) fn fs_path(path: &RelPath) -> &str {
     if path.is_root() { "." } else { path.as_str() }
 }
 
@@ -172,6 +173,9 @@ impl Volume {
         let mut entries = Vec::new();
         for entry in handle.entries().map_err(map_err)? {
             let file_name = entry.map_err(map_err)?.file_name();
+            if dir.is_root() && file_name == STAGING_DIR {
+                continue;
+            }
             let name = file_name.to_string_lossy().into_owned();
             let resolved = file_name
                 .to_str()
