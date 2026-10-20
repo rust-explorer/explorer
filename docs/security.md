@@ -1,7 +1,7 @@
 # Security
 
-This page describes what Explorer protects against as of the browsing and download
-milestone. To report a vulnerability, follow [SECURITY.md](../SECURITY.md); do not open a
+This page describes what Explorer protects against as of the browsing, download and
+upload milestone. To report a vulnerability, follow [SECURITY.md](../SECURITY.md); do not open a
 public issue.
 
 ## Scope
@@ -13,7 +13,8 @@ allowed group. It also defends the volumes against path tricks (traversal, symli
 point outside a volume) and keeps the files it serves from running in the app's origin.
 It does not defend against a compromised provider, reverse proxy or host, nor against
 someone who can already write inside a volume on the host. Every signed-in user in the
-allowed group can read every volume; per-volume or per-folder permissions do not exist yet.
+allowed group can read every volume and write to every volume that is not read-only;
+per-volume or per-folder permissions do not exist yet.
 
 ## Tokens stay on the server
 
@@ -41,6 +42,10 @@ Because the cookie is `Secure`, Explorer must be served over HTTPS.
 the origin of `EXPLORER_PUBLIC_URL`; otherwise the server answers 403 `csrf_rejected`.
 Login is a harmless `GET` that only starts a sign-in; the callback is protected by the
 `state` parameter, which is bound to the session and usable once.
+
+This covers every write: creating, appending to and cancelling an upload (`POST`, `PATCH`,
+`DELETE` under `/files/uploads`) and creating a folder. Uploads use same-origin `XHR` and
+`fetch`, so the browser sends an `Origin` the check accepts.
 
 ## Open redirects
 
@@ -92,6 +97,42 @@ Names that are not valid UTF-8 are skipped with a warning.
   FIFOs, devices). Symlinks to files inside the volume are included as files.
 - Files are opened non-blocking, so a FIFO swapped in after the check cannot hang a
   request, and the type is checked again on the open file.
+
+## Uploads
+
+- **Confinement.** A write goes through the same `(volume, path)` parsing and cap-std
+  confinement as a read, so a symlink or `..` cannot make an upload land outside its
+  volume. A write to a read-only volume is refused with 403 `read_only_volume` before
+  anything is touched.
+- **Staying in the volume.** Incoming data is staged in `.explorer-uploads` at the root of
+  the volume it is destined for and moved into place with a rename relative to open
+  directory handles, so no file content is copied across volumes or through a temporary
+  directory elsewhere. The staging directory is opened without following symlinks and must
+  be a real directory; the staged file is created with `O_NOFOLLOW`, mode `0600`, in a
+  `0700` directory. The rename keeps the file's mode, so an uploaded file ends up `0600`
+  and owned by the container user (not readable by other host users or groups); folders
+  created by an upload get the container's umask.
+- **Reserved name.** `.explorer-uploads` is never listed or zipped, and any client path
+  whose first component is that name is rejected with `invalid_path` (reason `reserved
+  name`), so it can be neither read, written nor created through the API.
+- **Ownership.** An upload belongs to the OIDC `sub` that created it. Looking it up, resuming
+  it, appending to it or cancelling it as another user is a 404 `upload_not_found`; the
+  upload id is 128 random bits and is not a capability on its own. `GET /api/uploads` lists
+  only the caller's uploads. Write access to the volume is checked again on every append.
+- **No silent overwrite.** The default conflict policy is `fail`. The final rename uses
+  no-replace semantics for `fail` and `keep_both`, so a file created while the upload was
+  running is never replaced; only an explicit `replace` overwrites, and never a folder.
+  The client's `modified` time is applied to the final file; nothing else from the client's
+  metadata is trusted.
+- **Limits.** The declared `Upload-Length` is checked against the volume's free space at
+  creation and a body longer than the declared length is cut off (413 `upload_too_large`).
+  Disk-full during a write is 507 `insufficient_storage`. A body that stalls for 60 seconds
+  is dropped. Each upload is written by one request at a time (423 `upload_busy`).
+- **Cleanup.** An upload untouched for 24 hours is removed with its staged file, as is a
+  stale staged file with no record. The sweep runs at startup and every hour.
+- **Logs.** Uploads are logged at `info` with the user's `sub`, the volume and the path (and
+  `bytes` and `final_path` on completion); folder creation and sweeps likewise; failures at
+  `warn`. File contents are never logged.
 
 ## Downloads
 
