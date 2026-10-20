@@ -8,12 +8,12 @@ use axum::http::StatusCode;
 use serde::Deserialize;
 use shared::api::{Entry, EntryKind, Listing, Space, VolumeInfo};
 
-use super::blocking_volume;
+use crate::access::{authorize, blocking_volume};
 use crate::app::AppState;
 use crate::auth::CurrentUser;
-use crate::authz::{Action, Policy};
+use crate::authz::Action;
 use crate::error::ApiError;
-use crate::storage::{self, RelPath};
+use crate::storage;
 
 #[derive(Deserialize)]
 pub struct EntriesQuery {
@@ -63,11 +63,7 @@ pub async fn entries(
             "Invalid volume or path parameter",
         ));
     };
-    if state.volumes.get(&volume).is_none() {
-        return Err(ApiError::volume_not_found(&volume));
-    }
-    Policy.check(&user, &volume, Action::Read)?;
-    let path = RelPath::parse(&query.path)?;
+    let path = authorize(&state, &user, &volume, &query.path, Action::Read)?;
     tracing::debug!(user = user.sub, volume, path = path.as_str(), "listing");
 
     let listed = blocking_volume(&state.volumes, &volume, {
