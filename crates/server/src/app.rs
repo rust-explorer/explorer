@@ -16,7 +16,7 @@ use tracing::Level;
 
 use crate::config::Config;
 use crate::error::{ApiError, attach_request_id};
-use crate::web;
+use crate::{csrf, session, web};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -24,12 +24,12 @@ pub struct AppState {
     pub db: SqlitePool,
 }
 
-pub fn router(state: AppState) -> Router {
-    router_with(state, Router::new())
+pub async fn router(state: AppState) -> Result<Router, sqlx::Error> {
+    router_with(state, Router::new()).await
 }
 
 /// Like [`router`], with `extra` routes served inside the same middleware stack.
-pub fn router_with(state: AppState, extra: Router<AppState>) -> Router {
+pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Router, sqlx::Error> {
     let trace = TraceLayer::new_for_http()
         .make_span_with(|req: &Request<_>| {
             let request_id = req
@@ -50,6 +50,14 @@ pub fn router_with(state: AppState, extra: Router<AppState>) -> Router {
                 .latency_unit(LatencyUnit::Millis),
         );
 
+    let session = session::layer(state.db.clone(), state.config.session_ttl).await?;
+    let origin: Arc<str> = state
+        .config
+        .public_url
+        .origin()
+        .ascii_serialization()
+        .into();
+
     let router = extra
         .route("/healthz", get(healthz))
         .nest("/api", Router::new().fallback(not_found))
@@ -65,9 +73,14 @@ pub fn router_with(state: AppState, extra: Router<AppState>) -> Router {
                 .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
                 .layer(trace)
                 .layer(PropagateRequestIdLayer::x_request_id())
-                .layer(middleware::from_fn(attach_request_id)),
+                .layer(middleware::from_fn(attach_request_id))
+                .layer(middleware::from_fn_with_state(
+                    origin,
+                    csrf::require_same_origin,
+                ))
+                .layer(session),
         );
-    web::security_headers(router)
+    Ok(web::security_headers(router))
 }
 
 async fn healthz() -> Json<Health> {
