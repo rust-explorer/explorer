@@ -226,22 +226,30 @@ browser. The engine lives in `crates/web/src/uploads`:
 
 ## Server modules
 
-Implemented:
+One folder per domain under `crates/server/src`:
 
 - `config` — loads and validates the environment at startup, reporting every problem.
-- `app` — router, middleware stack, shared state.
-- `web` — static bundle serving, cache headers, security headers.
-- `error` — the JSON error type.
-- `telemetry` — `tracing` setup (pretty or JSON).
-- `healthcheck` — client used by `explorer healthcheck` for the Docker healthcheck.
-- `oidc` — provider discovery (retried at startup), authorization URL, code exchange, ID
-  token verification, groups, end-session URL.
-- `auth` — `/auth/*` handlers and the `CurrentUser` extractor.
-- `session` — cookie and SQLite-backed session layer.
 - `db` — SQLite pool for `/config/explorer.db` (WAL), with a writability check.
-- `csrf` — `Origin`/`Referer` check on state-changing requests.
-- `authz` — authorization policy; handlers pass the user, the volume and the action, so
-  finer rules can be added later.
+- `telemetry` — `tracing` setup (pretty or JSON) and log value truncation.
+- `healthcheck` — client used by `explorer healthcheck` for the Docker healthcheck.
+- `http` — the plumbing every domain shares.
+  - `mod` — shared state, middleware stack and the route tree composed from each domain's
+    routes, `/healthz` and the JSON 404 fallback.
+  - `error` — the JSON error type and the request id it carries.
+  - `request_id` — the `X-Request-Id` header, its validation.
+  - `static_files` — bundle check, SPA fallback and cache headers.
+  - `security_headers` — CSP, `X-Content-Type-Options`, `Referrer-Policy`.
+  - `access` — handler helpers: volume lookup, policy check, read-only rejection and path
+    parsing in one call, and running a blocking storage call on a volume.
+- `auth` — sign-in and access control.
+  - `routes` — `/auth/*` handlers and `GET /api/me`.
+  - `current_user` — the `CurrentUser` extractor.
+  - `session` — cookie and SQLite-backed session layer.
+  - `csrf` — `Origin`/`Referer` check on state-changing requests.
+  - `policy` — authorization policy; handlers pass the user, the volume and the action, so
+    finer rules can be added later.
+  - `oidc` — provider discovery (retried at startup), authorization URL, code exchange, ID
+    token verification, groups, end-session URL.
 - `storage` — all filesystem access; handlers never touch the filesystem directly.
   - `path` — `RelPath`, the validated relative path type.
   - `volumes` — discovery under `/data` and read-only detection.
@@ -249,10 +257,29 @@ Implemented:
     on [cap-std](https://docs.rs/cap-std) directories, run on Tokio's blocking pool.
   - `staging` and `write` — the per-volume staging directory and its files, the upload
     target checks, folder creation and the final rename.
-  - `error` — storage errors, mapped to API error codes in `error`.
-- `api` — `GET /api/volumes`, `GET /api/volumes/{volume}/entries`, `POST /api/volumes/{volume}/folders` and `GET /api/uploads`.
-- `access` — handler helpers: volume lookup, policy check, read-only rejection and path
-  parsing in one call, and running a blocking storage call on a volume.
-- `files` — `/files/download`, `/files/zip` and the `/files/uploads` mount.
-- `uploads` — the tus handlers (`tus`), the `uploads` table and in-memory locks (`store`),
-  and the abandoned-upload sweep (`cleanup`).
+  - `error` — storage errors, mapped to API error codes in `http::error`.
+- `browse` — `GET /api/volumes`, `GET /api/volumes/{volume}/entries` and
+  `POST /api/volumes/{volume}/folders`.
+- `downloads` — `/files/download` (with `Range`) and `/files/zip`.
+- `uploads` — resumable uploads.
+  - `routes` — `GET /api/uploads`, the user's pending uploads.
+  - `tus` — the `/files/uploads` tus endpoints: `protocol` (headers, version check,
+    creation metadata), `handlers`, `staged` (the staged file) and `commit` (writing the
+    body and moving the file into place).
+  - `store` — the `uploads` table and in-memory locks.
+  - `cleanup` — the abandoned-upload sweep.
+
+## Web modules
+
+Under `crates/web/src`:
+
+- `app`, `routes`, `i18n`, `format`, `listing` — the root component, the client routes,
+  translations, size and date formatting, sorting, file types and the visible row range.
+- `api` — fetch helpers and API failures; `urls` builds the API and file URLs.
+- `uploads` — the upload engine: `plan` (what a pick or drop sends), `queue` (the state
+  machine: items, effects and events, the reducer), `controller`, `transport`, `drop`,
+  `speed`.
+- `components` — grouped by screen: `layout` (shell, sidebar, breadcrumb, user menu,
+  sign-out), `browse` (file table, virtual list, drop zone), `uploads` (upload button,
+  uploads panel, conflict dialog), `common` (icons, notice, error panel).
+- `pages` — one component per route.
