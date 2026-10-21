@@ -1,10 +1,17 @@
+mod effects;
+mod item;
+
 use std::collections::{HashMap, HashSet};
 
 use shared::api::{ConflictPolicy, PendingUpload};
 
-use super::plan::{BatchPlan, FileSpec};
-use super::{CHUNK_SIZE, MAX_PARALLEL, REFRESH_EVERY_MS, retry_delay_ms};
+use super::plan::BatchPlan;
+use super::{MAX_PARALLEL, REFRESH_EVERY_MS, retry_delay_ms};
 use crate::api::{self, ApiFailure};
+
+pub use effects::{Effect, Event};
+pub use item::{Decision, Item, ItemKey, Kind, Status};
+use item::{Phase, policy};
 
 const ALREADY_EXISTS: &str = "already_exists";
 const UPLOAD_NOT_FOUND: &str = "upload_not_found";
@@ -12,134 +19,6 @@ const UPLOAD_BUSY: &str = "upload_busy";
 const OFFSET_MISMATCH: &str = "offset_mismatch";
 /// The server's only JSON 5xx besides 507 `insufficient_storage`.
 const INTERNAL: &str = "internal";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ItemKey(pub u64);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Decision {
-    Replace,
-    KeepBoth,
-    Cancel,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Status {
-    Queued,
-    NeedsDecision,
-    Uploading,
-    Retrying { attempt: u32, at_ms: i64 },
-    Done,
-    Failed(ApiFailure),
-    Cancelled,
-    Skipped,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Kind {
-    File(FileSpec),
-    Folder { volume: String, path: String },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Phase {
-    Idle,
-    CreatingFolder,
-    Creating,
-    Heading,
-    Patching,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Item {
-    pub key: ItemKey,
-    pub batch: u64,
-    pub kind: Kind,
-    pub status: Status,
-    pub sent: u64,
-    pub upload_url: Option<String>,
-    pub conflict: ConflictPolicy,
-    phase: Phase,
-    attempts: u32,
-    /// Last offset the server confirmed.
-    confirmed: u64,
-    restarted: bool,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Effect {
-    CreateFolder {
-        key: ItemKey,
-        volume: String,
-        path: String,
-    },
-    Create {
-        key: ItemKey,
-        spec: FileSpec,
-        conflict: ConflictPolicy,
-    },
-    Head {
-        key: ItemKey,
-        url: String,
-    },
-    Patch {
-        key: ItemKey,
-        url: String,
-        offset: u64,
-        len: u64,
-    },
-    /// Stops the item's in-flight request.
-    Abort {
-        key: ItemKey,
-    },
-    /// Terminates the upload on the server.
-    Delete {
-        url: String,
-    },
-    /// `tick` is due at that time.
-    WakeAt {
-        at_ms: i64,
-    },
-    Refresh {
-        volume: String,
-    },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum Event {
-    FolderCreated {
-        key: ItemKey,
-    },
-    Created {
-        key: ItemKey,
-        url: String,
-    },
-    /// `sent` counts every byte of the item the server has, not just this request's.
-    Progress {
-        key: ItemKey,
-        sent: u64,
-    },
-    Patched {
-        key: ItemKey,
-        offset: u64,
-    },
-    HeadDone {
-        key: ItemKey,
-        offset: u64,
-    },
-    Failed {
-        key: ItemKey,
-        failure: ApiFailure,
-    },
-    Decide {
-        key: ItemKey,
-        decision: Decision,
-        apply_to_all: bool,
-    },
-    Cancel {
-        key: ItemKey,
-    },
-}
 
 /// Upload state machine: events in, requests to send out.
 #[derive(Debug, Default)]
@@ -151,62 +30,6 @@ pub struct Queue {
     last_refresh: HashMap<String, i64>,
     unrefreshed: HashSet<String>,
     skipped: usize,
-}
-
-impl Status {
-    fn is_active(&self) -> bool {
-        matches!(
-            self,
-            Self::Queued | Self::NeedsDecision | Self::Uploading | Self::Retrying { .. }
-        )
-    }
-}
-
-impl Item {
-    fn volume(&self) -> &str {
-        match &self.kind {
-            Kind::File(spec) => &spec.volume,
-            Kind::Folder { volume, .. } => volume,
-        }
-    }
-
-    fn size(&self) -> u64 {
-        match &self.kind {
-            Kind::File(spec) => spec.size,
-            Kind::Folder { .. } => 0,
-        }
-    }
-
-    fn create(&mut self) -> Effect {
-        self.phase = Phase::Creating;
-        let Kind::File(spec) = &self.kind else {
-            unreachable!("folders are never uploaded");
-        };
-        Effect::Create {
-            key: self.key,
-            spec: spec.clone(),
-            conflict: self.conflict,
-        }
-    }
-
-    fn patch(&mut self, url: String, offset: u64) -> Effect {
-        self.phase = Phase::Patching;
-        self.sent = offset;
-        Effect::Patch {
-            key: self.key,
-            url,
-            offset,
-            len: CHUNK_SIZE.min(self.size() - offset),
-        }
-    }
-}
-
-fn policy(decision: Decision) -> Option<ConflictPolicy> {
-    match decision {
-        Decision::Replace => Some(ConflictPolicy::Replace),
-        Decision::KeepBoth => Some(ConflictPolicy::KeepBoth),
-        Decision::Cancel => None,
-    }
 }
 
 fn is_transient(failure: &ApiFailure) -> bool {
@@ -604,6 +427,8 @@ mod tests {
     use shared::api::ErrorBody;
 
     use super::*;
+    use crate::uploads::CHUNK_SIZE;
+    use crate::uploads::plan::FileSpec;
 
     const MIB: u64 = 1024 * 1024;
 
