@@ -21,7 +21,6 @@ pub mod static_files;
 use error::{ApiError, attach_request_id};
 use request_id::{drop_invalid_request_id, request_id};
 
-use crate::api;
 use crate::auth::oidc::Oidc;
 use crate::auth::{self, csrf, session};
 use crate::browse;
@@ -68,7 +67,11 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
         .route("/healthz", get(healthz))
         .nest(
             "/api",
-            api::routes().merge(browse::routes()).fallback(not_found),
+            Router::new()
+                .route("/me", get(auth::me))
+                .merge(browse::routes())
+                .merge(uploads::routes())
+                .fallback(not_found),
         )
         .nest("/auth", auth::routes().fallback(not_found))
         .nest(

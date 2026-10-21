@@ -2,10 +2,10 @@ use axum::Json;
 use axum::extract::State;
 use shared::api::PendingUpload;
 
+use super::tus::staged_len;
 use crate::auth::CurrentUser;
 use crate::http::AppState;
 use crate::http::error::ApiError;
-use crate::uploads::staged_len;
 
 /// The current user's unfinished uploads; those whose staged file is gone are left out.
 pub async fn pending(
