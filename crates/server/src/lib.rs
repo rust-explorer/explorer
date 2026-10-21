@@ -4,6 +4,7 @@ pub mod csrf;
 pub mod db;
 pub mod error;
 pub mod healthcheck;
+pub mod oidc;
 pub mod session;
 pub mod telemetry;
 pub mod web;

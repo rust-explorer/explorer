@@ -1,12 +1,14 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Router;
 use explorer_server::app::{AppState, router};
 use explorer_server::config::Config;
 use explorer_server::db;
 use explorer_server::healthcheck;
+use explorer_server::oidc::Oidc;
 use explorer_server::session;
 use explorer_server::telemetry;
 use explorer_server::web::check_bundle;
@@ -14,6 +16,8 @@ use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
 
 const LISTEN_ADDR: &str = "0.0.0.0:8080";
+const DISCOVERY_ATTEMPTS: u32 = 10;
+const DISCOVERY_DELAY: Duration = Duration::from_secs(3);
 const HEALTHCHECK_ADDR: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8080);
 
 #[tokio::main]
@@ -55,9 +59,25 @@ async fn main() -> ExitCode {
         }
     };
 
+    let oidc = match Oidc::discover_with_retry(
+        &config.oidc,
+        &config.public_url,
+        DISCOVERY_ATTEMPTS,
+        DISCOVERY_DELAY,
+    )
+    .await
+    {
+        Ok(oidc) => oidc,
+        Err(err) => {
+            tracing::error!(error = %err, "OIDC provider unavailable");
+            return ExitCode::from(2);
+        }
+    };
+
     let state = AppState {
         config: Arc::new(config),
         db: pool.clone(),
+        oidc: Arc::new(oidc),
     };
     let app = match router(state).await {
         Ok(app) => app,
