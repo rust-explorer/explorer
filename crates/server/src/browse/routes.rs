@@ -94,7 +94,7 @@ pub async fn entries(
 }
 
 /// Creates a folder and its missing parents; an existing folder is fine.
-pub async fn create(
+pub async fn create_folder(
     State(state): State<AppState>,
     user: CurrentUser,
     volume: Result<Path<String>, PathRejection>,

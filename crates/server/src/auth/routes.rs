@@ -32,7 +32,7 @@ pub async fn me(user: CurrentUser) -> Json<Me> {
 
 /// Keeps only same-origin absolute paths; anything that could leave the site becomes `/`.
 #[must_use]
-pub fn sanitize_return_to(raw: Option<&str>) -> String {
+pub(super) fn sanitize_return_to(raw: Option<&str>) -> String {
     let Some(raw) = raw else {
         return "/".to_owned();
     };

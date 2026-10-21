@@ -15,7 +15,7 @@ use crate::http::AppState;
 
 pub use current_user::CurrentUser;
 pub use policy::{Action, Policy};
-pub use routes::{me, sanitize_return_to};
+pub use routes::me;
 
 pub fn routes() -> Router<AppState> {
     Router::new()

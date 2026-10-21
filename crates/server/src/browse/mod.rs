@@ -9,5 +9,5 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/volumes", get(routes::volumes))
         .route("/volumes/{volume}/entries", get(routes::entries))
-        .route("/volumes/{volume}/folders", post(routes::create))
+        .route("/volumes/{volume}/folders", post(routes::create_folder))
 }
