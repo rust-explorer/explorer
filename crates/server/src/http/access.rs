@@ -3,10 +3,10 @@ use std::sync::Arc;
 use axum::http::StatusCode;
 use serde::Deserialize;
 
-use crate::app::AppState;
 use crate::auth::CurrentUser;
 use crate::authz::{Action, Policy};
-use crate::error::ApiError;
+use crate::http::AppState;
+use crate::http::error::ApiError;
 use crate::storage::{self, RelPath, Volumes};
 
 /// Query of the `/files/*` endpoints.

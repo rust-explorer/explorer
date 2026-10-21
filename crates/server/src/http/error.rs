@@ -6,8 +6,8 @@ use axum::response::{IntoResponse, Response};
 use serde_json::json;
 use shared::api::ErrorBody;
 
+use crate::http::request_id::request_id;
 use crate::storage::{InvalidPath, StorageError};
-use crate::telemetry::request_id;
 
 #[derive(Debug)]
 pub struct ApiError {

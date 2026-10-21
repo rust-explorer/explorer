@@ -8,7 +8,7 @@ use axum::http::{Request, StatusCode, header};
 use axum::response::Response;
 use common::client::{COOKIE, Jar};
 use common::fake_oidc::{self, FakeOidc};
-use explorer_server::app::router;
+use explorer_server::http::router;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use shared::api::{ErrorBody, LogoutResponse, Me};

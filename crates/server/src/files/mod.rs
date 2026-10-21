@@ -4,7 +4,7 @@ mod zip;
 use axum::Router;
 use axum::routing::get;
 
-use crate::app::AppState;
+use crate::http::AppState;
 use crate::uploads;
 
 pub use download::{attachment_headers, content_disposition};

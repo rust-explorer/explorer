@@ -15,7 +15,7 @@ use axum::http::{Method, Request, StatusCode, header};
 use axum::response::Response;
 use common::client::{Client, json};
 use common::fake_oidc::FakeOidc;
-use explorer_server::app::router;
+use explorer_server::http::router;
 use explorer_server::storage::UploadId;
 use explorer_server::uploads::Uploads;
 use http_body_util::BodyExt;

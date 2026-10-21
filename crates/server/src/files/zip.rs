@@ -16,11 +16,11 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::attachment_headers;
-use crate::access::{VolumeQuery, authorize, blocking_volume, invalid_query};
-use crate::app::AppState;
 use crate::auth::CurrentUser;
 use crate::authz::Action;
-use crate::error::ApiError;
+use crate::http::AppState;
+use crate::http::access::{VolumeQuery, authorize, blocking_volume, invalid_query};
+use crate::http::error::ApiError;
 use crate::storage::{RelPath, Volume, WalkItem};
 
 const CHUNK: usize = 64 * 1024;

@@ -13,11 +13,11 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
-use crate::access::{VolumeQuery, authorize, blocking_volume, invalid_query};
-use crate::app::AppState;
 use crate::auth::CurrentUser;
 use crate::authz::Action;
-use crate::error::ApiError;
+use crate::http::AppState;
+use crate::http::access::{VolumeQuery, authorize, blocking_volume, invalid_query};
+use crate::http::error::ApiError;
 use crate::storage::RelPath;
 
 /// RFC 8187 `attr-char`: everything else is percent-encoded.

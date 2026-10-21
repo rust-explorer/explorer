@@ -6,8 +6,9 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use url::Url;
 
-use crate::error::ApiError;
-use crate::telemetry::{request_id, truncate_for_log};
+use crate::http::error::ApiError;
+use crate::http::request_id::request_id;
+use crate::telemetry::truncate_for_log;
 
 /// Rejects state-changing requests whose `Origin` (or, failing that, `Referer`) is not `origin`.
 pub async fn require_same_origin(

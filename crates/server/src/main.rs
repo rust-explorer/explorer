@@ -4,16 +4,16 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use explorer_server::app::{AppState, router};
 use explorer_server::config::Config;
 use explorer_server::db;
 use explorer_server::healthcheck;
+use explorer_server::http::static_files::check_bundle;
+use explorer_server::http::{AppState, router};
 use explorer_server::oidc::Oidc;
 use explorer_server::session;
 use explorer_server::storage::Volumes;
 use explorer_server::telemetry;
 use explorer_server::uploads::{self, Uploads};
-use explorer_server::web::check_bundle;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
 

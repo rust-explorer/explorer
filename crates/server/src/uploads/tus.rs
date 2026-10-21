@@ -17,11 +17,11 @@ use tokio::io::AsyncWriteExt;
 use tokio_stream::StreamExt;
 
 use super::{UploadLock, UploadRecord};
-use crate::access::{authorize, blocking_volume};
-use crate::app::AppState;
 use crate::auth::CurrentUser;
 use crate::authz::Action;
-use crate::error::ApiError;
+use crate::http::AppState;
+use crate::http::access::{authorize, blocking_volume};
+use crate::http::error::ApiError;
 use crate::storage::{InvalidPath, RelPath, StorageError, UploadId};
 
 /// A PATCH whose body sends nothing for this long is treated as a disconnect.

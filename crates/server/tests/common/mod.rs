@@ -8,9 +8,9 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::Request;
-use explorer_server::app::{AppState, router};
 use explorer_server::config::Config;
 use explorer_server::db;
+use explorer_server::http::{AppState, router};
 use explorer_server::oidc::Oidc;
 use explorer_server::storage::Volumes;
 use explorer_server::uploads::Uploads;

@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
-use axum::extract::Request as AxumRequest;
 use axum::http::Request;
-use axum::middleware::{self, Next};
-use axum::response::Response;
+use axum::middleware;
 use axum::routing::{any, get};
 use axum::{Json, Router};
 use shared::api::Health;
@@ -14,13 +12,20 @@ use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetReques
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
+pub mod access;
+pub mod error;
+pub mod request_id;
+pub mod security_headers;
+pub mod static_files;
+
+use error::{ApiError, attach_request_id};
+use request_id::{drop_invalid_request_id, request_id};
+
 use crate::config::Config;
-use crate::error::{ApiError, attach_request_id};
 use crate::oidc::Oidc;
 use crate::storage::Volumes;
-use crate::telemetry::{REQUEST_ID_HEADER, request_id};
 use crate::uploads::{self, Uploads};
-use crate::{api, auth, csrf, files, session, web};
+use crate::{api, auth, csrf, files, session};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -65,7 +70,7 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
         .route("/api/", any(not_found))
         .route("/auth/", any(not_found))
         .route("/files/", any(not_found))
-        .fallback_service(web::service(&state.config.web_dir))
+        .fallback_service(static_files::service(&state.config.web_dir))
         .with_state(state)
         .layer(
             ServiceBuilder::new()
@@ -81,7 +86,7 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
                 ))
                 .layer(session),
         );
-    Ok(web::security_headers(router))
+    Ok(security_headers::security_headers(router))
 }
 
 async fn healthz() -> Json<Health> {
@@ -93,25 +98,4 @@ async fn healthz() -> Json<Health> {
 
 async fn not_found() -> ApiError {
     ApiError::not_found()
-}
-
-const MAX_REQUEST_ID_LEN: usize = 128;
-
-fn is_valid_request_id(id: &[u8]) -> bool {
-    (1..=MAX_REQUEST_ID_LEN).contains(&id.len())
-        && id
-            .iter()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
-}
-
-/// Removes a client-supplied request id that fails validation so `SetRequestIdLayer` generates one.
-async fn drop_invalid_request_id(mut request: AxumRequest, next: Next) -> Response {
-    let invalid = request
-        .headers()
-        .get(REQUEST_ID_HEADER)
-        .is_some_and(|v| !is_valid_request_id(v.as_bytes()));
-    if invalid {
-        request.headers_mut().remove(REQUEST_ID_HEADER);
-    }
-    next.run(request).await
 }

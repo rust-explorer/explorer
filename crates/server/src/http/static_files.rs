@@ -6,11 +6,7 @@ use axum::http::{HeaderValue, header};
 use axum::middleware::{self, Next};
 use axum::response::Response;
 use tower_http::services::{ServeDir, ServeFile};
-use tower_http::set_header::SetResponseHeaderLayer;
 
-const CSP: &str = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; \
-                   img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; \
-                   base-uri 'self'; form-action 'self'";
 const IMMUTABLE: &str = "public, max-age=31536000, immutable";
 
 #[derive(Debug, thiserror::Error)]
@@ -56,20 +52,4 @@ async fn cache_control(req: Request, next: Next) -> Response {
         }
     }
     res
-}
-
-pub fn security_headers(router: Router) -> Router {
-    router
-        .layer(SetResponseHeaderLayer::if_not_present(
-            header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static(CSP),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            header::X_CONTENT_TYPE_OPTIONS,
-            HeaderValue::from_static("nosniff"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            header::REFERRER_POLICY,
-            HeaderValue::from_static("same-origin"),
-        ))
 }

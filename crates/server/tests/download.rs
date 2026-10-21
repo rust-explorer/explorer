@@ -9,7 +9,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use axum::response::Response;
 use common::client::{Client, json};
-use explorer_server::app::router;
+use explorer_server::http::router;
 use http_body_util::BodyExt;
 use shared::api::ErrorBody;
 use tempfile::TempDir;

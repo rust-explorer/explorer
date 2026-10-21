@@ -12,11 +12,12 @@ use serde::{Deserialize, Serialize};
 use shared::api::{LogoutResponse, Me};
 use tower_sessions::Session;
 
-use crate::app::AppState;
 use crate::csrf;
-use crate::error::ApiError;
+use crate::http::AppState;
+use crate::http::error::ApiError;
+use crate::http::request_id::request_id;
 use crate::oidc::PendingLogin;
-use crate::telemetry::{request_id, truncate_for_log};
+use crate::telemetry::truncate_for_log;
 
 const PENDING_KEY: &str = "oidc_pending";
 const USER_KEY: &str = "user";

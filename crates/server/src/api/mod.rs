@@ -5,8 +5,8 @@ mod uploads;
 use axum::Router;
 use axum::routing::{get, post};
 
-use crate::app::AppState;
 use crate::auth;
+use crate::http::AppState;
 
 pub fn routes() -> Router<AppState> {
     Router::new()

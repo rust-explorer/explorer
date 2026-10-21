@@ -4,11 +4,11 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use shared::api::CreateFolder;
 
-use crate::access::{authorize, blocking_volume};
-use crate::app::AppState;
 use crate::auth::CurrentUser;
 use crate::authz::Action;
-use crate::error::ApiError;
+use crate::http::AppState;
+use crate::http::access::{authorize, blocking_volume};
+use crate::http::error::ApiError;
 use crate::storage::InvalidPath;
 
 /// Creates a folder and its missing parents; an existing folder is fine.

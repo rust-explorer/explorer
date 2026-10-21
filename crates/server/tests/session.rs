@@ -4,7 +4,7 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use axum::routing::get;
-use explorer_server::app::{AppState, router_with};
+use explorer_server::http::{AppState, router_with};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 use tower_sessions::Session;

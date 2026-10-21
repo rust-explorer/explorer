@@ -1,5 +1,5 @@
 use crate::auth::CurrentUser;
-use crate::error::ApiError;
+use crate::http::error::ApiError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {

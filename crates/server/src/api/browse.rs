@@ -8,11 +8,11 @@ use axum::http::StatusCode;
 use serde::Deserialize;
 use shared::api::{Entry, EntryKind, Listing, Space, VolumeInfo};
 
-use crate::access::{authorize, blocking_volume};
-use crate::app::AppState;
 use crate::auth::CurrentUser;
 use crate::authz::Action;
-use crate::error::ApiError;
+use crate::http::AppState;
+use crate::http::access::{authorize, blocking_volume};
+use crate::http::error::ApiError;
 use crate::storage;
 
 #[derive(Deserialize)]
