@@ -26,7 +26,7 @@ use crate::auth::oidc::Oidc;
 use crate::auth::{self, csrf, session};
 use crate::browse;
 use crate::config::Config;
-use crate::files;
+use crate::downloads;
 use crate::storage::Volumes;
 use crate::uploads::{self, Uploads};
 
@@ -71,7 +71,12 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
             api::routes().merge(browse::routes()).fallback(not_found),
         )
         .nest("/auth", auth::routes().fallback(not_found))
-        .nest("/files", files::routes().fallback(not_found))
+        .nest(
+            "/files",
+            downloads::routes()
+                .nest("/uploads", uploads::tus_routes())
+                .fallback(not_found),
+        )
         // nest() does not match the empty tail, so the bare-slash forms need explicit routes
         .route("/api/", any(not_found))
         .route("/auth/", any(not_found))
