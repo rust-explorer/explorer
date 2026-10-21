@@ -24,6 +24,7 @@ use request_id::{drop_invalid_request_id, request_id};
 use crate::api;
 use crate::auth::oidc::Oidc;
 use crate::auth::{self, csrf, session};
+use crate::browse;
 use crate::config::Config;
 use crate::files;
 use crate::storage::Volumes;
@@ -65,7 +66,10 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
 
     let router = extra
         .route("/healthz", get(healthz))
-        .nest("/api", api::routes().fallback(not_found))
+        .nest(
+            "/api",
+            api::routes().merge(browse::routes()).fallback(not_found),
+        )
         .nest("/auth", auth::routes().fallback(not_found))
         .nest("/files", files::routes().fallback(not_found))
         // nest() does not match the empty tail, so the bare-slash forms need explicit routes
