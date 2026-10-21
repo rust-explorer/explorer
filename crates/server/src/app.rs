@@ -18,6 +18,7 @@ use crate::config::Config;
 use crate::error::{ApiError, attach_request_id};
 use crate::oidc::Oidc;
 use crate::storage::Volumes;
+use crate::telemetry::{REQUEST_ID_HEADER, request_id};
 use crate::uploads::{self, Uploads};
 use crate::{api, auth, csrf, files, session, web};
 
@@ -38,11 +39,7 @@ pub async fn router(state: AppState) -> Result<Router, sqlx::Error> {
 pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Router, sqlx::Error> {
     let trace = TraceLayer::new_for_http()
         .make_span_with(|req: &Request<_>| {
-            let request_id = req
-                .headers()
-                .get("x-request-id")
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or_default();
+            let request_id = request_id(req.headers());
             tracing::info_span!(
                 "request",
                 method = %req.method(),
@@ -111,10 +108,10 @@ fn is_valid_request_id(id: &[u8]) -> bool {
 async fn drop_invalid_request_id(mut request: AxumRequest, next: Next) -> Response {
     let invalid = request
         .headers()
-        .get("x-request-id")
+        .get(REQUEST_ID_HEADER)
         .is_some_and(|v| !is_valid_request_id(v.as_bytes()));
     if invalid {
-        request.headers_mut().remove("x-request-id");
+        request.headers_mut().remove(REQUEST_ID_HEADER);
     }
     next.run(request).await
 }

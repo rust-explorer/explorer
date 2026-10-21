@@ -7,6 +7,7 @@ use serde_json::json;
 use shared::api::ErrorBody;
 
 use crate::storage::{InvalidPath, StorageError};
+use crate::telemetry::request_id;
 
 #[derive(Debug)]
 pub struct ApiError {
@@ -271,10 +272,8 @@ impl IntoResponse for ApiError {
 }
 
 pub async fn attach_request_id(request: Request, next: Next) -> Response {
-    let request_id = request
-        .headers()
-        .get("x-request-id")
-        .and_then(|v| v.to_str().ok())
+    let request_id = Some(request_id(request.headers()))
+        .filter(|id| !id.is_empty())
         .map(str::to_owned);
     let mut response = next.run(request).await;
     let Some(mut body) = response.extensions_mut().remove::<ErrorBody>() else {

@@ -1,11 +1,13 @@
 use std::io::{IsTerminal, stdout};
 
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, HeaderName};
 use tracing_subscriber::EnvFilter;
 
 use crate::config::{LogConfig, LogFormat};
 
 const MAX_LOGGED_LEN: usize = 256;
+
+pub const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
 
 /// # Panics
 /// If `log.filter` is not a valid filter; `Config` validates it beforehand.
@@ -21,7 +23,7 @@ pub fn init(log: &LogConfig) {
 #[must_use]
 pub fn request_id(headers: &HeaderMap) -> &str {
     headers
-        .get("x-request-id")
+        .get(REQUEST_ID_HEADER)
         .and_then(|v| v.to_str().ok())
         .unwrap_or_default()
 }
