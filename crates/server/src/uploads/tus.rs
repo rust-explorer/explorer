@@ -17,8 +17,8 @@ use tokio::io::AsyncWriteExt;
 use tokio_stream::StreamExt;
 
 use super::{UploadLock, UploadRecord};
+use crate::auth::Action;
 use crate::auth::CurrentUser;
-use crate::authz::Action;
 use crate::http::AppState;
 use crate::http::access::{authorize, blocking_volume};
 use crate::http::error::ApiError;

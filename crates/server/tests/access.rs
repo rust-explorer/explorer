@@ -5,8 +5,8 @@ use std::os::unix::fs::PermissionsExt;
 
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use explorer_server::auth::Action;
 use explorer_server::auth::CurrentUser;
-use explorer_server::authz::Action;
 use explorer_server::http::access::authorize;
 use explorer_server::http::error::ApiError;
 use shared::api::ErrorBody;

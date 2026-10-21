@@ -13,8 +13,8 @@ use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
+use crate::auth::Action;
 use crate::auth::CurrentUser;
-use crate::authz::Action;
 use crate::http::AppState;
 use crate::http::access::{VolumeQuery, authorize, blocking_volume, invalid_query};
 use crate::http::error::ApiError;

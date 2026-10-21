@@ -21,11 +21,13 @@ pub mod static_files;
 use error::{ApiError, attach_request_id};
 use request_id::{drop_invalid_request_id, request_id};
 
+use crate::api;
+use crate::auth::oidc::Oidc;
+use crate::auth::{self, csrf, session};
 use crate::config::Config;
-use crate::oidc::Oidc;
+use crate::files;
 use crate::storage::Volumes;
 use crate::uploads::{self, Uploads};
-use crate::{api, auth, csrf, files, session};
 
 #[derive(Clone)]
 pub struct AppState {

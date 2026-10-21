@@ -16,8 +16,8 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::attachment_headers;
+use crate::auth::Action;
 use crate::auth::CurrentUser;
-use crate::authz::Action;
 use crate::http::AppState;
 use crate::http::access::{VolumeQuery, authorize, blocking_volume, invalid_query};
 use crate::http::error::ApiError;

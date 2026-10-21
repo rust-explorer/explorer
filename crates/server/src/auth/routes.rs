@@ -1,59 +1,26 @@
 use std::fmt::Write as _;
 
 use axum::Json;
-use axum::Router;
 use axum::extract::rejection::QueryRejection;
-use axum::extract::{FromRequestParts, Query, State};
-use axum::http::request::Parts;
+use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use shared::api::{LogoutResponse, Me};
 use tower_sessions::Session;
 
-use crate::csrf;
+use super::csrf;
+use super::current_user::{CurrentUser, USER_KEY};
+use super::oidc::PendingLogin;
 use crate::http::AppState;
 use crate::http::error::ApiError;
 use crate::http::request_id::request_id;
-use crate::oidc::PendingLogin;
 use crate::telemetry::truncate_for_log;
 
 const PENDING_KEY: &str = "oidc_pending";
-const USER_KEY: &str = "user";
 const ID_TOKEN_KEY: &str = "id_token";
 const MAX_RETURN_TO_LEN: usize = 2048;
 const ACCESS_DENIED_PATH: &str = "/access-denied";
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CurrentUser {
-    pub sub: String,
-    pub name: String,
-    pub email: Option<String>,
-    pub groups: Vec<String>,
-}
-
-impl<S: Send + Sync> FromRequestParts<S> for CurrentUser {
-    type Rejection = ApiError;
-
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let session = Session::from_request_parts(parts, state)
-            .await
-            .map_err(|(_, msg)| ApiError::internal(msg))?;
-        session
-            .get::<Self>(USER_KEY)
-            .await
-            .map_err(ApiError::internal)?
-            .ok_or_else(ApiError::unauthenticated)
-    }
-}
-
-pub fn routes() -> Router<AppState> {
-    Router::new()
-        .route("/login", get(login))
-        .route("/callback", get(callback))
-        .route("/logout", post(logout))
-}
 
 pub async fn me(user: CurrentUser) -> Json<Me> {
     Json(Me {
@@ -90,11 +57,11 @@ pub fn sanitize_return_to(raw: Option<&str>) -> String {
 }
 
 #[derive(Deserialize)]
-struct LoginParams {
+pub(super) struct LoginParams {
     return_to: Option<String>,
 }
 
-async fn login(
+pub(super) async fn login(
     State(state): State<AppState>,
     session: Session,
     params: Result<Query<LoginParams>, QueryRejection>,
@@ -110,13 +77,13 @@ async fn login(
 }
 
 #[derive(Deserialize)]
-struct CallbackParams {
+pub(super) struct CallbackParams {
     code: Option<String>,
     state: Option<String>,
     error: Option<String>,
 }
 
-async fn callback(
+pub(super) async fn callback(
     State(state): State<AppState>,
     session: Session,
     headers: HeaderMap,
@@ -199,7 +166,7 @@ async fn callback(
     Ok(see_other(&return_to))
 }
 
-async fn logout(
+pub(super) async fn logout(
     State(state): State<AppState>,
     session: Session,
 ) -> Result<Json<LogoutResponse>, ApiError> {

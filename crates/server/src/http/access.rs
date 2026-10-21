@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use serde::Deserialize;
 
 use crate::auth::CurrentUser;
-use crate::authz::{Action, Policy};
+use crate::auth::{Action, Policy};
 use crate::http::AppState;
 use crate::http::error::ApiError;
 use crate::storage::{self, RelPath, Volumes};

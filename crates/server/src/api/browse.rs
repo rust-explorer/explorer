@@ -8,8 +8,8 @@ use axum::http::StatusCode;
 use serde::Deserialize;
 use shared::api::{Entry, EntryKind, Listing, Space, VolumeInfo};
 
+use crate::auth::Action;
 use crate::auth::CurrentUser;
-use crate::authz::Action;
 use crate::http::AppState;
 use crate::http::access::{authorize, blocking_volume};
 use crate::http::error::ApiError;
