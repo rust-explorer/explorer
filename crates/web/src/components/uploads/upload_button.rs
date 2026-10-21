@@ -3,7 +3,7 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 use dioxus_i18n::t;
 
-use super::icons::{ArrowUpIcon, PlusIcon};
+use crate::components::common::icons::{ArrowUpIcon, PlusIcon};
 use crate::uploads::{Uploads, use_uploads};
 
 const READ_ONLY_ID: &str = "upload-read-only";

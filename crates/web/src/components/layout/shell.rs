@@ -4,8 +4,8 @@ use dioxus::prelude::*;
 use dioxus_i18n::t;
 use shared::api::Me;
 
-use super::icons::MenuIcon;
 use super::user_menu::UserMenu;
+use crate::components::common::icons::MenuIcon;
 use crate::routes::Route;
 
 const SIDEBAR_ID: &str = "sidebar";

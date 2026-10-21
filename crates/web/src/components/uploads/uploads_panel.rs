@@ -2,9 +2,9 @@ use dioxus::prelude::*;
 use dioxus_i18n::prelude::i18n;
 use dioxus_i18n::t;
 
-use super::error_message;
-use super::icons::{CheckIcon, CloseIcon, MinusIcon, PlusIcon};
 use crate::api::ApiFailure;
+use crate::components::common::error_message;
+use crate::components::common::icons::{CheckIcon, CloseIcon, MinusIcon, PlusIcon};
 use crate::format::{format_size, format_speed, now_ms};
 use crate::uploads::{Item, Kind, Status, use_uploads};
 

@@ -5,12 +5,12 @@ use dioxus_i18n::prelude::i18n;
 use dioxus_i18n::t;
 use shared::api::{Entry, EntryKind};
 
-use super::VirtualList;
-use super::icons::{
+use super::virtual_list::VirtualList;
+use crate::api;
+use crate::components::common::icons::{
     ArchiveIcon, ArrowDownIcon, ArrowUpIcon, AudioIcon, DocumentIcon, DownloadIcon, FileIcon,
     FolderIcon, ImageIcon, VideoIcon,
 };
-use crate::api;
 use crate::format::{format_modified, format_size, now_ms};
 use crate::listing::{FileType, Sort, SortKey, file_type, sorted};
 use crate::routes::{Route, Segment, Segments};
