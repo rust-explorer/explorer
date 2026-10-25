@@ -11,7 +11,8 @@ use common::fake_oidc::{self, FakeOidc};
 use explorer_server::http::router;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
-use shared::api::{ErrorBody, LogoutResponse, Me};
+use shared::api::auth::{LogoutResponse, Me};
+use shared::api::error::ErrorBody;
 use tower::ServiceExt;
 use url::Url;
 

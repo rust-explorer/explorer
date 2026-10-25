@@ -4,7 +4,7 @@ use axum::http::{StatusCode, header};
 use common::{app_with_web_dir, get};
 use explorer_server::http::static_files::check_bundle;
 use http_body_util::BodyExt;
-use shared::api::ErrorBody;
+use shared::api::error::ErrorBody;
 use tower::ServiceExt;
 
 fn bundle() -> tempfile::TempDir {

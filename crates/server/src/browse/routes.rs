@@ -6,7 +6,7 @@ use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use serde::Deserialize;
-use shared::api::{CreateFolder, Entry, EntryKind, Listing, Space, VolumeInfo};
+use shared::api::browse::{CreateFolder, Entry, EntryKind, Listing, Space, VolumeInfo};
 
 use crate::auth::Action;
 use crate::auth::CurrentUser;

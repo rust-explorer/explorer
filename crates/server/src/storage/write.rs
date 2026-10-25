@@ -4,7 +4,7 @@ use std::time::SystemTime;
 use cap_std::fs::Dir;
 use rustix::fs::{Mode, OFlags, RenameFlags};
 use rustix::io::Errno;
-use shared::api::ConflictPolicy;
+use shared::api::uploads::ConflictPolicy;
 
 use super::ops::fs_path;
 use super::path::STAGING_DIR;

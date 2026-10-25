@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use dioxus_i18n::{t, te};
-use shared::api::ErrorBody;
+use shared::api::error::ErrorBody;
 
 use crate::api::ApiFailure;
 use crate::routes::{Route, Segments};

@@ -12,7 +12,7 @@ use axum::response::Response;
 use common::client::{Client, json};
 use explorer_server::http::router;
 use http_body_util::BodyExt;
-use shared::api::ErrorBody;
+use shared::api::error::ErrorBody;
 use tempfile::TempDir;
 use zip::{CompressionMethod, ZipArchive};
 

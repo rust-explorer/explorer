@@ -1,6 +1,6 @@
 use axum::Json;
 use axum::extract::State;
-use shared::api::PendingUpload;
+use shared::api::uploads::PendingUpload;
 
 use super::tus::staged_len;
 use crate::auth::CurrentUser;

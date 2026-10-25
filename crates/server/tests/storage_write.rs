@@ -7,7 +7,7 @@ use std::time::{Duration, SystemTime};
 use explorer_server::storage::{
     RelPath, STAGING_DIR, Staging, StorageError, UploadId, Volume, Volumes, WalkItem,
 };
-use shared::api::ConflictPolicy;
+use shared::api::uploads::ConflictPolicy;
 use tempfile::TempDir;
 
 struct Fixture {

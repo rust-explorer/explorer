@@ -20,7 +20,8 @@ use explorer_server::storage::UploadId;
 use explorer_server::uploads::Uploads;
 use http_body_util::BodyExt;
 use serde_json::json;
-use shared::api::{ErrorBody, PendingUpload};
+use shared::api::error::ErrorBody;
+use shared::api::uploads::PendingUpload;
 use shared::tus::encode_metadata;
 use sqlx::SqlitePool;
 use tempfile::TempDir;
@@ -1039,7 +1040,7 @@ async fn staging_is_unreachable_through_a_symlink_to_the_root() {
 
     let res = s.client.get("/api/volumes/media/entries?path=self").await;
     assert_eq!(res.status(), StatusCode::OK);
-    let listing: shared::api::Listing = json(res).await;
+    let listing: shared::api::browse::Listing = json(res).await;
     let names: Vec<_> = listing.entries.iter().map(|e| e.name.as_str()).collect();
     assert_eq!(names, ["a.txt", "self"]);
 

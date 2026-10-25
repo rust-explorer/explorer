@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use shared::api::ConflictPolicy;
+use shared::api::uploads::ConflictPolicy;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row as _, SqlitePool};
 

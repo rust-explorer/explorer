@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 use dioxus_i18n::t;
-use shared::api::Me;
+use shared::api::auth::Me;
 
 use super::user_menu::UserMenu;
 use crate::components::common::icons::MenuIcon;

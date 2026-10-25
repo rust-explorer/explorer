@@ -3,7 +3,7 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 use dioxus_i18n::prelude::i18n;
 use dioxus_i18n::t;
-use shared::api::{Entry, EntryKind};
+use shared::api::browse::{Entry, EntryKind};
 
 use super::virtual_list::VirtualList;
 use crate::api;

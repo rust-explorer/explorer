@@ -26,7 +26,7 @@ operations (rename, move, delete and the like) are planned.
 |---|---|---|
 | `explorer-server` | `crates/server` | Axum server, binary `explorer`. |
 | `explorer-web` | `crates/web` | Dioxus web app (WASM), styled with Tailwind, localised (`en`, `fr`, `es`). |
-| `explorer-shared` | `crates/shared` | API types (DTOs, error body) used by both sides. |
+| `explorer-shared` | `crates/shared` | Types used by both sides: the API DTOs, one module per domain under `api/` (`auth`, `browse`, `error`, `health`, `uploads`), and the tus metadata encoding. |
 
 The web app talks to the server over a plain REST-style JSON API rather than Dioxus
 server functions, so the API stays usable by other clients.

@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_i18n::prelude::i18n;
 use dioxus_i18n::t;
-use shared::api::{Space, VolumeInfo};
+use shared::api::browse::{Space, VolumeInfo};
 
 use crate::components::common::icons::{LockIcon, VolumeIcon};
 use crate::format::format_size;

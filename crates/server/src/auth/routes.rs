@@ -6,7 +6,7 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
-use shared::api::{LogoutResponse, Me};
+use shared::api::auth::{LogoutResponse, Me};
 use tower_sessions::Session;
 
 use super::csrf;

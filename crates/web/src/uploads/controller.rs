@@ -114,7 +114,7 @@ mod browser {
     use dioxus::core::{Runtime, spawn_forever};
     use dioxus::prelude::*;
     use gloo_timers::future::TimeoutFuture;
-    use shared::api::PendingUpload;
+    use shared::api::uploads::PendingUpload;
     use wasm_bindgen::JsCast as _;
     use wasm_bindgen::closure::Closure;
     use web_sys::{BeforeUnloadEvent, DragEvent, File};

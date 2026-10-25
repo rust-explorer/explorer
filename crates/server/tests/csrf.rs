@@ -6,7 +6,7 @@ use axum::http::{Request, StatusCode, header};
 use axum::routing::post;
 use explorer_server::http::{AppState, router_with};
 use http_body_util::BodyExt;
-use shared::api::ErrorBody;
+use shared::api::error::ErrorBody;
 use tower::ServiceExt;
 
 const PUBLIC_ORIGIN: &str = "https://files.example.com";

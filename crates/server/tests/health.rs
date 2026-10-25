@@ -7,7 +7,8 @@ use common::get;
 use explorer_server::http::error::ApiError;
 use explorer_server::http::{AppState, router_with};
 use http_body_util::BodyExt;
-use shared::api::{ErrorBody, Health};
+use shared::api::error::ErrorBody;
+use shared::api::health::Health;
 use tower::ServiceExt;
 
 async fn app() -> (axum::Router, tempfile::TempDir) {

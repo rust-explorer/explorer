@@ -4,7 +4,7 @@ use axum::http::Request;
 use axum::middleware;
 use axum::routing::{any, get};
 use axum::{Json, Router};
-use shared::api::Health;
+use shared::api::health::Health;
 use sqlx::SqlitePool;
 use tower::ServiceBuilder;
 use tower_http::LatencyUnit;

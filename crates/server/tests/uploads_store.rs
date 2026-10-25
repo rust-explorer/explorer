@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 use explorer_server::db;
 use explorer_server::storage::{RelPath, UploadId, Volumes};
 use explorer_server::uploads::{SweepReport, UPLOAD_TTL, UploadRecord, Uploads, sweep};
-use shared::api::ConflictPolicy;
+use shared::api::uploads::ConflictPolicy;
 
 const HOUR_MS: i64 = 3_600_000;
 

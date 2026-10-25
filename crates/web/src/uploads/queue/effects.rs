@@ -1,4 +1,4 @@
-use shared::api::ConflictPolicy;
+use shared::api::uploads::ConflictPolicy;
 
 use super::{Decision, ItemKey};
 use crate::api::ApiFailure;

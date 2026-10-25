@@ -8,7 +8,8 @@ use axum::http::StatusCode;
 use common::client::{Client, json};
 use explorer_server::http::router;
 use serde_json::json;
-use shared::api::{EntryKind, ErrorBody, Listing, VolumeInfo};
+use shared::api::browse::{EntryKind, Listing, VolumeInfo};
+use shared::api::error::ErrorBody;
 use tempfile::TempDir;
 
 struct Setup {

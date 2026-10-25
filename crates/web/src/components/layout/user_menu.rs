@@ -3,7 +3,7 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 use dioxus_i18n::prelude::i18n;
 use dioxus_i18n::t;
-use shared::api::Me;
+use shared::api::auth::Me;
 
 use super::SignOutButton;
 use crate::i18n::{change_locale, native_name, supported};

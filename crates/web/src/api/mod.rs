@@ -1,5 +1,6 @@
 use serde::de::DeserializeOwned;
-use shared::api::{ErrorBody, LogoutResponse};
+use shared::api::auth::LogoutResponse;
+use shared::api::error::ErrorBody;
 
 mod urls;
 

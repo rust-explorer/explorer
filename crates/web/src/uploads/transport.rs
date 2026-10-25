@@ -3,7 +3,9 @@ use std::rc::Rc;
 
 use gloo_net::http::{Method, RequestBuilder, Response};
 use gloo_timers::callback::Interval;
-use shared::api::{ConflictPolicy, CreateFolder, ErrorBody};
+use shared::api::browse::CreateFolder;
+use shared::api::error::ErrorBody;
+use shared::api::uploads::ConflictPolicy;
 use shared::tus::{TUS_VERSION, encode_metadata};
 use wasm_bindgen::JsCast as _;
 use wasm_bindgen::closure::Closure;

@@ -3,7 +3,7 @@ mod item;
 
 use std::collections::{HashMap, HashSet};
 
-use shared::api::{ConflictPolicy, PendingUpload};
+use shared::api::uploads::{ConflictPolicy, PendingUpload};
 
 use super::plan::BatchPlan;
 use super::{MAX_PARALLEL, REFRESH_EVERY_MS, retry_delay_ms};
@@ -424,7 +424,7 @@ impl Queue {
 
 #[cfg(test)]
 mod tests {
-    use shared::api::ErrorBody;
+    use shared::api::error::ErrorBody;
 
     use super::*;
     use crate::uploads::CHUNK_SIZE;

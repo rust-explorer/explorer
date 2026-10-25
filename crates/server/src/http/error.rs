@@ -4,7 +4,7 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
-use shared::api::ErrorBody;
+use shared::api::error::ErrorBody;
 
 use crate::http::request_id::request_id;
 use crate::storage::{InvalidPath, StorageError};

@@ -2,7 +2,8 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 use dioxus_i18n::t;
-use shared::api::{Listing, Me, VolumeInfo};
+use shared::api::auth::Me;
+use shared::api::browse::{Listing, VolumeInfo};
 
 use crate::api;
 use crate::components::{
