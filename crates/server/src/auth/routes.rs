@@ -1,5 +1,3 @@
-use std::fmt::Write as _;
-
 use axum::Json;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Query, State};
@@ -8,6 +6,7 @@ use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use shared::api::auth::{LogoutResponse, Me};
 use tower_sessions::Session;
+use url::{Position, Url};
 
 use super::csrf;
 use super::current_user::{CurrentUser, USER_KEY};
@@ -30,30 +29,20 @@ pub async fn me(user: CurrentUser) -> Json<Me> {
     })
 }
 
-/// Keeps only same-origin absolute paths; anything that could leave the site becomes `/`.
+/// Where to send the user after sign-in: `raw` resolved against the public URL, kept only when it
+/// stays on the same origin; anything else, including what a browser would read as another host
+/// (`//host`, `/\host`), becomes `/`.
 #[must_use]
-pub(super) fn sanitize_return_to(raw: Option<&str>) -> String {
-    let Some(raw) = raw else {
-        return "/".to_owned();
-    };
-    let mut chars = raw.chars();
-    let acceptable = chars.next() == Some('/')
-        && !matches!(chars.next(), Some('/' | '\\'))
-        && raw.len() <= MAX_RETURN_TO_LEN
-        && !raw.chars().any(char::is_control);
-    if !acceptable {
-        return "/".to_owned();
-    }
-    // Non-ASCII bytes are not valid in a `Location` header value.
-    let mut sanitized = String::with_capacity(raw.len());
-    for byte in raw.bytes() {
-        if byte.is_ascii() {
-            sanitized.push(char::from(byte));
-        } else {
-            let _ = write!(sanitized, "%{byte:02X}");
-        }
-    }
-    sanitized
+pub(super) fn sanitize_return_to(public_url: &Url, raw: Option<&str>) -> String {
+    raw.filter(|raw| {
+        raw.starts_with('/') && raw.len() <= MAX_RETURN_TO_LEN && !raw.chars().any(char::is_control)
+    })
+    .and_then(|raw| public_url.join(raw).ok())
+    .filter(|url| url.origin() == public_url.origin())
+    .map(|url| url[Position::BeforePath..].to_owned())
+    // A path normalised to `//host` would be read as another host once sent back as `Location`.
+    .filter(|target| !target.starts_with("//"))
+    .unwrap_or_else(|| "/".to_owned())
 }
 
 #[derive(Deserialize)]
@@ -68,7 +57,7 @@ pub(super) async fn login(
 ) -> Result<Response, ApiError> {
     let return_to = params.ok().and_then(|Query(p)| p.return_to);
     let (url, mut pending) = state.oidc.authorize_url();
-    pending.return_to = sanitize_return_to(return_to.as_deref());
+    pending.return_to = sanitize_return_to(&state.config.public_url, return_to.as_deref());
     session
         .insert(PENDING_KEY, pending)
         .await
@@ -198,6 +187,14 @@ fn see_other(location: &str) -> Response {
 mod tests {
     use super::*;
 
+    fn public_url() -> Url {
+        Url::parse("https://files.example.com").unwrap()
+    }
+
+    fn sanitize(raw: Option<&str>) -> String {
+        sanitize_return_to(&public_url(), raw)
+    }
+
     #[test]
     fn sanitize_return_to_rejects_open_redirects() {
         let long = format!("/{}", "a".repeat(3000));
@@ -212,25 +209,32 @@ mod tests {
             "/ok\t",
             "/ok\u{7f}",
             "evil.example",
+            "/..//evil.example",
+            "/.//evil.example",
+            "/./\\evil.example",
+            "https://files.example.com:8443/x",
         ] {
-            assert_eq!(sanitize_return_to(Some(raw)), "/", "{raw:?}");
+            assert_eq!(sanitize(Some(raw)), "/", "{raw:?}");
         }
-        assert_eq!(sanitize_return_to(None), "/");
+        assert_eq!(sanitize(None), "/");
     }
 
     #[test]
     fn sanitize_return_to_keeps_local_paths() {
-        for raw in ["/", "/docs/a?b=1", "/docs/a#frag", "/a/b\\c", "/a//b"] {
-            assert_eq!(sanitize_return_to(Some(raw)), raw);
+        for raw in ["/", "/docs/a?b=1", "/docs/a#frag", "/a//b"] {
+            assert_eq!(sanitize(Some(raw)), raw);
         }
+        // Normalised the way the browser would read them.
+        assert_eq!(sanitize(Some("/a/b\\c")), "/a/b/c");
+        assert_eq!(sanitize(Some("/a/../b")), "/b");
         let max = format!("/{}", "a".repeat(MAX_RETURN_TO_LEN - 1));
-        assert_eq!(sanitize_return_to(Some(&max)), max);
+        assert_eq!(sanitize(Some(&max)), max);
     }
 
     #[test]
     fn sanitize_return_to_percent_encodes_non_ascii() {
-        assert_eq!(sanitize_return_to(Some("/caf\u{e9}")), "/caf%C3%A9");
-        assert!(HeaderValue::try_from(sanitize_return_to(Some("/\u{1f600}"))).is_ok());
+        assert_eq!(sanitize(Some("/caf\u{e9}")), "/caf%C3%A9");
+        assert!(HeaderValue::try_from(sanitize(Some("/\u{1f600}"))).is_ok());
     }
 
     #[test]

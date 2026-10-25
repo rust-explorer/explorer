@@ -49,9 +49,12 @@ This covers every write: creating, appending to and cancelling an upload (`POST`
 
 ## Open redirects
 
-`/auth/login?return_to=` accepts only same-site absolute paths (a single leading `/`, no
-`//` or `/\`, no control characters, at most 2048 bytes). Anything else becomes `/`. The
-post-login redirect target is stored in the session, never taken from the callback.
+`/auth/login?return_to=` must be a path (leading `/`, no control characters, at most 2048
+bytes). It is resolved against `EXPLORER_PUBLIC_URL` with a WHATWG URL parser, the same rules
+browsers apply, and kept only if the result has the same origin and its path does not start
+with `//`. So `//host`, `/\host` or `/..//host` cannot send the user to another site; they
+become `/`. The post-login redirect target is stored in the session, never taken from the
+callback.
 
 ## Groups gate
 
