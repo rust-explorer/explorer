@@ -253,7 +253,7 @@ One folder per domain under `crates/server/src`:
 - `storage` — all filesystem access; handlers never touch the filesystem directly.
   - `path` — `RelPath`, the validated relative path type.
   - `volumes` — discovery under `/data` and read-only detection.
-  - `ops` — listing, `stat`, opening files, walking a folder, free space. Blocking calls
+  - `read` — listing, `stat`, opening files, walking a folder, free space. Blocking calls
     on [cap-std](https://docs.rs/cap-std) directories, run on Tokio's blocking pool.
   - `staging` and `write` — the per-volume staging directory and its files, the upload
     target checks, folder creation and the final rename.

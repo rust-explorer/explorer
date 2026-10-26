@@ -6,8 +6,8 @@ use rustix::fs::{Mode, OFlags, RenameFlags};
 use rustix::io::Errno;
 use shared::api::uploads::ConflictPolicy;
 
-use super::ops::fs_path;
 use super::path::STAGING_DIR;
+use super::read::fs_path;
 use super::{RelPath, Staging, StorageError, UploadId, Volume};
 
 const KEEP_BOTH_MAX: u32 = 999;

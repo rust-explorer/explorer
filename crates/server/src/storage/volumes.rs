@@ -6,6 +6,8 @@ use cap_std::fs::Dir;
 use rustix::fs::{Access, AtFlags};
 use rustix::io::Errno;
 
+/// A mounted volume. Its methods are split by concern: reading in `read.rs`, writing and uploads
+/// in `write.rs`.
 pub struct Volume {
     name: String,
     pub(super) root: Dir,
