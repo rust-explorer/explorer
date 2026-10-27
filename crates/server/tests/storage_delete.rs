@@ -110,6 +110,28 @@ fn delete_removes_symlink_not_target() {
 }
 
 #[test]
+fn delete_of_a_link_to_the_root_removes_only_the_link() {
+    let fixture = Fixture::new(|media, _| {
+        fs::write(media.join("a.txt"), b"a").unwrap();
+        fs::create_dir(media.join("Sub")).unwrap();
+        symlink(".", media.join("rootlink")).unwrap();
+        symlink("..", media.join("Sub/up")).unwrap();
+    });
+    let media = fixture.media();
+
+    for link in ["rootlink", "Sub/up"] {
+        media.check_deletable(&rel(link)).unwrap();
+        media.delete(&rel(link)).unwrap();
+        assert!(
+            !exists_no_follow(&fixture.media_path().join(link)),
+            "{link}"
+        );
+    }
+    assert_eq!(fs::read(fixture.media_path().join("a.txt")).unwrap(), b"a");
+    assert!(fixture.media_path().join("Sub").is_dir());
+}
+
+#[test]
 fn delete_refuses_root_and_reserved() {
     let fixture = Fixture::new(|media, _| {
         fs::create_dir(media.join(STAGING_DIR)).unwrap();

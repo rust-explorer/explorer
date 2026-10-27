@@ -717,6 +717,33 @@ fn cross_volume_move_keeps_what_it_skipped() {
 }
 
 #[test]
+fn cross_volume_move_of_a_link_to_a_folder_removes_only_the_link() {
+    let fixture = Fixture::new(|media, _| {
+        write(&media.join("Real/a.txt"), b"a");
+        write(&media.join("Real/Sub/b.txt"), b"b");
+        symlink("Real", media.join("link")).unwrap();
+    });
+    let progress = Recorder::default();
+
+    move_entry(
+        fixture.media(),
+        "link",
+        fixture.documents(),
+        "",
+        ConflictPolicy::Fail,
+        &progress,
+    )
+    .unwrap();
+
+    let (media, documents) = (fixture.path("media"), fixture.path("documents"));
+    assert_eq!(names(&media), ["Real"]);
+    assert_eq!(fs::read(media.join("Real/a.txt")).unwrap(), b"a");
+    assert_eq!(fs::read(media.join("Real/Sub/b.txt")).unwrap(), b"b");
+    assert_eq!(fs::read(documents.join("link/a.txt")).unwrap(), b"a");
+    assert_eq!(fs::read(documents.join("link/Sub/b.txt")).unwrap(), b"b");
+}
+
+#[test]
 fn move_into_descendant_is_refused() {
     let fixture = Fixture::new(|media, _| {
         write(&media.join("A/sub/x.txt"), b"x");
