@@ -4,10 +4,10 @@ use dioxus::prelude::*;
 use dioxus_i18n::t;
 
 use crate::components::common::icons::{ArrowUpIcon, PlusIcon};
+use crate::components::common::{Menu, MenuItem};
 use crate::uploads::{Uploads, use_uploads};
 
 const READ_ONLY_ID: &str = "upload-read-only";
-const MENU_ITEM: &str = "block w-full rounded-md px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100 focus-visible:bg-slate-100 focus-visible:outline-none dark:text-slate-200 dark:hover:bg-slate-800 dark:focus-visible:bg-slate-800";
 
 #[derive(Clone, Copy, PartialEq)]
 enum Picker {
@@ -81,12 +81,12 @@ fn UploadMenu(floating: bool, read_only: bool, on_pick: EventHandler<Picker>) ->
     let (button_class, menu_class) = if floating {
         (
             "inline-flex size-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:bg-slate-400 dark:disabled:bg-slate-600",
-            "absolute bottom-full right-0 z-20 mb-2",
+            "absolute bottom-full right-0 mb-2",
         )
     } else {
         (
             "inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700",
-            "absolute right-0 top-full z-20 mt-2",
+            "absolute right-0 top-full mt-2",
         )
     };
     let read_only_text = t!("upload-read-only");
@@ -105,13 +105,7 @@ fn UploadMenu(floating: bool, read_only: bool, on_pick: EventHandler<Picker>) ->
     };
 
     rsx! {
-        div {
-            class: "relative",
-            onkeydown: move |event| {
-                if open() && event.key() == Key::Escape {
-                    close_and_refocus();
-                }
-            },
+        div { class: "relative",
             button {
                 r#type: "button",
                 class: button_class,
@@ -132,33 +126,12 @@ fn UploadMenu(floating: bool, read_only: bool, on_pick: EventHandler<Picker>) ->
                 }
             }
             if open() {
-                // Transparent backdrop: a click anywhere outside the menu closes it.
-                div {
-                    class: "fixed inset-0 z-10",
-                    onclick: move |_| open.set(false),
-                }
-                div {
+                Menu {
                     id: menu_id,
-                    role: "menu",
-                    class: "{menu_class} w-44 rounded-lg border border-slate-200 bg-white p-1 shadow-lg dark:border-slate-700 dark:bg-slate-900",
-                    button {
-                        r#type: "button",
-                        role: "menuitem",
-                        class: MENU_ITEM,
-                        // Focus moves into the menu so Escape reaches it in every browser.
-                        onmounted: move |event| async move {
-                            let _ = event.data().set_focus(true).await;
-                        },
-                        onclick: move |_| pick(Picker::Files),
-                        {t!("upload-files")}
-                    }
-                    button {
-                        r#type: "button",
-                        role: "menuitem",
-                        class: MENU_ITEM,
-                        onclick: move |_| pick(Picker::Folder),
-                        {t!("upload-folder")}
-                    }
+                    class: "{menu_class} z-20",
+                    on_close: move |()| close_and_refocus(),
+                    MenuItem { on_select: move |()| pick(Picker::Files), {t!("upload-files")} }
+                    MenuItem { on_select: move |()| pick(Picker::Folder), {t!("upload-folder")} }
                 }
             }
         }

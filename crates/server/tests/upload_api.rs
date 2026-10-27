@@ -16,7 +16,7 @@ use axum::response::Response;
 use common::client::{Client, json};
 use common::fake_oidc::FakeOidc;
 use explorer_server::http::router;
-use explorer_server::storage::UploadId;
+use explorer_server::storage::StagedId;
 use explorer_server::uploads::Uploads;
 use http_body_util::BodyExt;
 use serde_json::json;
@@ -102,8 +102,8 @@ fn clone_client(client: &Client) -> Client {
     }
 }
 
-fn id_of(location: &str) -> UploadId {
-    UploadId::parse(location.rsplit('/').next().unwrap()).unwrap()
+fn id_of(location: &str) -> StagedId {
+    StagedId::parse(location.rsplit('/').next().unwrap()).unwrap()
 }
 
 fn content(len: usize) -> Vec<u8> {

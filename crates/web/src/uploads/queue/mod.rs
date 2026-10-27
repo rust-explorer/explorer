@@ -3,15 +3,17 @@ mod item;
 
 use std::collections::{HashMap, HashSet};
 
-use shared::api::uploads::{ConflictPolicy, PendingUpload};
+use shared::api::conflict::ConflictPolicy;
+use shared::api::uploads::PendingUpload;
 
 use super::plan::BatchPlan;
 use super::{MAX_PARALLEL, REFRESH_EVERY_MS, retry_delay_ms};
 use crate::api::{self, ApiFailure};
+use crate::conflict::Decision;
 
 pub use effects::{Effect, Event};
-pub use item::{Decision, Item, ItemKey, Kind, Status};
-use item::{Phase, policy};
+use item::Phase;
+pub use item::{Item, ItemKey, Kind, Status};
 
 const ALREADY_EXISTS: &str = "already_exists";
 const UPLOAD_NOT_FOUND: &str = "upload_not_found";
@@ -213,7 +215,7 @@ impl Queue {
             .decisions
             .get(&self.items[index].batch)
             .copied()
-            .and_then(policy);
+            .and_then(Decision::policy);
         let item = &mut self.items[index];
         item.status = Status::Uploading;
         match (&item.kind, item.upload_url.clone()) {
@@ -307,7 +309,7 @@ impl Queue {
         };
         match (code, item.phase) {
             (ALREADY_EXISTS, Phase::Creating) if item.conflict == ConflictPolicy::Fail => {
-                match decision.map(policy) {
+                match decision.map(Decision::policy) {
                     Some(Some(conflict)) => {
                         item.conflict = conflict;
                         effects.push(item.create());
@@ -356,7 +358,7 @@ impl Queue {
             vec![index]
         };
         for target in targets {
-            match policy(decision) {
+            match decision.policy() {
                 Some(conflict) => {
                     let item = &mut self.items[target];
                     item.conflict = conflict;

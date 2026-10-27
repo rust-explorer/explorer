@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use axum::http::header::{HeaderMap, HeaderName, HeaderValue};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use shared::api::uploads::ConflictPolicy;
+use shared::api::conflict::ConflictPolicy;
 use shared::tus::{TUS_VERSION, decode_metadata};
 
 use crate::http::error::ApiError;

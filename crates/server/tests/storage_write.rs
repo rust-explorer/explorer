@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use explorer_server::storage::{
-    RelPath, STAGING_DIR, Staging, StorageError, UploadId, Volume, Volumes, WalkItem,
+    RelPath, STAGING_DIR, StagedId, Staging, StorageError, Volume, Volumes, WalkItem,
 };
-use shared::api::uploads::ConflictPolicy;
+use shared::api::conflict::ConflictPolicy;
 use tempfile::TempDir;
 
 struct Fixture {
@@ -42,8 +42,8 @@ fn write(path: &Path, contents: &[u8]) {
     fs::write(path, contents).unwrap();
 }
 
-fn stage(staging: &Staging, contents: &[u8]) -> UploadId {
-    let id = UploadId::random();
+fn stage(staging: &Staging, contents: &[u8]) -> StagedId {
+    let id = StagedId::random();
     let mut file = staging.create(&id).unwrap();
     file.write_all(contents).unwrap();
     id
@@ -164,7 +164,7 @@ fn commit_creates_folders_sets_mtime_and_empties_staging() {
     let modified = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
     let final_path = media
-        .commit_upload(
+        .commit_staged(
             &staging,
             &id,
             &rel("Films/2026/Dune.mkv"),
@@ -229,7 +229,7 @@ fn commit_keep_both_picks_next_free_name() {
     let id = stage(&staging, b"third");
 
     let final_path = media
-        .commit_upload(&staging, &id, &rel("a.txt"), ConflictPolicy::KeepBoth, None)
+        .commit_staged(&staging, &id, &rel("a.txt"), ConflictPolicy::KeepBoth, None)
         .unwrap();
 
     assert_eq!(final_path, rel("a (2).txt"));
@@ -247,7 +247,7 @@ fn commit_replace_overwrites_file() {
     let id = stage(&staging, b"new");
 
     let final_path = media
-        .commit_upload(
+        .commit_staged(
             &staging,
             &id,
             &rel("dir/a.txt"),
@@ -272,7 +272,7 @@ fn commit_replace_refuses_folder() {
     let staging = media.staging().unwrap();
     let id = stage(&staging, b"new");
 
-    let result = media.commit_upload(&staging, &id, &rel("folder"), ConflictPolicy::Replace, None);
+    let result = media.commit_staged(&staging, &id, &rel("folder"), ConflictPolicy::Replace, None);
 
     assert!(
         matches!(result, Err(StorageError::IsADirectory(ref p)) if *p == rel("folder")),
@@ -297,7 +297,7 @@ fn commit_fail_after_race_keeps_both() {
     write(&fixture.media_path().join("a.txt"), b"original");
 
     let final_path = media
-        .commit_upload(&staging, &id, &rel("a.txt"), ConflictPolicy::Fail, None)
+        .commit_staged(&staging, &id, &rel("a.txt"), ConflictPolicy::Fail, None)
         .unwrap();
 
     assert_eq!(final_path, rel("a (1).txt"));
@@ -369,7 +369,7 @@ fn commit_into_escaping_parent_is_outside_volume() {
             matches!(check, Err(StorageError::OutsideVolume(_))),
             "{check:?}"
         );
-        let result = media.commit_upload(&staging, &id, &rel("escape/x"), policy, None);
+        let result = media.commit_staged(&staging, &id, &rel("escape/x"), policy, None);
         assert!(
             matches!(result, Err(StorageError::OutsideVolume(_))),
             "{policy:?} {result:?}"
@@ -386,7 +386,7 @@ fn commit_to_root_is_a_directory() {
     let staging = media.staging().unwrap();
     let id = stage(&staging, b"x");
 
-    let result = media.commit_upload(
+    let result = media.commit_staged(
         &staging,
         &id,
         &RelPath::root(),
@@ -407,7 +407,7 @@ fn committed_file_mode_follows_the_umask() {
     let staging = media.staging().unwrap();
     let id = stage(&staging, b"x");
     media
-        .commit_upload(&staging, &id, &rel("a.txt"), ConflictPolicy::Fail, None)
+        .commit_staged(&staging, &id, &rel("a.txt"), ConflictPolicy::Fail, None)
         .unwrap();
 
     let reference = fixture.media_path().join("reference");
@@ -472,7 +472,7 @@ fn staging_is_unreachable_through_a_symlink_to_the_root() {
     let other = stage(&staging, b"other");
     not_found(
         media
-            .commit_upload(&staging, &other, &staged, ConflictPolicy::Replace, None)
+            .commit_staged(&staging, &other, &staged, ConflictPolicy::Replace, None)
             .map(drop),
     );
     assert_eq!(

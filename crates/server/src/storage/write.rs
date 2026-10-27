@@ -4,11 +4,11 @@ use std::time::SystemTime;
 use cap_std::fs::Dir;
 use rustix::fs::{Mode, OFlags, RenameFlags};
 use rustix::io::Errno;
-use shared::api::uploads::ConflictPolicy;
+use shared::api::conflict::ConflictPolicy;
 
 use super::path::STAGING_DIR;
 use super::read::fs_path;
-use super::{RelPath, Staging, StorageError, UploadId, Volume};
+use super::{RelPath, StagedId, Staging, StorageError, Volume};
 
 const KEEP_BOTH_MAX: u32 = 999;
 
@@ -115,10 +115,10 @@ impl Volume {
 
     /// Moves a staged upload to `dest`, creating its parent folders, and returns the path it
     /// ended up at, which differs from `dest` when another file took that name.
-    pub fn commit_upload(
+    pub fn commit_staged(
         &self,
         staging: &Staging,
-        id: &UploadId,
+        id: &StagedId,
         dest: &RelPath,
         conflict: ConflictPolicy,
         modified: Option<SystemTime>,

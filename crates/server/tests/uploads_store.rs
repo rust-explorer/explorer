@@ -2,9 +2,9 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use explorer_server::db;
-use explorer_server::storage::{RelPath, UploadId, Volumes};
+use explorer_server::storage::{RelPath, StagedId, Volumes};
 use explorer_server::uploads::{SweepReport, UPLOAD_TTL, UploadRecord, Uploads, sweep};
-use shared::api::uploads::ConflictPolicy;
+use shared::api::conflict::ConflictPolicy;
 
 const HOUR_MS: i64 = 3_600_000;
 
@@ -42,7 +42,7 @@ fn now_ms() -> i64 {
 
 fn record(user: &str, volume: &str, updated_at: i64) -> UploadRecord {
     UploadRecord {
-        id: UploadId::random(),
+        id: StagedId::random(),
         user_sub: user.to_owned(),
         volume: volume.to_owned(),
         path: RelPath::parse("Film.mkv").unwrap(),
@@ -55,13 +55,13 @@ fn record(user: &str, volume: &str, updated_at: i64) -> UploadRecord {
     }
 }
 
-fn stage(fx: &Fixture, volume: &str, id: &UploadId, age: Duration) {
+fn stage(fx: &Fixture, volume: &str, id: &StagedId, age: Duration) {
     let staging = fx.volumes.get(volume).unwrap().staging().unwrap();
     let file = staging.create(id).unwrap();
     file.set_modified(SystemTime::now() - age).unwrap();
 }
 
-fn staged(fx: &Fixture, volume: &str, id: &UploadId) -> bool {
+fn staged(fx: &Fixture, volume: &str, id: &StagedId) -> bool {
     let staging = fx.volumes.get(volume).unwrap().existing_staging().unwrap();
     staging.is_some_and(|s| s.len(id).unwrap().is_some())
 }
@@ -178,8 +178,8 @@ async fn sweep_removes_records_of_missing_volumes() {
 #[tokio::test]
 async fn sweep_removes_old_orphans_only() {
     let fx = fixture(&["media"]).await;
-    let old = UploadId::random();
-    let fresh = UploadId::random();
+    let old = StagedId::random();
+    let fresh = StagedId::random();
     stage(&fx, "media", &old, UPLOAD_TTL + Duration::from_secs(3600));
     stage(&fx, "media", &fresh, Duration::from_secs(3600));
 
@@ -235,8 +235,8 @@ async fn sweep_never_creates_staging_dirs() {
 #[tokio::test]
 async fn lock_is_exclusive_until_dropped() {
     let fx = fixture(&["media"]).await;
-    let id = UploadId::random();
-    let other = UploadId::random();
+    let id = StagedId::random();
+    let other = StagedId::random();
 
     let lock = fx.uploads.try_lock(&id).unwrap();
     assert!(fx.uploads.try_lock(&id).is_none());

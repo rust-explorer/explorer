@@ -1,7 +1,8 @@
-use shared::api::uploads::ConflictPolicy;
+use shared::api::conflict::ConflictPolicy;
 
-use super::{Decision, ItemKey};
+use super::ItemKey;
 use crate::api::ApiFailure;
+use crate::conflict::Decision;
 use crate::uploads::plan::FileSpec;
 
 #[derive(Debug, Clone, PartialEq)]

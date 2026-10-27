@@ -1,4 +1,4 @@
-use shared::api::uploads::ConflictPolicy;
+use shared::api::conflict::ConflictPolicy;
 
 use super::Effect;
 use crate::api::ApiFailure;
@@ -7,13 +7,6 @@ use crate::uploads::plan::FileSpec;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ItemKey(pub u64);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Decision {
-    Replace,
-    KeepBoth,
-    Cancel,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Status {
@@ -103,13 +96,5 @@ impl Item {
             offset,
             len: CHUNK_SIZE.min(self.size() - offset),
         }
-    }
-}
-
-pub(super) fn policy(decision: Decision) -> Option<ConflictPolicy> {
-    match decision {
-        Decision::Replace => Some(ConflictPolicy::Replace),
-        Decision::KeepBoth => Some(ConflictPolicy::KeepBoth),
-        Decision::Cancel => None,
     }
 }

@@ -16,7 +16,7 @@ use crate::auth::{Action, CurrentUser};
 use crate::http::AppState;
 use crate::http::access::{authorize, blocking_volume};
 use crate::http::error::ApiError;
-use crate::storage::{InvalidPath, RelPath, UploadId};
+use crate::storage::{InvalidPath, RelPath, StagedId};
 use crate::uploads::UploadRecord;
 
 pub(super) async fn discover(_user: CurrentUser) -> Response {
@@ -62,7 +62,7 @@ pub(super) async fn create(
         ..
     } = creation;
 
-    let id = UploadId::random();
+    let id = StagedId::random();
     blocking_volume(&state.volumes, &volume, {
         let (id, path) = (id.clone(), path.clone());
         move |vol| {
@@ -281,7 +281,7 @@ async fn find(
 ) -> Result<UploadRecord, ApiError> {
     let id = id
         .ok()
-        .and_then(|Path(id)| UploadId::parse(&id))
+        .and_then(|Path(id)| StagedId::parse(&id))
         .ok_or_else(ApiError::upload_not_found)?;
     state
         .uploads

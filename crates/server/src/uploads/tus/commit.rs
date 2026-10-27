@@ -131,7 +131,7 @@ pub(super) async fn commit(
                     )),
                 });
             }
-            vol.commit_upload(&staging, &id, &path, conflict, modified)
+            vol.commit_staged(&staging, &id, &path, conflict, modified)
         }
     })
     .await?

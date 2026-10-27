@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::task::JoinHandle;
 
 use super::store::{UPLOAD_TTL, Uploads};
-use crate::storage::{UploadId, Volumes};
+use crate::storage::{StagedId, Volumes};
 
 pub const SWEEP_INTERVAL: Duration = Duration::from_secs(3600);
 
@@ -95,7 +95,7 @@ pub async fn sweep(uploads: &Uploads, volumes: &Arc<Volumes>, now: SystemTime) -
 async fn remove_staged(
     volumes: &Arc<Volumes>,
     volume: &str,
-    id: &UploadId,
+    id: &StagedId,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let volumes = Arc::clone(volumes);
     let volume = volume.to_owned();
@@ -112,7 +112,7 @@ async fn remove_staged(
     .await?
 }
 
-async fn old_staged(volumes: &Arc<Volumes>, volume: &str, cutoff: SystemTime) -> Vec<UploadId> {
+async fn old_staged(volumes: &Arc<Volumes>, volume: &str, cutoff: SystemTime) -> Vec<StagedId> {
     let volumes = Arc::clone(volumes);
     let name = volume.to_owned();
     let listed = tokio::task::spawn_blocking(move || {
@@ -129,7 +129,7 @@ async fn old_staged(volumes: &Arc<Volumes>, volume: &str, cutoff: SystemTime) ->
         Ok(Ok(files)) => files
             .into_iter()
             .filter(|(_, modified)| *modified < cutoff)
-            .filter_map(|(name, _)| UploadId::parse(&name))
+            .filter_map(|(name, _)| StagedId::parse(&name))
             .collect(),
         Ok(Err(err)) => {
             tracing::warn!(error = %err, volume, "cannot list staged uploads");

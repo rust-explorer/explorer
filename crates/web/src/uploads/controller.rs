@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use dioxus::prelude::*;
 
-use super::{Decision, Event, ItemKey, Queue, SpeedMeter};
+use super::{Event, ItemKey, Queue, SpeedMeter};
+use crate::conflict::Decision;
 use crate::format::now_ms;
 
 /// Bumped by `Effect::Refresh`; the browse page's volume and listing resources read it.
