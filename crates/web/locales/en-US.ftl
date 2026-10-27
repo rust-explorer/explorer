@@ -149,10 +149,20 @@ task-skipped =
         [one] 1 item couldn't be copied and was skipped
        *[other] { $count } items couldn't be copied and were skipped
     }
+task-skipped-move =
+    { $count ->
+        [one] 1 item couldn't be moved and stayed in place
+       *[other] { $count } items couldn't be moved and stayed in place
+    }
 copy-title =
     { $count ->
         [one] Copy { $name } to…
        *[other] Copy { $count } items to…
+    }
+move-title =
+    { $count ->
+        [one] Move { $name } to…
+       *[other] Move { $count } items to…
     }
 picker-volume = Volume
 picker-choose-volume = Choose a volume
@@ -160,3 +170,4 @@ picker-location = Destination folder
 picker-folders = Folders
 picker-empty = No folders here
 picker-copy-here = Copy here
+picker-move-here = Move here

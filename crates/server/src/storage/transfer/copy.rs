@@ -151,7 +151,7 @@ impl Files<'_> {
         modified: Option<SystemTime>,
     ) -> Result<RelPath, StorageError> {
         let id = StagedId::random();
-        let placed = self.stream(from, &id).and_then(|()| {
+        let placed = self.stream(from, to, &id).and_then(|()| {
             if self.progress.is_cancelled() {
                 return Err(StorageError::Cancelled);
             }
@@ -176,7 +176,7 @@ impl Files<'_> {
         }
     }
 
-    fn stream(&self, from: &RelPath, id: &StagedId) -> Result<(), StorageError> {
+    fn stream(&self, from: &RelPath, to: &RelPath, id: &StagedId) -> Result<(), StorageError> {
         let read_err = |err| StorageError::from_io(from, err).on_source();
         let (mut input, _) = self
             .source
@@ -194,7 +194,7 @@ impl Files<'_> {
             }
             output
                 .write_all(&chunk[..n])
-                .map_err(|err| StorageError::from_io(&RelPath::root(), err))?;
+                .map_err(|err| StorageError::from_io(to, err))?;
             self.progress.add_bytes(n as u64);
         }
     }

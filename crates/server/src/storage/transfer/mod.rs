@@ -1,8 +1,10 @@
 mod check;
 mod copy;
+mod r#move;
 
 pub use check::check_transfer;
 pub use copy::copy;
+pub use r#move::{MoveOutcome, check_move, move_entry};
 
 use super::{EntryKind, RelPath, StorageError, Volume, WalkItem};
 
@@ -15,6 +17,8 @@ pub trait TransferProgress {
     fn add_bytes(&self, n: u64);
     fn add_file(&self);
     fn skip(&self);
+    /// A move that found it has to copy made this plan itself.
+    fn planned(&self, _plan: &TransferPlan) {}
 }
 
 /// What copying an entry involves: a file is one item, a folder its walk, without the folder

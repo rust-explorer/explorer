@@ -219,11 +219,11 @@ async fn delete_checks_run_before_the_task_exists() {
         (
             json!({
                 "op": "move",
-                "source": {"volume": "media", "path": "a.txt"},
+                "source": {"volume": "media", "path": ""},
                 "dest_dir": {"volume": "documents", "path": ""},
             }),
-            StatusCode::NOT_FOUND,
-            "not_found",
+            StatusCode::BAD_REQUEST,
+            "invalid_path",
         ),
     ] {
         let res = post_task(&mut s.client, body.clone()).await;
@@ -454,5 +454,105 @@ async fn copy_to_read_only_volume_is_403() {
     .await;
     error_of(res, StatusCode::FORBIDDEN, "read_only_volume").await;
     assert!(!s.data.join("documents/a.txt").exists());
+    assert!(list(&mut s.client).await.is_empty());
+}
+
+fn move_spec(source: (&str, &str), dest_dir: (&str, &str)) -> serde_json::Value {
+    let mut spec = copy_spec(source, dest_dir);
+    spec["op"] = json!("move");
+    spec
+}
+
+#[tokio::test]
+async fn move_task_same_volume() {
+    let mut s = setup().await;
+    let media = s.data.join("media");
+    fs::create_dir_all(media.join("Sub")).unwrap();
+    fs::write(media.join("a.txt"), b"abc").unwrap();
+    fs::write(media.join("Sub/b.txt"), b"b").unwrap();
+
+    let res = post_task(
+        &mut s.client,
+        move_spec(("media", "a.txt"), ("media", "Sub")),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+    let info: TaskInfo = json(res).await;
+    let done = finished(&mut s.client, &info.id).await;
+
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    assert_eq!((done.files_done, done.files_total), (1, Some(1)));
+    assert_eq!(done.final_path.as_deref(), Some("Sub/a.txt"));
+    assert_eq!(fs::read(media.join("Sub/a.txt")).unwrap(), b"abc");
+    assert!(!media.join("a.txt").exists());
+
+    let res = post_task(
+        &mut s.client,
+        move_spec(("media", "Sub/b.txt"), ("media", "Sub")),
+    )
+    .await;
+    error_of(res, StatusCode::BAD_REQUEST, "invalid_destination").await;
+    let res = post_task(&mut s.client, move_spec(("media", "Sub"), ("media", "Sub"))).await;
+    error_of(res, StatusCode::BAD_REQUEST, "invalid_destination").await;
+    fs::write(media.join("b.txt"), b"other").unwrap();
+    let res = post_task(
+        &mut s.client,
+        move_spec(("media", "Sub/b.txt"), ("media", "")),
+    )
+    .await;
+    let error = error_of(res, StatusCode::CONFLICT, "already_exists").await;
+    assert_eq!(
+        error.details,
+        Some(json!({"volume": "media", "path": "b.txt", "kind": "file"}))
+    );
+    assert_eq!(list(&mut s.client).await.len(), 1);
+}
+
+#[tokio::test]
+async fn move_task_across_volumes() {
+    let mut s = setup().await;
+    let media = s.data.join("media");
+    fs::create_dir_all(media.join("F/Sub")).unwrap();
+    fs::write(media.join("F/a.txt"), b"abc").unwrap();
+    fs::write(media.join("F/Sub/b.txt"), b"defg").unwrap();
+
+    let res = post_task(&mut s.client, move_spec(("media", "F"), ("documents", ""))).await;
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+    let info: TaskInfo = json(res).await;
+    let done = finished(&mut s.client, &info.id).await;
+
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    assert_eq!((done.files_done, done.files_total), (2, Some(2)));
+    assert_eq!((done.bytes_done, done.bytes_total), (7, Some(7)));
+    assert_eq!(done.final_path.as_deref(), Some("F"));
+    let moved = s.data.join("documents/F");
+    assert_eq!(fs::read(moved.join("a.txt")).unwrap(), b"abc");
+    assert_eq!(fs::read(moved.join("Sub/b.txt")).unwrap(), b"defg");
+    assert!(!media.join("F").exists());
+}
+
+#[tokio::test]
+async fn move_from_read_only_volume_is_403() {
+    if rustix::process::geteuid().is_root() {
+        return;
+    }
+    let mut s = setup_with(None, |data| {
+        fs::write(data.join("documents/a.txt"), b"a").unwrap();
+        fs::write(data.join("media/b.txt"), b"b").unwrap();
+        fs::set_permissions(data.join("documents"), fs::Permissions::from_mode(0o555)).unwrap();
+    })
+    .await;
+    fs::set_permissions(s.data.join("documents"), fs::Permissions::from_mode(0o755)).unwrap();
+
+    for spec in [
+        move_spec(("documents", "a.txt"), ("media", "")),
+        move_spec(("media", "b.txt"), ("documents", "")),
+    ] {
+        let res = post_task(&mut s.client, spec).await;
+        error_of(res, StatusCode::FORBIDDEN, "read_only_volume").await;
+    }
+    assert!(s.data.join("documents/a.txt").is_file());
+    assert!(s.data.join("media/b.txt").is_file());
+    assert!(!s.data.join("media/a.txt").exists());
     assert!(list(&mut s.client).await.is_empty());
 }

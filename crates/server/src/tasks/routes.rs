@@ -6,7 +6,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use shared::api::tasks::{TaskInfo, TaskSpec};
 
-use super::copy::Copy;
+use super::transfer::{TransferKind, TransferTask};
 use super::{Progress, TaskError};
 use crate::auth::{Action, CurrentUser};
 use crate::http::AppState;
@@ -55,24 +55,33 @@ pub async fn create(
             source,
             dest_dir,
             conflict,
+        }
+        | TaskSpec::Move {
+            source,
+            dest_dir,
+            conflict,
         } => {
-            let copy = Copy {
-                path: authorize(&state, &user, &source.volume, &source.path, Action::Read)?,
-                dir: authorize(
+            let (kind, source_access) = match &spec {
+                TaskSpec::Move { .. } => (TransferKind::Move, Action::Write),
+                _ => (TransferKind::Copy, Action::Read),
+            };
+            let task = TransferTask {
+                kind,
+                path: authorize(&state, &user, &source.volume, &source.path, source_access)?,
+                dest_dir: authorize(
                     &state,
                     &user,
                     &dest_dir.volume,
                     &dest_dir.path,
                     Action::Write,
                 )?,
-                source: source.clone(),
-                dest_dir: dest_dir.clone(),
+                source: source.volume.clone(),
+                dest: dest_dir.volume.clone(),
                 conflict: *conflict,
             };
-            copy.check(&state.volumes).await?;
-            Box::new(copy.op(Arc::clone(&state.volumes), user.sub.clone()))
+            task.check(&state.volumes).await?;
+            Box::new(task.op(Arc::clone(&state.volumes), user.sub.clone()))
         }
-        TaskSpec::Move { .. } => return Err(ApiError::not_found()),
     };
     let request_id = Some(request_id(&headers).to_owned()).filter(|id| !id.is_empty());
     let info = state.tasks.submit(&user.sub, spec, request_id, op);

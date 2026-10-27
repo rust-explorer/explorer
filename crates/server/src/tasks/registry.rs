@@ -54,6 +54,15 @@ impl Progress {
         let _ = self.final_path.set(path);
     }
 
+    /// Files and bytes done, and entries skipped, so far.
+    pub fn counts(&self) -> (u64, u64, u64) {
+        (
+            self.files_done.load(Ordering::Relaxed),
+            self.bytes_done.load(Ordering::Relaxed),
+            self.skipped.load(Ordering::Relaxed),
+        )
+    }
+
     fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
     }
@@ -74,6 +83,11 @@ impl crate::storage::TransferProgress for Progress {
 
     fn skip(&self) {
         Progress::skip(self);
+    }
+
+    fn planned(&self, plan: &crate::storage::TransferPlan) {
+        self.set_files_total(plan.files);
+        self.set_bytes_total(plan.bytes);
     }
 }
 

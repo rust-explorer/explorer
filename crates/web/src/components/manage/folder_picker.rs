@@ -24,7 +24,8 @@ struct Shown {
 }
 
 /// Picks a destination folder, starting at `volume`/`path`, among the folders of the writable
-/// volumes. The `blocked` folders of `blocked_volume` and everything under them can't be picked.
+/// volumes. The `blocked` folders of `blocked_volume` and everything under them can't be picked,
+/// nor, with `start_unpickable`, the starting folder itself (a move to where the entries are).
 #[component]
 pub fn FolderPicker(
     title: String,
@@ -33,10 +34,15 @@ pub fn FolderPicker(
     path: Segments,
     blocked_volume: String,
     blocked: Vec<String>,
+    #[props(default)] start_unpickable: bool,
     on_pick: EventHandler<(String, String)>,
     on_close: EventHandler<()>,
     #[props(default)] return_focus: Option<FocusTarget>,
 ) -> Element {
+    let start = use_hook(|| Shown {
+        volume: volume.clone(),
+        path: path.clone(),
+    });
     let mut shown = use_signal(|| Shown { volume, path });
     let volumes = use_resource(|| api::get_json::<Vec<VolumeInfo>>("/api/volumes"));
     let url = use_memo(move || {
@@ -61,7 +67,9 @@ pub fn FolderPicker(
     };
     let current = shown();
     let blocked_here = |path: &str| is_blocked(&current.volume, path, &blocked_volume, &blocked);
-    let can_pick = writable.contains(&current.volume) && !blocked_here(&current.path.joined());
+    let can_pick = writable.contains(&current.volume)
+        && !blocked_here(&current.path.joined())
+        && !(start_unpickable && current == start);
     let folders = match &*listing.read() {
         Some((fetched, result)) if *fetched == url() => Some(result.clone()),
         _ => None,

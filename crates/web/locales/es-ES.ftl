@@ -153,10 +153,20 @@ task-skipped =
         [one] 1 elemento no se pudo copiar y se omitió
        *[other] { $count } elementos no se pudieron copiar y se omitieron
     }
+task-skipped-move =
+    { $count ->
+        [one] 1 elemento no se pudo mover y se quedó en su sitio
+       *[other] { $count } elementos no se pudieron mover y se quedaron en su sitio
+    }
 copy-title =
     { $count ->
         [one] Copiar { $name } a…
        *[other] Copiar { $count } elementos a…
+    }
+move-title =
+    { $count ->
+        [one] Mover { $name } a…
+       *[other] Mover { $count } elementos a…
     }
 picker-volume = Volumen
 picker-choose-volume = Elige un volumen
@@ -164,3 +174,4 @@ picker-location = Carpeta de destino
 picker-folders = Carpetas
 picker-empty = No hay carpetas aquí
 picker-copy-here = Copiar aquí
+picker-move-here = Mover aquí

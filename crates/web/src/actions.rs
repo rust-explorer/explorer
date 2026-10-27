@@ -15,7 +15,7 @@ impl RowAction {
     pub fn available(self) -> bool {
         matches!(
             self,
-            Self::Download | Self::Rename | Self::CopyTo | Self::Delete
+            Self::Download | Self::Rename | Self::MoveTo | Self::CopyTo | Self::Delete
         )
     }
 }
@@ -71,10 +71,9 @@ mod tests {
 
     #[test]
     fn only_built_actions_are_available() {
-        for action in [Download, Rename, CopyTo, Delete] {
+        for action in [Download, Rename, MoveTo, CopyTo, Delete] {
             assert!(action.available(), "{action:?}");
         }
-        assert!(!MoveTo.available());
     }
 
     #[test]

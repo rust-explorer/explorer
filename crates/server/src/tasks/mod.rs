@@ -1,7 +1,7 @@
-mod copy;
 mod registry;
 mod routes;
 mod run;
+mod transfer;
 
 use std::time::Duration;
 

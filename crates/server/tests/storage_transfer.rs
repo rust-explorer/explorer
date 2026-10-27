@@ -5,7 +5,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
 use explorer_server::storage::{
-    self, COPY_CHUNK, RelPath, STAGING_DIR, StorageError, TransferProgress, Volume, Volumes,
+    self, COPY_CHUNK, MoveOutcome, RelPath, STAGING_DIR, StorageError, TransferProgress, Volume,
+    Volumes,
 };
 use shared::api::conflict::ConflictPolicy;
 use tempfile::TempDir;
@@ -542,5 +543,392 @@ fn cancelled_copy_leaves_nothing() {
     let documents = fixture.path("documents");
     assert!(!documents.join("big.bin").exists());
     assert!(!documents.join("F").exists());
+    assert!(fixture.staged("documents").is_empty());
+}
+
+/// Checks and moves `path` of `source` into `dest_dir` of `dest`, planning only when needed.
+fn move_entry(
+    source: &Volume,
+    path: &str,
+    dest: &Volume,
+    dest_dir: &str,
+    conflict: ConflictPolicy,
+    progress: &Recorder,
+) -> Result<MoveOutcome, StorageError> {
+    let (path, dest_dir) = (rel(path), rel(dest_dir));
+    storage::check_move(source, &path, dest, &dest_dir, conflict)?;
+    storage::move_entry(source, &path, dest, &dest_dir, conflict, None, progress)
+}
+
+fn names(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+fn mkfifo(path: &Path) {
+    let status = std::process::Command::new("mkfifo")
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+#[test]
+fn move_file_same_volume() {
+    let fixture = Fixture::new(|media, _| {
+        write(&media.join("a.txt"), b"hello");
+        fs::create_dir(media.join("Sub")).unwrap();
+    });
+    let progress = Recorder::default();
+
+    let outcome = move_entry(
+        fixture.media(),
+        "a.txt",
+        fixture.media(),
+        "Sub",
+        ConflictPolicy::Fail,
+        &progress,
+    )
+    .unwrap();
+
+    assert!(matches!(outcome, MoveOutcome::Renamed(path) if path == rel("Sub/a.txt")));
+    let media = fixture.path("media");
+    assert_eq!(fs::read(media.join("Sub/a.txt")).unwrap(), b"hello");
+    assert!(!media.join("a.txt").exists());
+    assert_eq!(progress.bytes.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn move_folder_same_volume_keeps_symlinks() {
+    let fixture = Fixture::new(|media, _| {
+        write(&media.join("F/real.txt"), b"real");
+        symlink("real.txt", media.join("F/link")).unwrap();
+        fs::create_dir(media.join("Sub")).unwrap();
+    });
+
+    let outcome = move_entry(
+        fixture.media(),
+        "F",
+        fixture.media(),
+        "Sub",
+        ConflictPolicy::Fail,
+        &Recorder::default(),
+    )
+    .unwrap();
+
+    assert!(matches!(outcome, MoveOutcome::Renamed(path) if path == rel("Sub/F")));
+    let moved = fixture.path("media").join("Sub/F");
+    assert!(
+        fs::symlink_metadata(moved.join("link"))
+            .unwrap()
+            .is_symlink()
+    );
+    assert_eq!(
+        fs::read_link(moved.join("link")).unwrap(),
+        Path::new("real.txt")
+    );
+    assert_eq!(fs::read(moved.join("link")).unwrap(), b"real");
+    assert!(!fixture.path("media").join("F").exists());
+}
+
+#[test]
+fn move_across_volumes() {
+    let fixture = Fixture::new(|media, documents| {
+        write(&media.join("a.txt"), b"abc");
+        write(&media.join("F/x.txt"), b"x");
+        write(&media.join("F/Deep/inner/y.txt"), b"yy");
+        fs::create_dir(media.join("F/Empty")).unwrap();
+        fs::create_dir(documents.join("Backup")).unwrap();
+    });
+    let progress = Recorder::default();
+
+    let file = move_entry(
+        fixture.media(),
+        "a.txt",
+        fixture.documents(),
+        "Backup",
+        ConflictPolicy::Fail,
+        &progress,
+    )
+    .unwrap();
+    let tree = move_entry(
+        fixture.media(),
+        "F",
+        fixture.documents(),
+        "Backup",
+        ConflictPolicy::Fail,
+        &progress,
+    )
+    .unwrap();
+
+    assert!(
+        matches!(file, MoveOutcome::Copied { final_path } if final_path == rel("Backup/a.txt"))
+    );
+    assert!(matches!(tree, MoveOutcome::Copied { final_path } if final_path == rel("Backup/F")));
+    let backup = fixture.path("documents").join("Backup");
+    assert_eq!(fs::read(backup.join("a.txt")).unwrap(), b"abc");
+    assert_eq!(fs::read(backup.join("F/x.txt")).unwrap(), b"x");
+    assert_eq!(fs::read(backup.join("F/Deep/inner/y.txt")).unwrap(), b"yy");
+    assert!(backup.join("F/Empty").is_dir());
+    assert_eq!(names(&fixture.path("media")), Vec::<String>::new());
+    assert_eq!(progress.files.load(Ordering::Relaxed), 3);
+    assert_eq!(progress.bytes.load(Ordering::Relaxed), 6);
+    assert!(fixture.staged("documents").is_empty());
+}
+
+#[test]
+fn cross_volume_move_keeps_what_it_skipped() {
+    let fixture = Fixture::new(|media, _| {
+        write(&media.join("F/a.txt"), b"a");
+        write(&media.join("F/Gone/b.txt"), b"b");
+        write(&media.join("Other/c.txt"), b"c");
+        fs::create_dir_all(media.join("F/Keep/Deep")).unwrap();
+        symlink("../../Other", media.join("F/Keep/dirlink")).unwrap();
+        mkfifo(&media.join("F/Keep/Deep/fifo"));
+    });
+    let progress = Recorder::default();
+
+    move_entry(
+        fixture.media(),
+        "F",
+        fixture.documents(),
+        "",
+        ConflictPolicy::Fail,
+        &progress,
+    )
+    .unwrap();
+
+    let (media, documents) = (fixture.path("media"), fixture.path("documents"));
+    assert_eq!(names(&media.join("F")), ["Keep"]);
+    assert_eq!(names(&media.join("F/Keep")), ["Deep", "dirlink"]);
+    assert_eq!(names(&media.join("F/Keep/Deep")), ["fifo"]);
+    assert_eq!(fs::read(media.join("Other/c.txt")).unwrap(), b"c");
+    assert_eq!(fs::read(documents.join("F/a.txt")).unwrap(), b"a");
+    assert_eq!(fs::read(documents.join("F/Gone/b.txt")).unwrap(), b"b");
+    assert!(documents.join("F/Keep/Deep").is_dir());
+    assert!(names(&documents.join("F/Keep/Deep")).is_empty());
+    assert_eq!(progress.skipped.load(Ordering::Relaxed), 2);
+}
+
+#[test]
+fn move_into_descendant_is_refused() {
+    let fixture = Fixture::new(|media, _| {
+        write(&media.join("A/sub/x.txt"), b"x");
+        symlink("A", media.join("link")).unwrap();
+    });
+    for dest_dir in ["A", "A/sub", "link/sub"] {
+        let checked = storage::check_move(
+            fixture.media(),
+            &rel("A"),
+            fixture.media(),
+            &rel(dest_dir),
+            ConflictPolicy::KeepBoth,
+        );
+        assert!(
+            matches!(checked, Err(StorageError::InvalidDestination(_))),
+            "{dest_dir}: {checked:?}"
+        );
+    }
+
+    let unchecked = storage::move_entry(
+        fixture.media(),
+        &rel("A"),
+        fixture.media(),
+        &rel("A/sub"),
+        ConflictPolicy::KeepBoth,
+        None,
+        &Recorder::default(),
+    );
+    assert!(
+        matches!(unchecked, Err(StorageError::InvalidDestination(_))),
+        "{unchecked:?}"
+    );
+    assert!(fixture.path("media").join("A/sub/x.txt").is_file());
+}
+
+#[test]
+fn move_to_own_folder_is_refused() {
+    let fixture = Fixture::new(|media, _| {
+        write(&media.join("Sub/a.txt"), b"a");
+        write(&media.join("top.txt"), b"t");
+        symlink("Sub", media.join("link")).unwrap();
+    });
+    for (path, dest_dir) in [("Sub/a.txt", "Sub"), ("Sub/a.txt", "link"), ("top.txt", "")] {
+        for conflict in [ConflictPolicy::Fail, ConflictPolicy::KeepBoth] {
+            let checked = storage::check_move(
+                fixture.media(),
+                &rel(path),
+                fixture.media(),
+                &rel(dest_dir),
+                conflict,
+            );
+            assert!(
+                matches!(checked, Err(StorageError::InvalidDestination(_))),
+                "{path} → {dest_dir}: {checked:?}"
+            );
+        }
+    }
+    storage::check_move(
+        fixture.media(),
+        &rel("Sub/a.txt"),
+        fixture.media(),
+        &RelPath::root(),
+        ConflictPolicy::Fail,
+    )
+    .unwrap();
+}
+
+#[test]
+fn move_keep_both() {
+    let fixture = Fixture::new(|media, documents| {
+        write(&media.join("a.txt"), b"mine");
+        write(&media.join("F/x.txt"), b"x");
+        write(&media.join("Sub/a.txt"), b"theirs");
+        write(&documents.join("F/y.txt"), b"y");
+    });
+
+    let same = move_entry(
+        fixture.media(),
+        "a.txt",
+        fixture.media(),
+        "Sub",
+        ConflictPolicy::KeepBoth,
+        &Recorder::default(),
+    )
+    .unwrap();
+    let across = move_entry(
+        fixture.media(),
+        "F",
+        fixture.documents(),
+        "",
+        ConflictPolicy::KeepBoth,
+        &Recorder::default(),
+    )
+    .unwrap();
+
+    assert!(matches!(same, MoveOutcome::Renamed(path) if path == rel("Sub/a (1).txt")));
+    assert!(matches!(across, MoveOutcome::Copied { final_path } if final_path == rel("F (1)")));
+    let (media, documents) = (fixture.path("media"), fixture.path("documents"));
+    assert_eq!(fs::read(media.join("Sub/a.txt")).unwrap(), b"theirs");
+    assert_eq!(fs::read(media.join("Sub/a (1).txt")).unwrap(), b"mine");
+    assert_eq!(fs::read(documents.join("F (1)/x.txt")).unwrap(), b"x");
+    assert!(documents.join("F/y.txt").is_file());
+    assert!(!media.join("a.txt").exists() && !media.join("F").exists());
+}
+
+#[test]
+fn move_replace_file() {
+    let fixture = Fixture::new(|media, documents| {
+        write(&media.join("a.txt"), b"new");
+        write(&media.join("b.txt"), b"new b");
+        write(&media.join("Sub/a.txt"), b"old");
+        write(&documents.join("b.txt"), b"old b");
+    });
+
+    let same = move_entry(
+        fixture.media(),
+        "a.txt",
+        fixture.media(),
+        "Sub",
+        ConflictPolicy::Replace,
+        &Recorder::default(),
+    )
+    .unwrap();
+    let across = move_entry(
+        fixture.media(),
+        "b.txt",
+        fixture.documents(),
+        "",
+        ConflictPolicy::Replace,
+        &Recorder::default(),
+    )
+    .unwrap();
+
+    assert!(matches!(same, MoveOutcome::Renamed(path) if path == rel("Sub/a.txt")));
+    assert!(matches!(across, MoveOutcome::Copied { final_path } if final_path == rel("b.txt")));
+    let media = fixture.path("media");
+    assert_eq!(fs::read(media.join("Sub/a.txt")).unwrap(), b"new");
+    assert_eq!(
+        fs::read(fixture.path("documents").join("b.txt")).unwrap(),
+        b"new b"
+    );
+    assert_eq!(names(&media), ["Sub"]);
+}
+
+#[test]
+fn move_target_appearing_after_check_is_kept() {
+    let fixture = Fixture::new(|media, _| {
+        write(&media.join("a.txt"), b"mine");
+        write(&media.join("F/x.txt"), b"x");
+        fs::create_dir(media.join("Sub")).unwrap();
+    });
+    for path in ["a.txt", "F"] {
+        storage::check_move(
+            fixture.media(),
+            &rel(path),
+            fixture.media(),
+            &rel("Sub"),
+            ConflictPolicy::Fail,
+        )
+        .unwrap();
+    }
+    let sub = fixture.path("media").join("Sub");
+    write(&sub.join("a.txt"), b"theirs");
+    write(&sub.join("F/theirs.txt"), b"theirs");
+
+    for (path, expected) in [("a.txt", "Sub/a (1).txt"), ("F", "Sub/F (1)")] {
+        let outcome = storage::move_entry(
+            fixture.media(),
+            &rel(path),
+            fixture.media(),
+            &rel("Sub"),
+            ConflictPolicy::Fail,
+            None,
+            &Recorder::default(),
+        )
+        .unwrap();
+        assert!(
+            matches!(&outcome, MoveOutcome::Renamed(placed) if *placed == rel(expected)),
+            "{outcome:?}"
+        );
+    }
+
+    assert_eq!(fs::read(sub.join("a.txt")).unwrap(), b"theirs");
+    assert_eq!(fs::read(sub.join("a (1).txt")).unwrap(), b"mine");
+    assert_eq!(names(&sub.join("F")), ["theirs.txt"]);
+    assert_eq!(fs::read(sub.join("F (1)/x.txt")).unwrap(), b"x");
+}
+
+#[test]
+fn cancelled_cross_volume_move_keeps_the_source() {
+    let fixture = Fixture::new(|media, _| {
+        for name in ["a", "b", "c"] {
+            write(&media.join(format!("F/{name}.txt")), name.as_bytes());
+        }
+    });
+    let progress = Recorder {
+        cancel_after_files: Some(2),
+        ..Recorder::default()
+    };
+
+    let result = move_entry(
+        fixture.media(),
+        "F",
+        fixture.documents(),
+        "",
+        ConflictPolicy::Fail,
+        &progress,
+    );
+
+    assert!(matches!(result, Err(StorageError::Cancelled)), "{result:?}");
+    assert_eq!(
+        names(&fixture.path("media").join("F")),
+        ["a.txt", "b.txt", "c.txt"]
+    );
+    assert!(!fixture.path("documents").join("F").exists());
     assert!(fixture.staged("documents").is_empty());
 }

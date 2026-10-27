@@ -102,7 +102,7 @@ fn TaskStatus(task: Task) -> Element {
             p { class: NOTE, {t!("task-cancelled")} }
         },
         (TaskState::Done, Some(info)) if info.skipped > 0 => rsx! {
-            p { class: NOTE, {t!("task-skipped", count: info.skipped)} }
+            p { class: NOTE, {skipped_note(&task.spec, info.skipped)} }
         },
         (TaskState::Done, _) => rsx! {},
     }
@@ -118,6 +118,14 @@ fn label(spec: &TaskSpec) -> String {
         TaskSpec::Move { dest_dir, .. } => {
             t!("task-moving", name: name, folder: entry_name(dest_dir).to_owned())
         }
+    }
+}
+
+/// A move leaves what it skipped in the source.
+fn skipped_note(spec: &TaskSpec, count: u64) -> String {
+    match spec {
+        TaskSpec::Move { .. } => t!("task-skipped-move", count: count),
+        _ => t!("task-skipped", count: count),
     }
 }
 
