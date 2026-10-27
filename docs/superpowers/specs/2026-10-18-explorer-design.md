@@ -171,7 +171,8 @@ reflects §9 behaviour.
 Desktop:
 
 - **Top bar**: app name, search field (filename search in the current volume, recursive),
-  list/grid toggle, "New folder", "Upload", avatar menu (user name, logout).
+  list/grid toggle, refresh (reloads the current listing), "New folder", "Upload", avatar
+  menu (user name, logout).
 - **Sidebar**: list of volumes; favorites; free space of the current volume.
 - **Main area**: breadcrumb; file table with columns Name / Size / Modified, sortable;
   checkboxes for multi-select. Folders first, then files.
@@ -179,6 +180,12 @@ Desktop:
 - **Context menu** (right click) on an item: download, rename, move to…, copy to…,
   delete (with confirmation). "Preview" appears only once preview is implemented.
 - **Grid view**: tiles with thumbnails for common image formats, icons for everything else.
+- **Space usage** (added 2026-10-27 at the owner's request): from a folder (or a volume
+  root), "Analyse space" scans the tree in the background and opens a screen listing its
+  content biggest first, each line with a proportional bar, its size and its share of the
+  parent. Clicking a sub-folder goes down into it without a new scan; the screen shows when
+  the scan ran and can run it again. A folder's row menu also offers "Calculate size",
+  which runs the same scan and shows the result in the Size column.
 - **Drag & drop** files from the desktop anywhere on the listing to upload them into the
   current folder.
 - **Floating uploads panel**: per-file progress, speed, cancel; collapsible; the user can
@@ -259,6 +266,12 @@ Errors are shown as non-blocking toasts with the server's message. Destructive a
 - **Search**: case-insensitive filename substring search, recursive within the current
   volume, with a result cap and cancellation; results show their parent path.
 - **Favorites**: stored per user (OIDC `sub`) in SQLite.
+- **Space usage scans** (added 2026-10-27) run as background tasks like move/copy, with
+  progress and cancel in the same panel. They walk the tree with the server's own confined
+  filesystem code in parallel (no external `du`, which the image does not ship), and
+  follow `du`'s rules: allocated size (`st_blocks × 512`), hard links counted once, no
+  crossing into other filesystems, symlinks not followed. Results are kept in memory for a
+  limited time, per user; a restart loses them.
 
 ## 10. Configuration and installation
 
@@ -337,7 +350,7 @@ supports the Docker healthcheck.
 5. **Manage** — new folder, rename, move, copy, delete, multi-select, context menu,
    background tasks for long operations.
 6. **Polish** — grid view with thumbnails, search, favorites, dark mode, mobile layout
-   refinements, read-only volume UX.
+   refinements, read-only volume UX; refresh and space usage (added 2026-10-27).
 7. **v1.0 release** — docs complete, tagged image on GHCR.
 
 Each milestone ends with something usable; no UI element from a later milestone appears
