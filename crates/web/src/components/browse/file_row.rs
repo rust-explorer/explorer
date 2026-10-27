@@ -132,7 +132,6 @@ pub fn FileRow(
         div {
             role: "row",
             aria_rowindex: index + 2,
-            aria_selected: selected,
             aria_disabled: if disabled { "true" },
             title: if disabled { t!("entry-unavailable") },
             class: "group {COLUMNS} h-11 border-b border-slate-100 {row_class} dark:border-slate-800",

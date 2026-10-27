@@ -8,9 +8,12 @@ use crate::api;
 use crate::components::common::icons::{CloseIcon, CopyIcon, DownloadIcon, MoveIcon, TrashIcon};
 use crate::routes::Segments;
 
+/// Name, size, modified and actions.
+const COLUMNS_AFTER_SELECT: usize = 4;
 const BUTTON: &str = "inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-indigo-600 dark:text-slate-200 dark:hover:bg-slate-800";
 
-/// Replaces the column headers while entries are selected.
+/// Replaces the column headers while entries are selected, as one header spanning the
+/// columns after the select-all box.
 #[component]
 pub fn SelectionBar(
     count: usize,
@@ -19,7 +22,10 @@ pub fn SelectionBar(
     on_clear: EventHandler<()>,
 ) -> Element {
     rsx! {
-        div { class: "flex min-w-0 flex-1 items-center gap-1 pr-2",
+        div {
+            role: "columnheader",
+            aria_colspan: COLUMNS_AFTER_SELECT,
+            class: "flex min-w-0 flex-1 items-center gap-1 pr-2",
             span { role: "status", class: "mr-2 truncate text-sm font-medium text-slate-900 dark:text-white",
                 {t!("selection-count", count: count)}
             }
