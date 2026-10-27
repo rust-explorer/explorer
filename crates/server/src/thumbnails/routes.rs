@@ -71,16 +71,10 @@ pub async fn thumbnail(
     let thumbnail = if let Some(thumbnail) = cached {
         thumbnail
     } else {
-        let _permit = state.thumbnails.permit().await;
         let thumbnails = Arc::clone(&state.thumbnails);
-        let span = tracing::Span::current();
-        tokio::task::spawn_blocking(move || {
-            let _entered = span.enter();
-            generate(&thumbnails, &key, file)
-        })
-        .await
-        .map_err(ApiError::internal)?
-        .ok_or_else(ApiError::thumbnail_unavailable)?
+        bounded(&state.thumbnails, move || generate(&thumbnails, &key, file))
+            .await?
+            .ok_or_else(ApiError::thumbnail_unavailable)?
     };
     tracing::debug!(
         user = user.sub,
@@ -126,6 +120,23 @@ async fn lookup(thumbnails: &Arc<Thumbnails>, key: &str) -> Result<Option<Thumbn
     }))
 }
 
+/// Runs `work` on the blocking pool under a render permit. The permit moves into the task, so a
+/// request cancelled mid-render (a grid tile scrolled away) still holds it until the work ends.
+async fn bounded<T: Send + 'static>(
+    thumbnails: &Thumbnails,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, ApiError> {
+    let permit = thumbnails.permit().await;
+    let span = tracing::Span::current();
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let _entered = span.enter();
+        work()
+    })
+    .await
+    .map_err(ApiError::internal)
+}
+
 /// Renders and caches the thumbnail, unless a concurrent request already did. `None` when the
 /// file can't be decoded.
 fn generate(thumbnails: &Thumbnails, key: &str, file: std::fs::File) -> Option<Thumbnail> {
@@ -161,6 +172,7 @@ fn etag_matches(if_none_match: &str, key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::thumbnails::THUMB_CONCURRENCY;
 
     #[test]
     fn if_none_match_lists_and_weak_tags() {
@@ -171,5 +183,33 @@ mod tests {
         assert!(!etag_matches("\"abcd\"", "abc"));
         assert!(!etag_matches("abc", "abc"));
         assert!(!etag_matches("", "abc"));
+    }
+
+    #[tokio::test]
+    async fn cancelled_request_keeps_its_permit_until_the_render_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let thumbnails = Thumbnails::new(dir.path().to_owned()).unwrap();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let mut request = Box::pin(bounded(&thumbnails, move || {
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        }));
+        tokio::select! {
+            _ = &mut request => panic!("the render was released early"),
+            started = started_rx => started.unwrap(),
+        }
+        drop(request);
+        assert_eq!(thumbnails.available_permits(), THUMB_CONCURRENCY - 1);
+
+        release_tx.send(()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while thumbnails.available_permits() < THUMB_CONCURRENCY {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the permit was never returned"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
     }
 }

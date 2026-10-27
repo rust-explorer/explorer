@@ -1,11 +1,11 @@
 use std::fs::File;
-use std::io::{BufReader, Cursor};
+use std::io::{self, BufReader, Cursor, Read, Seek, SeekFrom};
 
 use image::codecs::jpeg::JpegEncoder;
 use image::metadata::Orientation;
 use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader, Limits};
 
-use super::{MAX_DECODE_ALLOC, MAX_PIXELS_SIDE, THUMB_SIZE};
+use super::{MAX_DECODE_ALLOC, MAX_PIXELS_SIDE, MAX_SOURCE_BYTES, THUMB_SIZE};
 
 const JPEG_QUALITY: u8 = 80;
 
@@ -28,10 +28,20 @@ pub enum RenderError {
     Image(#[from] image::ImageError),
 }
 
-/// Decodes `file` within the limits, applies its EXIF orientation and shrinks it to fit
-/// [`THUMB_SIZE`]. Images with an alpha channel become PNG, the others JPEG.
+/// Decodes `file` within the limits, shrinks it to fit [`THUMB_SIZE`] and applies its EXIF
+/// orientation. Images with an alpha channel become PNG, the others JPEG. At most
+/// [`MAX_SOURCE_BYTES`] are read, even if the file grew since it was checked.
 pub fn render(file: File) -> Result<Thumbnail, RenderError> {
-    let mut reader = ImageReader::new(BufReader::new(file)).with_guessed_format()?;
+    render_capped(file, MAX_SOURCE_BYTES)
+}
+
+fn render_capped(file: File, max_bytes: u64) -> Result<Thumbnail, RenderError> {
+    let source = Capped {
+        inner: file,
+        position: 0,
+        limit: max_bytes,
+    };
+    let mut reader = ImageReader::new(BufReader::new(source)).with_guessed_format()?;
     if !reader.format().is_some_and(|format| {
         matches!(
             format,
@@ -52,13 +62,15 @@ pub fn render(file: File) -> Result<Thumbnail, RenderError> {
     }
     // A broken EXIF block only costs the orientation.
     let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
-    let mut image = DynamicImage::from_decoder(decoder)?;
-    image.apply_orientation(orientation);
-    let image = if image.width() > THUMB_SIZE || image.height() > THUMB_SIZE {
+    let image = DynamicImage::from_decoder(decoder)?;
+    // Shrinking first keeps a rotation from copying the full-size image. The bounds are square,
+    // so they fit both before and after a 90° turn.
+    let mut image = if image.width() > THUMB_SIZE || image.height() > THUMB_SIZE {
         image.thumbnail(THUMB_SIZE, THUMB_SIZE)
     } else {
         image
     };
+    image.apply_orientation(orientation);
 
     let mut bytes = Vec::new();
     if image.color().has_alpha() {
@@ -75,6 +87,30 @@ pub fn render(file: File) -> Result<Thumbnail, RenderError> {
             bytes,
             content_type: "image/jpeg",
         })
+    }
+}
+
+/// A seekable reader that ends at `limit`, as `Read::take` would if it could seek.
+struct Capped<R> {
+    inner: R,
+    position: u64,
+    limit: u64,
+}
+
+impl<R: Read> Read for Capped<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let left = self.limit.saturating_sub(self.position);
+        let len = usize::try_from(left).map_or(buf.len(), |left| left.min(buf.len()));
+        let read = self.inner.read(&mut buf[..len])?;
+        self.position += read as u64;
+        Ok(read)
+    }
+}
+
+impl<R: Seek> Seek for Capped<R> {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.position = self.inner.seek(pos)?;
+        Ok(self.position)
     }
 }
 
@@ -218,6 +254,42 @@ mod tests {
             matches!(&err, RenderError::Image(image::ImageError::Limits(_))),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn reads_stop_at_the_cap() {
+        let mut capped = Capped {
+            inner: Cursor::new(vec![7u8; 100]),
+            position: 0,
+            limit: 10,
+        };
+        let mut all = Vec::new();
+        capped.read_to_end(&mut all).unwrap();
+        assert_eq!(all.len(), 10);
+        capped.seek(SeekFrom::Start(4)).unwrap();
+        all.clear();
+        capped.read_to_end(&mut all).unwrap();
+        assert_eq!(all.len(), 6);
+        capped.seek(SeekFrom::Start(50)).unwrap();
+        assert_eq!(capped.read(&mut [0; 8]).unwrap(), 0);
+    }
+
+    #[test]
+    fn file_grown_past_the_cap_is_cut() {
+        let source = jpeg(400, 200);
+        let scan = source.windows(2).position(|w| w == [0xFF, 0xDA]).unwrap();
+        assert!(render_capped(file_with(&source), source.len() as u64).is_ok());
+        assert!(render_capped(file_with(&source), scan as u64).is_err());
+    }
+
+    #[test]
+    fn rotated_large_image_is_shrunk_then_turned() {
+        let source = jpeg(2000, 1000);
+        let mut bytes = source[..2].to_vec();
+        bytes.extend_from_slice(&exif_orientation_6());
+        bytes.extend_from_slice(&source[2..]);
+        let thumbnail = render(file_with(&bytes)).unwrap();
+        assert_eq!(decoded(&thumbnail).dimensions(), (160, 320));
     }
 
     #[test]

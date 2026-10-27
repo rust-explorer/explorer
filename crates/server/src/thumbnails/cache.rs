@@ -2,11 +2,12 @@ use std::fmt::Write as _;
 use std::fs::{self, File};
 use std::io::{self, ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rand::Rng as _;
 use sha2::{Digest, Sha256};
-use tokio::sync::{Semaphore, SemaphorePermit};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use super::{THUMB_CONCURRENCY, THUMB_MAX_AGE, THUMB_VERSION, Thumbnail};
 
@@ -17,7 +18,7 @@ const FORMATS: [(&str, &str); 2] = [("jpg", "image/jpeg"), ("png", "image/png")]
 /// The on-disk thumbnail cache, and the permits that bound concurrent renders.
 pub struct Thumbnails {
     dir: PathBuf,
-    permits: Semaphore,
+    permits: Arc<Semaphore>,
 }
 
 impl Thumbnails {
@@ -26,7 +27,7 @@ impl Thumbnails {
         fs::create_dir_all(&dir)?;
         Ok(Self {
             dir,
-            permits: Semaphore::new(THUMB_CONCURRENCY),
+            permits: Arc::new(Semaphore::new(THUMB_CONCURRENCY)),
         })
     }
 
@@ -36,8 +37,14 @@ impl Thumbnails {
     }
 
     /// Waits for a render slot; `None` only if the semaphore were closed, which never happens.
-    pub async fn permit(&self) -> Option<SemaphorePermit<'_>> {
-        self.permits.acquire().await.ok()
+    /// The permit is owned so it can move into the blocking task that renders.
+    pub async fn permit(&self) -> Option<OwnedSemaphorePermit> {
+        Arc::clone(&self.permits).acquire_owned().await.ok()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn available_permits(&self) -> usize {
+        self.permits.available_permits()
     }
 
     /// The cached thumbnail for `key`, if any.

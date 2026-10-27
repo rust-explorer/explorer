@@ -44,6 +44,7 @@ pub fn routes() -> Router<AppState> {
 }
 
 /// Sweeps the cache now, then every [`SWEEP_INTERVAL`].
+#[must_use = "dropping the handle detaches the task"]
 pub fn spawn_sweeper(thumbnails: Arc<Thumbnails>) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(SWEEP_INTERVAL);
