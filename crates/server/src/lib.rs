@@ -3,6 +3,7 @@ pub mod browse;
 pub mod config;
 pub mod db;
 pub mod downloads;
+pub mod favorites;
 pub mod healthcheck;
 pub mod http;
 pub mod storage;

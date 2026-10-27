@@ -226,3 +226,19 @@ pub fn RefreshIcon(#[props(default = "size-5".to_owned())] class: String) -> Ele
         }
     }
 }
+
+#[component]
+pub fn StarIcon(
+    #[props(default = "size-5".to_owned())] class: String,
+    #[props(default)] filled: bool,
+) -> Element {
+    let fill = if filled { "currentColor" } else { "none" };
+    rsx! {
+        Icon { class,
+            path {
+                fill,
+                d: "m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z",
+            }
+        }
+    }
+}

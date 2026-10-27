@@ -171,3 +171,20 @@ async fn upload_folder_and_task_writes_need_same_origin() {
     let res = send(req).await;
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn favorite_writes_need_same_origin() {
+    let targets = [
+        ("PUT", "/api/favorites"),
+        ("DELETE", "/api/favorites?volume=media&path=Films"),
+    ];
+    for origin in [None, Some("https://evil.example")] {
+        for (method, uri) in targets {
+            let mut builder = Request::builder().method(method).uri(uri);
+            if let Some(origin) = origin {
+                builder = builder.header(header::ORIGIN, origin);
+            }
+            assert_rejected(builder.body(Body::empty()).unwrap()).await;
+        }
+    }
+}

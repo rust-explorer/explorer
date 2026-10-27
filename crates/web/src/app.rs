@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 
 use crate::components::{ActivityPanel, TaskConflictDialog, UploadConflictDialog};
+use crate::favorites::use_favorites_provider;
 use crate::i18n::use_init_i18n_from_browser;
 use crate::listing::Sort;
 use crate::revision::use_revision_provider;
@@ -23,6 +24,7 @@ pub fn App() -> Element {
     // Uploads and tasks keep running, and their panel stays, across navigation.
     let uploads = use_uploads_provider();
     use_tasks_provider();
+    use_favorites_provider();
     // One conflict prompt at a time: the uploads' first.
     let upload_waiting = use_memo(move || uploads.queue().read().pending_decision().is_some());
 

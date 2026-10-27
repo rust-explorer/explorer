@@ -53,6 +53,16 @@ pub fn rename_url(volume: &str) -> String {
     format!("/api/volumes/{}/rename", encode_component(volume))
 }
 
+pub const FAVORITES_URL: &str = "/api/favorites";
+
+pub fn favorite_url(volume: &str, path: &str) -> String {
+    format!(
+        "{FAVORITES_URL}?volume={}&path={}",
+        encode_component(volume),
+        encode_component(path)
+    )
+}
+
 pub const TASKS_URL: &str = "/api/tasks";
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -100,5 +110,9 @@ mod tests {
         );
         assert_eq!(rename_url("my files"), "/api/volumes/my%20files/rename");
         assert_eq!(task_url("0a/b"), "/api/tasks/0a%2Fb");
+        assert_eq!(
+            favorite_url("my files", "é/x"),
+            "/api/favorites?volume=my%20files&path=%C3%A9%2Fx"
+        );
     }
 }

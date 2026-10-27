@@ -3,6 +3,7 @@ mod api;
 mod app;
 mod components;
 mod conflict;
+mod favorites;
 mod format;
 mod i18n;
 mod listing;

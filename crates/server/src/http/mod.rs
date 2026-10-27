@@ -26,6 +26,7 @@ use crate::auth::{self, csrf, session};
 use crate::browse;
 use crate::config::Config;
 use crate::downloads;
+use crate::favorites::{self, Favorites};
 use crate::storage::Volumes;
 use crate::tasks::{self, Tasks};
 use crate::uploads::{self, Uploads};
@@ -38,6 +39,7 @@ pub struct AppState {
     pub volumes: Arc<Volumes>,
     pub uploads: Arc<Uploads>,
     pub tasks: Arc<Tasks>,
+    pub favorites: Arc<Favorites>,
 }
 
 pub async fn router(state: AppState) -> Result<Router, sqlx::Error> {
@@ -74,6 +76,7 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
                 .merge(browse::routes())
                 .merge(uploads::routes())
                 .merge(tasks::routes())
+                .merge(favorites::routes())
                 .fallback(not_found),
         )
         .nest("/auth", auth::routes().fallback(not_found))

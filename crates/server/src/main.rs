@@ -8,6 +8,7 @@ use explorer_server::auth::oidc::Oidc;
 use explorer_server::auth::session;
 use explorer_server::config::Config;
 use explorer_server::db;
+use explorer_server::favorites::Favorites;
 use explorer_server::healthcheck;
 use explorer_server::http::static_files::check_bundle;
 use explorer_server::http::{AppState, router};
@@ -98,6 +99,7 @@ async fn main() -> ExitCode {
         volumes: Arc::clone(&volumes),
         uploads: Arc::clone(&upload_registry),
         tasks: Arc::new(Tasks::new()),
+        favorites: Arc::new(Favorites::new(pool.clone())),
     };
     tracing::info!("no background task to recover: tasks live in memory only");
     let app = match router(state).await {

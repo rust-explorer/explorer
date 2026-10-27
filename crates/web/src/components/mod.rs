@@ -1,5 +1,6 @@
 mod browse;
 mod common;
+pub(crate) mod favorites;
 mod layout;
 mod manage;
 mod tasks;

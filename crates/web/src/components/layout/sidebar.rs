@@ -4,6 +4,7 @@ use dioxus_i18n::t;
 use shared::api::browse::{Space, VolumeInfo};
 
 use crate::components::common::icons::{LockIcon, VolumeIcon};
+use crate::components::favorites::FavoritesList;
 use crate::format::format_size;
 use crate::routes::{Route, Segments};
 
@@ -37,6 +38,7 @@ pub fn Sidebar(volumes: Vec<VolumeInfo>, current: String) -> Element {
                 }
             }
         }
+        FavoritesList {}
         if let Some(space) = space {
             FreeSpace { volume: current, space }
         }

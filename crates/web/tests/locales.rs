@@ -102,6 +102,7 @@ fn every_api_error_code_has_a_message() {
         "cross_device",
         "invalid_destination",
         "task_not_found",
+        "favorites_full",
     ]
     .iter()
     .map(|code| format!("error-{code}"))

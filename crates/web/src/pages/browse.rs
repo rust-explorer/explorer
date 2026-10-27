@@ -10,6 +10,7 @@ use crate::components::{
     Breadcrumb, DropZone, ErrorPanel, FileTable, NewFolderButton, RefreshButton, Shell, Sidebar,
     UploadButton,
 };
+use crate::favorites::use_favorites_sync;
 use crate::revision::Revision;
 use crate::routes::{Segment, Segments};
 use crate::selection::Selection;
@@ -17,6 +18,7 @@ use crate::selection::Selection;
 #[component]
 pub fn Browse(volume: Segment, path: Segments) -> Element {
     let Revision(revision) = use_context();
+    use_favorites_sync();
     let mut me = use_resource(|| api::get_json::<Me>("/api/me"));
     let mut volumes = use_resource(move || {
         revision();
