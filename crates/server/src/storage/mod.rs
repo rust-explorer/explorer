@@ -3,6 +3,7 @@ mod error;
 mod path;
 mod read;
 mod rename;
+mod search;
 mod staging;
 mod transfer;
 mod volumes;
@@ -11,6 +12,7 @@ mod write;
 pub use error::StorageError;
 pub use path::{InvalidPath, RelPath, STAGING_DIR};
 pub use read::{EntryKind, EntryMeta, Space, WalkItem};
+pub use search::{SEARCH_LIMIT, SearchHit, SearchOutcome};
 pub use staging::{StagedId, Staging};
 pub use transfer::{
     COPY_CHUNK, MoveOutcome, TransferPlan, TransferProgress, check_move, check_transfer, copy,

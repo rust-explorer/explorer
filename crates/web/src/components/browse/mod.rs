@@ -8,5 +8,6 @@ mod selection_bar;
 mod virtual_list;
 
 pub use drop_zone::DropZone;
+pub use file_row::EntryIcon;
 pub use file_table::FileTable;
 pub use refresh_button::RefreshButton;

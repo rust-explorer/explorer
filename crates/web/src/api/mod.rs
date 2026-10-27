@@ -7,7 +7,7 @@ mod urls;
 
 pub use urls::{
     FAVORITES_URL, download_url, encode_component, entries_url, favorite_url, folders_url,
-    rename_url, upload_url, zip_selection_url, zip_url,
+    rename_url, search_url, upload_url, zip_selection_url, zip_url,
 };
 #[cfg_attr(not(target_arch = "wasm32"), allow(unused_imports))]
 pub use urls::{TASKS_URL, task_url};
@@ -46,6 +46,40 @@ pub async fn sign_out() -> Result<(), ApiFailure> {
 #[cfg(target_arch = "wasm32")]
 pub async fn get_json<T: DeserializeOwned>(path: &str) -> Result<T, ApiFailure> {
     send(gloo_net::http::Request::get(path)).await
+}
+
+/// Like [`get_json`]; aborting through `signal` makes it fail with [`ApiFailure::Network`].
+#[cfg(target_arch = "wasm32")]
+pub async fn get_json_abortable<T: DeserializeOwned>(
+    path: &str,
+    signal: &AbortSignal,
+) -> Result<T, ApiFailure> {
+    send(gloo_net::http::Request::get(path).abort_signal(Some(signal))).await
+}
+
+/// Aborts the requests made with its signal when dropped.
+#[cfg(target_arch = "wasm32")]
+pub struct AbortGuard(web_sys::AbortController);
+
+#[cfg(target_arch = "wasm32")]
+pub use web_sys::AbortSignal;
+
+#[cfg(target_arch = "wasm32")]
+impl AbortGuard {
+    pub fn new() -> Self {
+        Self(web_sys::AbortController::new().expect("AbortController is available"))
+    }
+
+    pub fn signal(&self) -> AbortSignal {
+        self.0.signal()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for AbortGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -155,6 +189,32 @@ pub fn navigate(url: &str) {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_json<T: DeserializeOwned>(_: &str) -> std::future::Ready<Result<T, ApiFailure>> {
+    std::future::ready(Err(ApiFailure::Network))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub struct AbortSignal;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub struct AbortGuard;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl AbortGuard {
+    pub fn new() -> Self {
+        Self
+    }
+
+    #[expect(clippy::unused_self, reason = "mirrors the wasm guard")]
+    pub fn signal(&self) -> AbortSignal {
+        AbortSignal
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn get_json_abortable<T: DeserializeOwned>(
+    _: &str,
+    _: &AbortSignal,
+) -> std::future::Ready<Result<T, ApiFailure>> {
     std::future::ready(Err(ApiFailure::Network))
 }
 

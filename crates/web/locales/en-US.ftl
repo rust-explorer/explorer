@@ -177,3 +177,14 @@ picker-empty = No folders here
 picker-copy-here = Copy here
 picker-move-here = Move here
 refresh = Refresh
+search-placeholder = Search in { $volume }
+search-open = Search
+search-close = Close search
+search-searching = Searching…
+search-results =
+    { $count ->
+        [one] 1 result for “{ $query }” in { $volume }
+       *[other] { $count } results for “{ $query }” in { $volume }
+    }
+search-empty = No result for “{ $query }” in { $volume }
+search-truncated = Showing the first { $count }, refine your search.

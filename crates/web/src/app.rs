@@ -6,6 +6,7 @@ use crate::i18n::use_init_i18n_from_browser;
 use crate::listing::Sort;
 use crate::revision::use_revision_provider;
 use crate::routes::Route;
+use crate::search::use_search_provider;
 use crate::tasks::use_tasks_provider;
 use crate::uploads::use_uploads_provider;
 
@@ -21,6 +22,7 @@ pub fn App() -> Element {
     // App-wide so the chosen sort survives navigation.
     use_context_provider(|| Signal::new(Sort::default()));
     use_revision_provider();
+    use_search_provider();
     // Uploads and tasks keep running, and their panel stays, across navigation.
     let uploads = use_uploads_provider();
     use_tasks_provider();

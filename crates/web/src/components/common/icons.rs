@@ -242,3 +242,21 @@ pub fn StarIcon(
         }
     }
 }
+
+#[component]
+pub fn SearchIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15ZM16 16l5 5" }
+        }
+    }
+}
+
+#[component]
+pub fn ArrowLeftIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M19 12H5M11 6l-6 6 6 6" }
+        }
+    }
+}

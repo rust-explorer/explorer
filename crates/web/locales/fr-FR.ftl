@@ -181,3 +181,14 @@ picker-empty = Aucun dossier ici
 picker-copy-here = Copier ici
 picker-move-here = Déplacer ici
 refresh = Actualiser
+search-placeholder = Rechercher dans { $volume }
+search-open = Rechercher
+search-close = Fermer la recherche
+search-searching = Recherche en cours…
+search-results =
+    { $count ->
+        [one] 1 résultat pour « { $query } » dans { $volume }
+       *[other] { $count } résultats pour « { $query } » dans { $volume }
+    }
+search-empty = Aucun résultat pour « { $query } » dans { $volume }
+search-truncated = Affichage des { $count } premiers, affinez votre recherche.

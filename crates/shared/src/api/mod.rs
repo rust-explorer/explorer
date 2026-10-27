@@ -4,5 +4,6 @@ pub mod conflict;
 pub mod error;
 pub mod favorites;
 pub mod health;
+pub mod search;
 pub mod tasks;
 pub mod uploads;

@@ -7,12 +7,13 @@ use shared::api::browse::{Listing, VolumeInfo};
 
 use crate::api;
 use crate::components::{
-    Breadcrumb, DropZone, ErrorPanel, FileTable, NewFolderButton, RefreshButton, Shell, Sidebar,
-    UploadButton,
+    Breadcrumb, DropZone, ErrorPanel, FileTable, NewFolderButton, RefreshButton, SearchField,
+    SearchResults, Shell, Sidebar, UploadButton,
 };
 use crate::favorites::use_favorites_sync;
 use crate::revision::Revision;
 use crate::routes::{Segment, Segments};
+use crate::search::{SearchQuery, effective_query};
 use crate::selection::Selection;
 
 #[component]
@@ -34,9 +35,11 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
     }));
 
     let mut selection = use_signal(Selection::default);
+    let SearchQuery(mut query) = use_context();
     use_effect(use_reactive!(|url| {
         let _ = url;
         selection.write().clear();
+        query.set(String::new());
     }));
 
     let user = match me.read().clone() {
@@ -69,6 +72,10 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
         }
     });
 
+    let search = rsx! {
+        SearchField { key: "{url}", volume: volume.as_str().to_owned() }
+    };
+
     let sidebar = match volumes.read().clone() {
         Some(Ok(volumes)) => rsx! {
             Sidebar { volumes, current: volume.as_str().to_owned() }
@@ -89,7 +96,14 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
 
     let ready = *listing.state().read() == UseResourceState::Ready;
     let current = current_result(listing.read().as_ref(), &url, ready);
+    let searching = effective_query(&query.read()).map(ToOwned::to_owned);
     let content = match current {
+        _ if searching.is_some() => rsx! {
+            SearchResults {
+                volume: volume.as_str().to_owned(),
+                query: searching.clone().unwrap_or_default(),
+            }
+        },
         Some(Ok(entries)) => rsx! {
             FileTable {
                 volume: volume.clone(),
@@ -110,7 +124,7 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
     };
 
     rsx! {
-        Shell { user, sidebar, actions,
+        Shell { user, sidebar, actions, search,
             DropZone { volume: volume.as_str().to_owned(), path: path.joined(), read_only,
                 Breadcrumb { volume: volume.clone(), path: path.clone() }
                 {content}

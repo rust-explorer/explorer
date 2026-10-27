@@ -204,7 +204,7 @@ pub fn FileRow(
 }
 
 #[component]
-fn EntryIcon(kind: EntryKind, name: String) -> Element {
+pub fn EntryIcon(kind: EntryKind, name: String) -> Element {
     const CLASS: &str = "size-5 shrink-0";
     const FILE: &str = "size-5 shrink-0 text-slate-400 dark:text-slate-500";
     match kind {

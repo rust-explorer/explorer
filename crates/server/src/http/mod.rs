@@ -27,6 +27,7 @@ use crate::browse;
 use crate::config::Config;
 use crate::downloads;
 use crate::favorites::{self, Favorites};
+use crate::search;
 use crate::storage::Volumes;
 use crate::tasks::{self, Tasks};
 use crate::uploads::{self, Uploads};
@@ -77,6 +78,7 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
                 .merge(uploads::routes())
                 .merge(tasks::routes())
                 .merge(favorites::routes())
+                .merge(search::routes())
                 .fallback(not_found),
         )
         .nest("/auth", auth::routes().fallback(not_found))

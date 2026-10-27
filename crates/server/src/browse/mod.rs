@@ -1,5 +1,7 @@
 mod routes;
 
+pub(crate) use routes::epoch_millis;
+
 use axum::Router;
 use axum::routing::{get, post};
 

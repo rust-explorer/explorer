@@ -378,3 +378,122 @@ fn upward_symlink_inside_volume_is_followed() {
 
     assert_eq!(find(&entries, "up").kind, EntryKind::Dir);
 }
+
+mod search {
+    use std::sync::atomic::AtomicBool;
+    use std::time::{Duration, Instant};
+
+    use super::*;
+    use explorer_server::storage::SearchOutcome;
+
+    fn far() -> Instant {
+        Instant::now() + Duration::from_secs(60)
+    }
+
+    fn run(volume: &Volume, needle: &str, limit: usize) -> SearchOutcome {
+        volume
+            .search(needle, limit, far(), &AtomicBool::new(false))
+            .unwrap()
+    }
+
+    fn paths(outcome: &SearchOutcome) -> Vec<&str> {
+        outcome.hits.iter().map(|h| h.path.as_str()).collect()
+    }
+
+    #[test]
+    fn search_matches_case_insensitively() {
+        let fixture = Fixture::new(|media| {
+            write(&media.join("Photo.JPG"), b"x");
+            write(&media.join("Été.txt"), b"x");
+            write(&media.join("other.txt"), b"x");
+        });
+        assert_eq!(paths(&run(fixture.media(), "photo", 10)), ["Photo.JPG"]);
+        assert_eq!(paths(&run(fixture.media(), "été", 10)), ["Été.txt"]);
+        let hit = &run(fixture.media(), "photo", 10).hits[0];
+        assert_eq!((hit.kind, hit.size), (EntryKind::File, Some(1)));
+        assert!(hit.modified.is_some());
+    }
+
+    #[test]
+    fn search_is_breadth_first() {
+        let fixture = Fixture::new(|media| {
+            write(&media.join("a/b/c/needle-deep.txt"), b"x");
+            write(&media.join("a/needle-mid.txt"), b"x");
+            write(&media.join("z-needle-top.txt"), b"x");
+            fs::create_dir(media.join("needle-dir")).unwrap();
+        });
+        assert_eq!(
+            paths(&run(fixture.media(), "needle", 10)),
+            [
+                "needle-dir",
+                "z-needle-top.txt",
+                "a/needle-mid.txt",
+                "a/b/c/needle-deep.txt"
+            ]
+        );
+        assert_eq!(
+            run(fixture.media(), "needle", 10).hits[0].kind,
+            EntryKind::Dir
+        );
+    }
+
+    #[test]
+    fn search_stops_at_limit() {
+        let fixture = Fixture::new(|media| {
+            for i in 0..5 {
+                write(&media.join(format!("m{i}.txt")), b"x");
+            }
+        });
+        let outcome = run(fixture.media(), "m", 3);
+        assert_eq!(outcome.hits.len(), 3);
+        assert!(outcome.truncated);
+        let exact = run(fixture.media(), "m", 5);
+        assert_eq!(exact.hits.len(), 5);
+        assert!(!exact.truncated);
+    }
+
+    #[test]
+    fn search_hides_staging_and_skips_symlinked_dirs() {
+        let fixture = Fixture::new(|media| {
+            write(&media.join(".explorer-uploads/hit-staged"), b"x");
+            write(&media.join("real/hit-inside.txt"), b"x");
+            write(&media.join("target/hit-linked.txt"), b"x");
+            write(&media.join("hit-file.txt"), b"x");
+            symlink("target", media.join("hit-link")).unwrap();
+            symlink("hit-file.txt", media.join("hit-filelink")).unwrap();
+        });
+        let outcome = run(fixture.media(), "hit", 50);
+        let mut found = paths(&outcome);
+        found.sort_unstable();
+        assert_eq!(
+            found,
+            [
+                "hit-file.txt",
+                "hit-filelink",
+                "real/hit-inside.txt",
+                "target/hit-linked.txt"
+            ]
+        );
+    }
+
+    #[test]
+    fn search_stops_when_cancelled() {
+        let fixture = Fixture::new(|media| write(&media.join("a.txt"), b"x"));
+        let err = fixture
+            .media()
+            .search("a", 10, far(), &AtomicBool::new(true))
+            .unwrap_err();
+        assert!(matches!(err, StorageError::Cancelled));
+    }
+
+    #[test]
+    fn search_stops_at_deadline() {
+        let fixture = Fixture::new(|media| write(&media.join("a.txt"), b"x"));
+        let outcome = fixture
+            .media()
+            .search("a", 10, Instant::now(), &AtomicBool::new(false))
+            .unwrap();
+        assert!(outcome.truncated);
+        assert!(outcome.hits.is_empty());
+    }
+}

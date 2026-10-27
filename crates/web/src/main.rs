@@ -11,6 +11,7 @@ mod names;
 mod pages;
 mod revision;
 mod routes;
+mod search;
 mod selection;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 mod tasks;
