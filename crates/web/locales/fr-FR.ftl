@@ -147,3 +147,20 @@ delete-title =
     }
 delete-warning = Les dossiers sont supprimés avec tout leur contenu. Cette action est irréversible.
 delete-confirm = Supprimer
+task-deciding = Existe déjà : en attente de votre réponse
+task-skipped =
+    { $count ->
+        [one] 1 élément n'a pas pu être copié et a été ignoré
+       *[other] { $count } éléments n'ont pas pu être copiés et ont été ignorés
+    }
+copy-title =
+    { $count ->
+        [one] Copier { $name } vers…
+       *[other] Copier { $count } éléments vers…
+    }
+picker-volume = Volume
+picker-choose-volume = Choisissez un volume
+picker-location = Dossier de destination
+picker-folders = Dossiers
+picker-empty = Aucun dossier ici
+picker-copy-here = Copier ici

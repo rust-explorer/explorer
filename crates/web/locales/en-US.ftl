@@ -143,3 +143,20 @@ delete-title =
     }
 delete-warning = Folders are deleted with everything inside. This can't be undone.
 delete-confirm = Delete
+task-deciding = Already exists: waiting for your answer
+task-skipped =
+    { $count ->
+        [one] 1 item couldn't be copied and was skipped
+       *[other] { $count } items couldn't be copied and were skipped
+    }
+copy-title =
+    { $count ->
+        [one] Copy { $name } to…
+       *[other] Copy { $count } items to…
+    }
+picker-volume = Volume
+picker-choose-volume = Choose a volume
+picker-location = Destination folder
+picker-folders = Folders
+picker-empty = No folders here
+picker-copy-here = Copy here

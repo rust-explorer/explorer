@@ -29,6 +29,12 @@ pub enum StorageError {
     /// A rename into the entry itself or one of its descendants.
     #[error("invalid destination: {}", .0.as_str())]
     InvalidDestination(RelPath),
+    /// A copy or move noticed its task was cancelled; never an HTTP error.
+    #[error("cancelled")]
+    Cancelled,
+    /// A copy or move failed on its source volume rather than on its destination.
+    #[error("on the source: {0}")]
+    Source(Box<StorageError>),
     #[error(transparent)]
     InvalidPath(#[from] InvalidPath),
     #[error("i/o error on {}: {source}", .path.as_str())]
@@ -36,6 +42,13 @@ pub enum StorageError {
 }
 
 impl StorageError {
+    pub(super) fn on_source(self) -> Self {
+        match self {
+            Self::Source(_) | Self::Cancelled | Self::InvalidPath(_) => self,
+            other => Self::Source(Box::new(other)),
+        }
+    }
+
     pub(super) fn from_io(path: &RelPath, err: io::Error) -> Self {
         let path = path.clone();
         if is_escape(&err) {

@@ -47,10 +47,10 @@ struct Entry {
 
 /// A directory or file by device and inode, whatever path or symlink leads to it.
 #[derive(Clone, Copy, PartialEq, Eq)]
-struct Identity(u64, u64);
+pub(super) struct Identity(u64, u64);
 
 impl Identity {
-    fn of(meta: &Metadata) -> Self {
+    pub(super) fn of(meta: &Metadata) -> Self {
         Self(meta.dev(), meta.ino())
     }
 }
@@ -154,13 +154,19 @@ impl Volume {
     /// Depth-first, each directory before its contents. Entries that are neither files nor
     /// directories are skipped, and so are symlinks to directories, which also rules out cycles.
     pub fn walk(&self, dir: &RelPath) -> Result<Vec<WalkItem>, StorageError> {
+        self.walk_counting(dir).map(|(items, _)| items)
+    }
+
+    /// Like [`Volume::walk`], with the number of entries it skipped.
+    pub fn walk_counting(&self, dir: &RelPath) -> Result<(Vec<WalkItem>, u64), StorageError> {
         self.refuse_reserved(dir)?;
         let start = self.metadata(dir)?;
         if !start.is_dir() {
             return Err(StorageError::NotADirectory(dir.clone()));
         }
         let mut pending = Vec::new();
-        self.push_children(dir, &mut pending)?;
+        let mut skipped = 0;
+        self.push_children(dir, &mut pending, &mut skipped)?;
         let mut items = Vec::new();
         while let Some((path, meta)) = pending.pop() {
             if meta.kind == EntryKind::File {
@@ -170,11 +176,11 @@ impl Volume {
                     modified: meta.modified,
                 });
             } else {
-                self.push_children(&path, &mut pending)?;
+                self.push_children(&path, &mut pending, &mut skipped)?;
                 items.push(WalkItem::Dir(path));
             }
         }
-        Ok(items)
+        Ok((items, skipped))
     }
 
     /// What zipping the named entry `path` includes: a file alone, a folder and its walk.
@@ -319,6 +325,7 @@ impl Volume {
         &self,
         dir: &RelPath,
         pending: &mut Vec<(RelPath, EntryMeta)>,
+        skipped: &mut u64,
     ) -> Result<(), StorageError> {
         for entry in self.entries(dir)?.into_iter().rev() {
             match entry.path {
@@ -328,12 +335,15 @@ impl Volume {
                 {
                     pending.push((path, entry.meta));
                 }
-                _ => tracing::debug!(
-                    volume = self.name(),
-                    dir = dir.as_str(),
-                    name = entry.meta.name,
-                    "walk skips a symlinked directory or an entry that is neither a file nor a directory"
-                ),
+                _ => {
+                    *skipped += 1;
+                    tracing::debug!(
+                        volume = self.name(),
+                        dir = dir.as_str(),
+                        name = entry.meta.name,
+                        "walk skips a symlinked directory or an entry that is neither a file nor a directory"
+                    );
+                }
             }
         }
         Ok(())

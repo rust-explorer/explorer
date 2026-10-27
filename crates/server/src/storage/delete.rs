@@ -17,7 +17,7 @@ impl Volume {
 
     /// Fails as [`Volume::delete`] would before removing anything: the root, a reserved path or
     /// a missing entry.
-    pub fn check_source(&self, path: &RelPath) -> Result<(), StorageError> {
+    pub fn check_deletable(&self, path: &RelPath) -> Result<(), StorageError> {
         self.locate(path).map(drop)
     }
 

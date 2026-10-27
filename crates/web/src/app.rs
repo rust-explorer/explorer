@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::components::{ActivityPanel, ConflictDialog};
+use crate::components::{ActivityPanel, ConflictDialog, TaskConflictDialog};
 use crate::i18n::use_init_i18n_from_browser;
 use crate::listing::Sort;
 use crate::revision::use_revision_provider;
@@ -31,5 +31,6 @@ pub fn App() -> Element {
         Router::<Route> {}
         ActivityPanel {}
         ConflictDialog {}
+        TaskConflictDialog {}
     }
 }

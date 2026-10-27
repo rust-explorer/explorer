@@ -161,7 +161,7 @@ fn delete_missing_is_not_found() {
 }
 
 #[test]
-fn check_source_matches_delete() {
+fn check_deletable_matches_delete() {
     let fixture = Fixture::new(|media, _| {
         fs::write(media.join("a.txt"), b"a").unwrap();
         symlink("missing", media.join("dangling")).unwrap();
@@ -170,18 +170,18 @@ fn check_source_matches_delete() {
     });
     let media = fixture.media();
 
-    media.check_source(&rel("a.txt")).unwrap();
-    media.check_source(&rel("dangling")).unwrap();
+    media.check_deletable(&rel("a.txt")).unwrap();
+    media.check_deletable(&rel("dangling")).unwrap();
     assert!(matches!(
-        media.check_source(&rel("nope")),
+        media.check_deletable(&rel("nope")),
         Err(StorageError::NotFound(_))
     ));
     assert!(matches!(
-        media.check_source(&RelPath::root()),
+        media.check_deletable(&RelPath::root()),
         Err(StorageError::InvalidPath(_))
     ));
     assert!(matches!(
-        media.check_source(&rel(&format!("rootlink/{STAGING_DIR}"))),
+        media.check_deletable(&rel(&format!("rootlink/{STAGING_DIR}"))),
         Err(StorageError::NotFound(_))
     ));
 

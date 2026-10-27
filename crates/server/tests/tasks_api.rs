@@ -218,7 +218,7 @@ async fn delete_checks_run_before_the_task_exists() {
         ),
         (
             json!({
-                "op": "copy",
+                "op": "move",
                 "source": {"volume": "media", "path": "a.txt"},
                 "dest_dir": {"volume": "documents", "path": ""},
             }),
@@ -346,4 +346,113 @@ async fn dismiss_finished_task() {
         "task_not_found",
     )
     .await;
+}
+
+fn copy_spec(source: (&str, &str), dest_dir: (&str, &str)) -> serde_json::Value {
+    json!({
+        "op": "copy",
+        "source": {"volume": source.0, "path": source.1},
+        "dest_dir": {"volume": dest_dir.0, "path": dest_dir.1},
+    })
+}
+
+#[tokio::test]
+async fn copy_task_across_volumes_reports_progress() {
+    let mut s = setup().await;
+    let media = s.data.join("media");
+    fs::create_dir_all(media.join("F/Sub")).unwrap();
+    fs::write(media.join("F/a.txt"), b"abc").unwrap();
+    fs::write(media.join("F/Sub/b.txt"), b"defg").unwrap();
+
+    let res = post_task(&mut s.client, copy_spec(("media", "F"), ("documents", ""))).await;
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+    let info: TaskInfo = json(res).await;
+    let done = finished(&mut s.client, &info.id).await;
+
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    assert_eq!((done.files_done, done.files_total), (2, Some(2)));
+    assert_eq!((done.bytes_done, done.bytes_total), (7, Some(7)));
+    assert_eq!(done.skipped, 0);
+    assert_eq!(done.final_path.as_deref(), Some("F"));
+    let copied = s.data.join("documents/F");
+    assert_eq!(fs::read(copied.join("a.txt")).unwrap(), b"abc");
+    assert_eq!(fs::read(copied.join("Sub/b.txt")).unwrap(), b"defg");
+    assert!(media.join("F/Sub/b.txt").is_file());
+}
+
+#[tokio::test]
+async fn copy_conflict_is_409_with_details() {
+    let mut s = setup().await;
+    let (media, documents) = (s.data.join("media"), s.data.join("documents"));
+    fs::write(media.join("a.txt"), b"new").unwrap();
+    fs::create_dir(media.join("F")).unwrap();
+    fs::write(documents.join("a.txt"), b"old").unwrap();
+    fs::create_dir(documents.join("F")).unwrap();
+
+    for (path, kind) in [("a.txt", "file"), ("F", "dir")] {
+        let res = post_task(&mut s.client, copy_spec(("media", path), ("documents", ""))).await;
+        let error = error_of(res, StatusCode::CONFLICT, "already_exists").await;
+        assert_eq!(
+            error.details,
+            Some(json!({"volume": "documents", "path": path, "kind": kind}))
+        );
+    }
+
+    let mut replace = copy_spec(("media", "F"), ("documents", ""));
+    replace["conflict"] = json!("replace");
+    let res = post_task(&mut s.client, replace).await;
+    error_of(res, StatusCode::BAD_REQUEST, "is_a_directory").await;
+
+    let res = post_task(&mut s.client, copy_spec(("media", "F"), ("media", "F"))).await;
+    error_of(res, StatusCode::BAD_REQUEST, "invalid_destination").await;
+    assert!(list(&mut s.client).await.is_empty());
+    assert_eq!(fs::read(documents.join("a.txt")).unwrap(), b"old");
+}
+
+#[tokio::test]
+async fn copy_from_read_only_volume_is_allowed() {
+    if rustix::process::geteuid().is_root() {
+        return;
+    }
+    let mut s = setup_with(None, |data| {
+        fs::write(data.join("documents/a.txt"), b"a").unwrap();
+        fs::set_permissions(data.join("documents"), fs::Permissions::from_mode(0o555)).unwrap();
+    })
+    .await;
+
+    let res = post_task(
+        &mut s.client,
+        copy_spec(("documents", "a.txt"), ("media", "")),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+    let info: TaskInfo = json(res).await;
+    let done = finished(&mut s.client, &info.id).await;
+    fs::set_permissions(s.data.join("documents"), fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    assert_eq!(done.final_path.as_deref(), Some("a.txt"));
+    assert_eq!(fs::read(s.data.join("media/a.txt")).unwrap(), b"a");
+}
+
+#[tokio::test]
+async fn copy_to_read_only_volume_is_403() {
+    if rustix::process::geteuid().is_root() {
+        return;
+    }
+    let mut s = setup_with(None, |data| {
+        fs::write(data.join("media/a.txt"), b"a").unwrap();
+        fs::set_permissions(data.join("documents"), fs::Permissions::from_mode(0o555)).unwrap();
+    })
+    .await;
+    fs::set_permissions(s.data.join("documents"), fs::Permissions::from_mode(0o755)).unwrap();
+
+    let res = post_task(
+        &mut s.client,
+        copy_spec(("media", "a.txt"), ("documents", "")),
+    )
+    .await;
+    error_of(res, StatusCode::FORBIDDEN, "read_only_volume").await;
+    assert!(!s.data.join("documents/a.txt").exists());
+    assert!(list(&mut s.client).await.is_empty());
 }

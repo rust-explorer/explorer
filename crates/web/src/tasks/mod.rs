@@ -1,12 +1,15 @@
+mod conflict;
 mod store;
 #[cfg(target_arch = "wasm32")]
 mod transport;
 
 use dioxus::prelude::*;
+use shared::api::browse::EntryKind;
 use shared::api::tasks::TaskSpec;
 
 pub use store::{Effect, Event, Task, TaskKey, TaskList};
 
+use crate::conflict::Decision;
 use crate::revision::Revision;
 
 /// The app-wide list of the background tasks this tab started.
@@ -35,6 +38,17 @@ impl TaskStore {
 
     pub fn start(mut self, specs: Vec<TaskSpec>) {
         let effects = self.list.write().start(specs);
+        self.run(effects);
+    }
+
+    /// One user action's copies or moves, sharing "apply to all".
+    pub fn start_transfers(mut self, specs: Vec<(TaskSpec, EntryKind)>) {
+        let effects = self.list.write().start_transfers(specs);
+        self.run(effects);
+    }
+
+    pub fn decide(mut self, key: TaskKey, decision: Decision, apply_to_all: bool) {
+        let effects = self.list.write().decide(key, decision, apply_to_all);
         self.run(effects);
     }
 

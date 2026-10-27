@@ -10,7 +10,7 @@ use super::path::STAGING_DIR;
 use super::read::fs_path;
 use super::{RelPath, StagedId, Staging, StorageError, Volume};
 
-const KEEP_BOTH_MAX: u32 = 999;
+pub(super) const KEEP_BOTH_MAX: u32 = 999;
 
 /// `Film.mkv` → `Film (n).mkv`. A leading or trailing dot does not start an extension.
 #[must_use]

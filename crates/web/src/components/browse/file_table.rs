@@ -13,7 +13,7 @@ use crate::actions::{RowAction, selection_actions};
 use crate::api;
 use crate::components::common::FocusTarget;
 use crate::components::common::icons::{ArrowDownIcon, ArrowUpIcon};
-use crate::components::{DeleteDialog, RenameDialog};
+use crate::components::{CopyDialog, DeleteDialog, RenameDialog};
 use crate::format::now_ms;
 use crate::listing::{Sort, SortKey, sorted};
 use crate::routes::{Segment, Segments};
@@ -37,6 +37,15 @@ struct Deleting {
     from_selection: bool,
 }
 
+/// Entries waiting for a destination folder; from the selection bar, a confirmed copy clears
+/// the selection.
+#[derive(Clone, PartialEq)]
+struct Copying {
+    entries: Vec<(String, EntryKind)>,
+    trigger: Option<FocusTarget>,
+    from_selection: bool,
+}
+
 #[component]
 pub fn FileTable(
     volume: Segment,
@@ -49,6 +58,7 @@ pub fn FileTable(
     let mut menu = use_signal(|| None::<MenuRequest>);
     let mut renaming = use_signal(|| None::<Renaming>);
     let mut deleting = use_signal(|| None::<Deleting>);
+    let mut copying = use_signal(|| None::<Copying>);
     let rows = use_memo(move || Rc::new(sorted(&entries.read(), sort())));
     let now = use_memo(move || {
         let _ = entries.read();
@@ -81,6 +91,7 @@ pub fn FileTable(
     let on_sort = move |column: SortKey| sort.set(sort().toggled(column));
     let menu_name = menu.read().as_ref().map(|open| open.entry.name.clone());
     let (dialog_volume, dialog_parent) = (volume.as_str().to_owned(), path.joined());
+    let copy_parent = path.clone();
 
     let refocus = move |trigger: Option<FocusTarget>| {
         if let Some(FocusTarget(button)) = trigger {
@@ -110,7 +121,12 @@ pub fn FileTable(
                     }
                     refocus(trigger);
                 }
-                RowAction::MoveTo | RowAction::CopyTo => refocus(trigger),
+                RowAction::CopyTo => copying.set(Some(Copying {
+                    entries: vec![(entry.name, entry.kind)],
+                    trigger,
+                    from_selection: false,
+                })),
+                RowAction::MoveTo => refocus(trigger),
             }
         }
     };
@@ -132,7 +148,12 @@ pub fn FileTable(
                 trigger: None,
                 from_selection: true,
             })),
-            RowAction::Rename | RowAction::MoveTo | RowAction::CopyTo => {}
+            RowAction::CopyTo => copying.set(Some(Copying {
+                entries: selected.clone(),
+                trigger: None,
+                from_selection: true,
+            })),
+            RowAction::Rename | RowAction::MoveTo => {}
         }
     };
     let on_select = move |(name, range): (String, bool)| {
@@ -240,6 +261,21 @@ pub fn FileTable(
                 entries,
                 return_focus: trigger,
                 on_close: move |()| renaming.set(None),
+            }
+        }
+        if let Some(Copying { entries, trigger, from_selection }) = copying() {
+            CopyDialog {
+                volume: dialog_volume.clone(),
+                parent: copy_parent.clone(),
+                entries,
+                return_focus: trigger,
+                on_close: move |()| copying.set(None),
+                on_confirmed: move |()| {
+                    copying.set(None);
+                    if from_selection {
+                        selection.write().clear();
+                    }
+                },
             }
         }
         if let Some(Deleting { names, trigger, from_selection }) = deleting() {

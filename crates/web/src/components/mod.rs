@@ -8,5 +8,6 @@ mod uploads;
 pub use browse::{DropZone, FileTable};
 pub use common::{ErrorPanel, Notice};
 pub use layout::{ActivityPanel, Breadcrumb, Shell, Sidebar, SignOutButton};
-pub use manage::{DeleteDialog, NewFolderButton, NewFolderDialog, RenameDialog};
+pub use manage::{CopyDialog, DeleteDialog, NewFolderButton, NewFolderDialog, RenameDialog};
+pub use tasks::TaskConflictDialog;
 pub use uploads::{ConflictDialog, UploadButton};

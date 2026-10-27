@@ -6,6 +6,20 @@ use tracing::Instrument as _;
 use super::registry::{Outcome, Progress, Tasks};
 use crate::http::error::ApiError;
 
+/// How a task stops short: a cancellation it noticed, or a failure. A failure after a cancel
+/// request is still a failure.
+#[derive(Debug)]
+pub enum TaskError {
+    Cancelled,
+    Failed(ApiError),
+}
+
+impl From<ApiError> for TaskError {
+    fn from(err: ApiError) -> Self {
+        Self::Failed(err)
+    }
+}
+
 impl Tasks {
     /// Queues a task for `user` that runs `op` on a blocking thread once a permit is free, in
     /// the current span. A failure keeps `request_id` so that it can be traced back.
@@ -14,7 +28,7 @@ impl Tasks {
         user: &str,
         spec: TaskSpec,
         request_id: Option<String>,
-        op: impl FnOnce(&Progress) -> Result<(), ApiError> + Send + 'static,
+        op: impl FnOnce(&Progress) -> Result<(), TaskError> + Send + 'static,
     ) -> TaskInfo {
         let (id, info) = self.insert(user, spec);
         let tasks = Arc::clone(self);
@@ -29,7 +43,7 @@ impl Tasks {
         self: Arc<Self>,
         id: &str,
         request_id: Option<String>,
-        op: impl FnOnce(&Progress) -> Result<(), ApiError> + Send + 'static,
+        op: impl FnOnce(&Progress) -> Result<(), TaskError> + Send + 'static,
     ) {
         let Ok(_permit) = Arc::clone(&self.permits).acquire_owned().await else {
             return;
@@ -48,8 +62,8 @@ impl Tasks {
         .await;
         let outcome = match result {
             Ok(Ok(())) => Outcome::Done,
-            Ok(Err(_)) if progress.is_cancelled() => Outcome::Cancelled,
-            Ok(Err(err)) => Outcome::Failed(err.to_body(request_id)),
+            Ok(Err(TaskError::Cancelled)) => Outcome::Cancelled,
+            Ok(Err(TaskError::Failed(err))) => Outcome::Failed(err.to_body(request_id)),
             Err(err) => Outcome::Failed(ApiError::internal(err).to_body(request_id)),
         };
         self.finish(id, outcome);
@@ -119,7 +133,7 @@ mod tests {
     async fn failure_and_cancellation_outcomes() {
         let tasks = Arc::new(Tasks::new());
         tasks.submit("ada", spec(), Some("req-1".to_owned()), |_| {
-            Err(ApiError::forbidden())
+            Err(ApiError::forbidden().into())
         });
         let list = until(&tasks, |list| list[0].state == TaskState::Failed).await;
         let error = list[0].error.clone().unwrap();
@@ -132,7 +146,7 @@ mod tests {
             started.send(()).unwrap();
             wait.recv().unwrap();
             if progress.is_cancelled() {
-                return Err(ApiError::internal("stopped"));
+                return Err(TaskError::Cancelled);
             }
             Ok(())
         });
@@ -143,5 +157,25 @@ mod tests {
         release.send(()).unwrap();
         let list = until(&tasks, |list| list[1].state == TaskState::Cancelled).await;
         assert_eq!(list[1].error, None);
+    }
+
+    #[tokio::test]
+    async fn failure_after_a_cancel_request_stays_a_failure() {
+        let tasks = Arc::new(Tasks::new());
+        let (started, wait_start) = mpsc::channel::<()>();
+        let (release, wait) = mpsc::channel::<()>();
+        let task = tasks.submit("ada", spec(), None, move |_| {
+            started.send(()).unwrap();
+            wait.recv().unwrap();
+            Err(ApiError::forbidden().into())
+        });
+        tokio::task::spawn_blocking(move || wait_start.recv().unwrap())
+            .await
+            .unwrap();
+        assert!(tasks.cancel_or_dismiss("ada", &task.id));
+        release.send(()).unwrap();
+        let list = until(&tasks, |list| !list[0].state.is_active()).await;
+        assert_eq!(list[0].state, TaskState::Failed);
+        assert_eq!(list[0].error.as_ref().unwrap().code, "forbidden");
     }
 }

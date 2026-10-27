@@ -1,7 +1,13 @@
+use std::collections::HashMap;
+
+use shared::api::browse::EntryKind;
+use shared::api::conflict::ConflictPolicy;
 use shared::api::error::ErrorBody;
 use shared::api::tasks::{TaskInfo, TaskSpec, TaskState};
 
+use super::conflict::{Conflict, policy_of, with_policy};
 use crate::api::ApiFailure;
+use crate::conflict::Decision;
 
 pub const POLL_EVERY_MS: u32 = 1000;
 const TASK_NOT_FOUND: &str = "task_not_found";
@@ -19,9 +25,28 @@ pub struct Task {
     /// The server refused the task, or no longer knows it.
     lost: Option<ApiFailure>,
     cancel_requested: bool,
+    /// The tasks of one user action share a batch, for "apply to all".
+    pub batch: u64,
+    /// What the source is, when the caller knows: only a file may replace a file.
+    source_kind: Option<EntryKind>,
+    /// The destination exists: the task waits for the user's decision.
+    conflict: Option<Conflict>,
 }
 
 impl Task {
+    pub fn conflict(&self) -> Option<&Conflict> {
+        self.conflict.as_ref()
+    }
+
+    /// Whether the conflict prompt may offer Replace.
+    pub fn allows_replace(&self) -> bool {
+        self.source_kind == Some(EntryKind::File)
+            && self
+                .conflict
+                .as_ref()
+                .is_some_and(|conflict| conflict.kind == EntryKind::File)
+    }
+
     pub fn state(&self) -> TaskState {
         match (&self.lost, &self.info) {
             (Some(_), _) => TaskState::Failed,
@@ -79,6 +104,9 @@ pub struct TaskList {
     /// The server ids known when the pending poll was issued; a task posted since then may be
     /// missing from its answer.
     polled: Vec<String>,
+    next_batch: u64,
+    /// "Apply to all" answers, by batch.
+    decisions: HashMap<u64, Decision>,
 }
 
 impl TaskList {
@@ -90,10 +118,36 @@ impl TaskList {
         self.tasks.iter().filter(|task| task.is_active()).count()
     }
 
+    /// The first task waiting for a conflict decision.
+    pub fn pending_decision(&self) -> Option<&Task> {
+        self.tasks.iter().find(|task| task.conflict.is_some())
+    }
+
+    pub fn batch_len(&self, batch: u64) -> usize {
+        self.tasks.iter().filter(|task| task.batch == batch).count()
+    }
+
+    /// Starts one batch of tasks whose source kinds are unknown.
     pub fn start(&mut self, specs: Vec<TaskSpec>) -> Vec<Effect> {
+        self.start_batch(specs.into_iter().map(|spec| (spec, None)).collect())
+    }
+
+    /// Starts one batch of copies or moves of entries of known kinds.
+    pub fn start_transfers(&mut self, specs: Vec<(TaskSpec, EntryKind)>) -> Vec<Effect> {
+        self.start_batch(
+            specs
+                .into_iter()
+                .map(|(spec, kind)| (spec, Some(kind)))
+                .collect(),
+        )
+    }
+
+    fn start_batch(&mut self, specs: Vec<(TaskSpec, Option<EntryKind>)>) -> Vec<Effect> {
+        let batch = self.next_batch;
+        self.next_batch += 1;
         specs
             .into_iter()
-            .map(|spec| {
+            .map(|(spec, source_kind)| {
                 let key = TaskKey(self.next_key);
                 self.next_key += 1;
                 self.tasks.push(Task {
@@ -102,10 +156,42 @@ impl TaskList {
                     info: None,
                     lost: None,
                     cancel_requested: false,
+                    batch,
+                    source_kind,
+                    conflict: None,
                 });
                 Effect::Post { key, spec }
             })
             .collect()
+    }
+
+    /// Answers the conflict of `key`, or of every task of its batch waiting with one that the
+    /// decision suits; a later conflict in the batch then gets the same answer.
+    pub fn decide(&mut self, key: TaskKey, decision: Decision, apply_to_all: bool) -> Vec<Effect> {
+        let Some(batch) = self
+            .tasks
+            .iter()
+            .find(|task| task.key == key && task.conflict.is_some())
+            .map(|task| task.batch)
+        else {
+            return Vec::new();
+        };
+        let keys: Vec<TaskKey> = if apply_to_all {
+            self.decisions.insert(batch, decision);
+            self.tasks
+                .iter()
+                .filter(|task| task.batch == batch && task.conflict.is_some())
+                .filter(|task| suits(task, decision))
+                .map(|task| task.key)
+                .collect()
+        } else {
+            vec![key]
+        };
+        let mut effects = Vec::new();
+        for key in keys {
+            self.apply(key, decision, &mut effects);
+        }
+        effects
     }
 
     pub fn handle(&mut self, event: Event) -> Vec<Effect> {
@@ -125,11 +211,7 @@ impl TaskList {
                     }
                 }
             }
-            Event::PostFailed { key, failure } => {
-                if let Some(task) = self.task_mut(key) {
-                    task.lost = Some(failure);
-                }
-            }
+            Event::PostFailed { key, failure } => self.refused(key, failure, &mut effects),
             Event::Polled(infos) => {
                 self.polling = false;
                 if self.update(&infos) {
@@ -152,6 +234,10 @@ impl TaskList {
         let Some(task) = self.task_mut(key).filter(|task| task.is_active()) else {
             return Vec::new();
         };
+        if task.conflict.is_some() {
+            self.tasks.retain(|task| task.key != key);
+            return Vec::new();
+        }
         if let Some(id) = task.server_id() {
             return vec![Effect::Delete { id: id.to_owned() }];
         }
@@ -215,15 +301,65 @@ impl TaskList {
         }
     }
 
+    /// A copy or move refused because its destination exists waits for a decision, unless
+    /// its batch already has one; any other refusal fails the task.
+    fn refused(&mut self, key: TaskKey, failure: ApiFailure, effects: &mut Vec<Effect>) {
+        let decision = self
+            .tasks
+            .iter()
+            .find(|task| task.key == key)
+            .and_then(|task| self.decisions.get(&task.batch).copied());
+        let Some(task) = self.task_mut(key) else {
+            return;
+        };
+        let conflict =
+            Conflict::of(&failure).filter(|_| policy_of(&task.spec) == Some(ConflictPolicy::Fail));
+        let Some(conflict) = conflict else {
+            task.lost = Some(failure);
+            return;
+        };
+        if task.cancel_requested {
+            self.tasks.retain(|task| task.key != key);
+            return;
+        }
+        task.conflict = Some(conflict);
+        if let Some(decision) = decision.filter(|&decision| suits(task, decision)) {
+            self.apply(key, decision, effects);
+        }
+    }
+
+    /// Resends the task with the decision's policy, or drops it on Cancel.
+    fn apply(&mut self, key: TaskKey, decision: Decision, effects: &mut Vec<Effect>) {
+        match decision.policy() {
+            None => self.tasks.retain(|task| task.key != key),
+            Some(conflict) => {
+                if let Some(task) = self.task_mut(key) {
+                    task.conflict = None;
+                    task.spec = with_policy(&task.spec, conflict);
+                    effects.push(Effect::Post {
+                        key,
+                        spec: task.spec.clone(),
+                    });
+                }
+            }
+        }
+    }
+
     fn task_mut(&mut self, key: TaskKey) -> Option<&mut Task> {
         self.tasks.iter_mut().find(|task| task.key == key)
     }
+}
+
+/// Replace only suits a file over a file.
+fn suits(task: &Task, decision: Decision) -> bool {
+    decision != Decision::Replace || task.allows_replace()
 }
 
 #[cfg(test)]
 mod tests {
     use shared::api::tasks::Location;
 
+    use super::super::conflict::ALREADY_EXISTS;
     use super::*;
 
     fn delete(path: &str) -> TaskSpec {
@@ -448,5 +584,185 @@ mod tests {
         );
         let left: Vec<TaskKey> = list.tasks().iter().map(|task| task.key).collect();
         assert_eq!(left, [TaskKey(1), TaskKey(2)]);
+    }
+
+    fn copy(path: &str, conflict: ConflictPolicy) -> TaskSpec {
+        TaskSpec::Copy {
+            source: Location {
+                volume: "media".to_owned(),
+                path: path.to_owned(),
+            },
+            dest_dir: Location {
+                volume: "documents".to_owned(),
+                path: String::new(),
+            },
+            conflict,
+        }
+    }
+
+    fn exists(path: &str, kind: &str) -> ApiFailure {
+        ApiFailure::Server(ErrorBody {
+            code: ALREADY_EXISTS.to_owned(),
+            message: String::new(),
+            details: Some(serde_json::json!({
+                "volume": "documents",
+                "path": path,
+                "kind": kind,
+            })),
+            request_id: None,
+        })
+    }
+
+    fn post(key: u64, path: &str, conflict: ConflictPolicy) -> Effect {
+        Effect::Post {
+            key: TaskKey(key),
+            spec: copy(path, conflict),
+        }
+    }
+
+    fn refuse(list: &mut TaskList, key: u64, failure: ApiFailure) -> Vec<Effect> {
+        list.handle(Event::PostFailed {
+            key: TaskKey(key),
+            failure,
+        })
+    }
+
+    fn waiting(list: &TaskList) -> Vec<TaskKey> {
+        list.tasks()
+            .iter()
+            .filter(|task| task.conflict().is_some())
+            .map(|task| task.key)
+            .collect()
+    }
+
+    /// `a`, `b` and `c` copied in one action; `d` in another.
+    fn copies() -> TaskList {
+        let mut list = TaskList::default();
+        let effects = list.start_transfers(vec![
+            (copy("a", ConflictPolicy::Fail), EntryKind::File),
+            (copy("b", ConflictPolicy::Fail), EntryKind::File),
+            (copy("c", ConflictPolicy::Fail), EntryKind::File),
+        ]);
+        assert_eq!(effects.len(), 3);
+        list.start_transfers(vec![(copy("d", ConflictPolicy::Fail), EntryKind::File)]);
+        list
+    }
+
+    #[test]
+    fn conflict_waits_for_a_decision() {
+        let mut list = copies();
+        assert_eq!(refuse(&mut list, 1, exists("b", "file")), []);
+
+        let task = list.pending_decision().unwrap();
+        assert_eq!(task.key, TaskKey(1));
+        assert_eq!(
+            task.conflict(),
+            Some(&Conflict {
+                volume: "documents".to_owned(),
+                path: "b".to_owned(),
+                kind: EntryKind::File,
+            })
+        );
+        assert!(task.allows_replace());
+        assert_eq!(task.state(), TaskState::Queued);
+        assert_eq!(list.batch_len(task.batch), 3);
+        assert_eq!(list.active_count(), 4);
+        assert_eq!(list.clear_finished(), []);
+        assert_eq!(list.tasks().len(), 4);
+    }
+
+    #[test]
+    fn apply_to_all_resends_the_batch_with_the_policy() {
+        let mut list = copies();
+        refuse(&mut list, 0, exists("a", "file"));
+        refuse(&mut list, 1, exists("b", "file"));
+        refuse(&mut list, 3, exists("d", "file"));
+
+        let effects = list.decide(TaskKey(0), Decision::KeepBoth, true);
+        assert_eq!(
+            effects,
+            [
+                post(0, "a", ConflictPolicy::KeepBoth),
+                post(1, "b", ConflictPolicy::KeepBoth),
+            ]
+        );
+        assert_eq!(
+            waiting(&list),
+            [TaskKey(3)],
+            "another action asks on its own"
+        );
+
+        // A later conflict of the batch gets the same answer.
+        let effects = refuse(&mut list, 2, exists("c", "file"));
+        assert_eq!(effects, [post(2, "c", ConflictPolicy::KeepBoth)]);
+        assert_eq!(list.tasks()[2].spec, copy("c", ConflictPolicy::KeepBoth));
+    }
+
+    #[test]
+    fn single_decision_and_cancel_drop_only_that_task() {
+        let mut list = copies();
+        refuse(&mut list, 0, exists("a", "file"));
+        refuse(&mut list, 1, exists("b", "file"));
+
+        assert_eq!(list.decide(TaskKey(0), Decision::Cancel, false), []);
+        assert_eq!(waiting(&list), [TaskKey(1)]);
+        assert!(list.tasks().iter().all(|task| task.key != TaskKey(0)));
+
+        assert_eq!(
+            list.decide(TaskKey(1), Decision::Replace, false),
+            [post(1, "b", ConflictPolicy::Replace)]
+        );
+        assert!(waiting(&list).is_empty());
+
+        // A later conflict of the batch still asks.
+        refuse(&mut list, 2, exists("c", "file"));
+        assert_eq!(waiting(&list), [TaskKey(2)]);
+        assert_eq!(list.decide(TaskKey(9), Decision::KeepBoth, false), []);
+    }
+
+    #[test]
+    fn replace_only_suits_a_file_over_a_file() {
+        let mut list = TaskList::default();
+        list.start_transfers(vec![
+            (copy("a", ConflictPolicy::Fail), EntryKind::File),
+            (copy("F", ConflictPolicy::Fail), EntryKind::Dir),
+            (copy("b", ConflictPolicy::Fail), EntryKind::File),
+        ]);
+        refuse(&mut list, 0, exists("a", "file"));
+        refuse(&mut list, 1, exists("F", "dir"));
+        refuse(&mut list, 2, exists("b", "dir"));
+        let allows: Vec<bool> = list.tasks().iter().map(Task::allows_replace).collect();
+        assert_eq!(allows, [true, false, false]);
+
+        let effects = list.decide(TaskKey(0), Decision::Replace, true);
+        assert_eq!(effects, [post(0, "a", ConflictPolicy::Replace)]);
+        assert_eq!(waiting(&list), [TaskKey(1), TaskKey(2)]);
+    }
+
+    #[test]
+    fn other_refusals_fail_the_task() {
+        let mut list = copies();
+        refuse(&mut list, 0, server("invalid_destination"));
+        assert_eq!(list.tasks()[0].state(), TaskState::Failed);
+
+        // Already sent with a policy: the server answer stands.
+        let mut list = TaskList::default();
+        list.start_transfers(vec![(copy("a", ConflictPolicy::KeepBoth), EntryKind::File)]);
+        refuse(&mut list, 0, exists("a", "file"));
+        assert_eq!(list.tasks()[0].state(), TaskState::Failed);
+        assert!(waiting(&list).is_empty());
+    }
+
+    #[test]
+    fn cancelling_a_waiting_task_drops_it() {
+        let mut list = copies();
+        refuse(&mut list, 0, exists("a", "file"));
+        assert_eq!(list.cancel(TaskKey(0)), []);
+        assert_eq!(list.tasks().len(), 3);
+
+        list.cancel(TaskKey(1));
+        refuse(&mut list, 1, exists("b", "file"));
+        assert_eq!(list.tasks().len(), 2);
+        assert_eq!(list.pending_decision(), None);
     }
 }

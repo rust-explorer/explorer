@@ -59,6 +59,24 @@ impl Progress {
     }
 }
 
+impl crate::storage::TransferProgress for Progress {
+    fn is_cancelled(&self) -> bool {
+        Progress::is_cancelled(self)
+    }
+
+    fn add_bytes(&self, n: u64) {
+        Progress::add_bytes(self, n);
+    }
+
+    fn add_file(&self) {
+        Progress::add_file(self);
+    }
+
+    fn skip(&self) {
+        Progress::skip(self);
+    }
+}
+
 /// How a task ended.
 pub(super) enum Outcome {
     Done,

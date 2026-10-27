@@ -6,13 +6,16 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use shared::api::tasks::{TaskInfo, TaskSpec};
 
-use super::Progress;
+use super::copy::Copy;
+use super::{Progress, TaskError};
 use crate::auth::{Action, CurrentUser};
 use crate::http::AppState;
 use crate::http::access::{authorize, blocking_volume};
 use crate::http::error::ApiError;
 use crate::http::request_id::request_id;
 use crate::storage::{RelPath, Volumes};
+
+type Op = Box<dyn FnOnce(&Progress) -> Result<(), TaskError> + Send>;
 
 pub async fn list(State(state): State<AppState>, user: CurrentUser) -> Json<Vec<TaskInfo>> {
     Json(state.tasks.list(&user.sub))
@@ -32,23 +35,44 @@ pub async fn create(
             "A JSON task is required",
         ));
     };
-    let op = match &spec {
+    let op: Op = match &spec {
         TaskSpec::Delete { source } => {
             let path = authorize(&state, &user, &source.volume, &source.path, Action::Write)?;
             blocking_volume(&state.volumes, &source.volume, {
                 let path = path.clone();
-                move |vol| vol.check_source(&path)
+                move |vol| vol.check_deletable(&path)
             })
             .await?
             .map_err(|err| ApiError::from_storage(&source.volume, err))?;
-            delete_op(
+            Box::new(delete_op(
                 Arc::clone(&state.volumes),
                 user.sub.clone(),
                 source.volume.clone(),
                 path,
-            )
+            ))
         }
-        TaskSpec::Copy { .. } | TaskSpec::Move { .. } => return Err(ApiError::not_found()),
+        TaskSpec::Copy {
+            source,
+            dest_dir,
+            conflict,
+        } => {
+            let copy = Copy {
+                path: authorize(&state, &user, &source.volume, &source.path, Action::Read)?,
+                dir: authorize(
+                    &state,
+                    &user,
+                    &dest_dir.volume,
+                    &dest_dir.path,
+                    Action::Write,
+                )?,
+                source: source.clone(),
+                dest_dir: dest_dir.clone(),
+                conflict: *conflict,
+            };
+            copy.check(&state.volumes).await?;
+            Box::new(copy.op(Arc::clone(&state.volumes), user.sub.clone()))
+        }
+        TaskSpec::Move { .. } => return Err(ApiError::not_found()),
     };
     let request_id = Some(request_id(&headers).to_owned()).filter(|id| !id.is_empty());
     let info = state.tasks.submit(&user.sub, spec, request_id, op);
@@ -72,7 +96,7 @@ fn delete_op(
     user: String,
     volume: String,
     path: RelPath,
-) -> impl FnOnce(&Progress) -> Result<(), ApiError> + Send + 'static {
+) -> impl FnOnce(&Progress) -> Result<(), TaskError> + Send + 'static {
     move |progress| {
         progress.set_files_total(1);
         let vol = volumes
@@ -87,7 +111,7 @@ fn delete_op(
                 error = %err,
                 "delete failed"
             );
-            return Err(ApiError::from_storage(&volume, err));
+            return Err(ApiError::from_storage(&volume, err).into());
         }
         progress.add_file();
         tracing::info!(

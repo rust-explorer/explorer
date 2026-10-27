@@ -64,6 +64,11 @@ fn TaskRow(task: Task) -> Element {
 
 #[component]
 fn TaskStatus(task: Task) -> Element {
+    if task.conflict().is_some() {
+        return rsx! {
+            p { class: NOTE, {t!("task-deciding")} }
+        };
+    }
     match (task.state(), &task.info) {
         (TaskState::Running, Some(info)) => match percent(info) {
             Some(percent) => rsx! {
@@ -95,6 +100,9 @@ fn TaskStatus(task: Task) -> Element {
         },
         (TaskState::Cancelled, _) => rsx! {
             p { class: NOTE, {t!("task-cancelled")} }
+        },
+        (TaskState::Done, Some(info)) if info.skipped > 0 => rsx! {
+            p { class: NOTE, {t!("task-skipped", count: info.skipped)} }
         },
         (TaskState::Done, _) => rsx! {},
     }

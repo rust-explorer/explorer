@@ -1,3 +1,4 @@
+mod copy;
 mod registry;
 mod routes;
 mod run;
@@ -10,6 +11,7 @@ use axum::routing::{delete, get};
 use crate::http::AppState;
 
 pub use registry::{Progress, Tasks};
+pub use run::TaskError;
 
 /// How many tasks run at once across all users; the others wait, queued.
 pub const MAX_RUNNING: usize = 2;

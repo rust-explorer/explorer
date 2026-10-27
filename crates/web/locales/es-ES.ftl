@@ -147,3 +147,20 @@ delete-title =
     }
 delete-warning = Las carpetas se eliminan con todo su contenido. Esta acción no se puede deshacer.
 delete-confirm = Eliminar
+task-deciding = Ya existe: esperando tu respuesta
+task-skipped =
+    { $count ->
+        [one] 1 elemento no se pudo copiar y se omitió
+       *[other] { $count } elementos no se pudieron copiar y se omitieron
+    }
+copy-title =
+    { $count ->
+        [one] Copiar { $name } a…
+       *[other] Copiar { $count } elementos a…
+    }
+picker-volume = Volumen
+picker-choose-volume = Elige un volumen
+picker-location = Carpeta de destino
+picker-folders = Carpetas
+picker-empty = No hay carpetas aquí
+picker-copy-here = Copiar aquí

@@ -229,6 +229,11 @@ impl ApiError {
                 return Self::new(StatusCode::BAD_REQUEST, "invalid_destination", message)
                     .with_details(json!({ "volume": volume, "path": path.as_str() }));
             }
+            // The caller picks the source volume for it, see [`ApiError::from_transfer`].
+            StorageError::Source(inner) => return Self::from_storage(volume, *inner),
+            StorageError::Cancelled => {
+                return Self::internal("a cancellation reported as an error");
+            }
             StorageError::InvalidPath(err) => return err.into(),
             StorageError::Io { path, source } => {
                 tracing::warn!(volume, path = path.as_str(), error = %source, "storage error");
@@ -239,6 +244,15 @@ impl ApiError {
         let message = format!("{label}{}", display_path(volume, path.as_str()));
         Self::new(status, code, message)
             .with_details(json!({ "volume": volume, "path": path.as_str() }))
+    }
+
+    /// Maps a failure of a copy or move with the volume it happened on.
+    #[must_use]
+    pub fn from_transfer(source: &str, dest: &str, err: StorageError) -> Self {
+        match err {
+            StorageError::Source(inner) => Self::from_storage(source, *inner),
+            other => Self::from_storage(dest, other),
+        }
     }
 
     /// The cause is logged, never returned to the client.
@@ -345,6 +359,28 @@ mod tests {
             Some(json!({ "volume": "media", "path": "a.txt" }))
         );
         assert_eq!(body.request_id.as_deref(), Some("req-1"));
+    }
+
+    #[test]
+    fn transfer_errors_name_the_volume_they_happened_on() {
+        let path = || RelPath::parse("a.txt").unwrap();
+        let source = ApiError::from_transfer(
+            "media",
+            "documents",
+            StorageError::Source(Box::new(StorageError::PermissionDenied(path()))),
+        );
+        assert_eq!(source.code, "permission_denied");
+        assert_eq!(
+            source.details,
+            Some(json!({ "volume": "media", "path": "a.txt" }))
+        );
+        let dest =
+            ApiError::from_transfer("media", "documents", StorageError::AlreadyExists(path()));
+        assert_eq!(dest.code, "already_exists");
+        assert_eq!(
+            dest.details,
+            Some(json!({ "volume": "documents", "path": "a.txt" }))
+        );
     }
 
     #[test]
