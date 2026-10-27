@@ -28,6 +28,20 @@ pub fn row_actions(kind: EntryKind, read_only: bool) -> Vec<RowAction> {
     }
 }
 
+/// The actions that apply to every selected entry; renaming is for one entry at a time.
+pub fn selection_actions(kinds: &[EntryKind], read_only: bool) -> Vec<RowAction> {
+    let Some((first, rest)) = kinds.split_first() else {
+        return Vec::new();
+    };
+    let mut actions = row_actions(*first, read_only);
+    for kind in rest {
+        let allowed = row_actions(*kind, read_only);
+        actions.retain(|action| allowed.contains(action));
+    }
+    actions.retain(|action| *action != RowAction::Rename);
+    actions
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,6 +72,30 @@ mod tests {
         assert!(Rename.available());
         for action in [MoveTo, CopyTo, Delete] {
             assert!(!action.available(), "{action:?}");
+        }
+    }
+
+    #[test]
+    fn selection_actions_are_the_common_ones_without_rename() {
+        use EntryKind::{Dir, File, Other};
+        for (kinds, read_only, expected) in [
+            (
+                &[File, Dir][..],
+                false,
+                &[Download, MoveTo, CopyTo, Delete][..],
+            ),
+            (&[File][..], false, &[Download, MoveTo, CopyTo, Delete][..]),
+            (&[File, Dir][..], true, &[Download, CopyTo][..]),
+            (&[File, Other][..], false, &[Delete][..]),
+            (&[Other][..], false, &[Delete][..]),
+            (&[File, Other][..], true, &[][..]),
+            (&[][..], false, &[][..]),
+        ] {
+            assert_eq!(
+                selection_actions(kinds, read_only),
+                expected,
+                "{kinds:?} {read_only}"
+            );
         }
     }
 }

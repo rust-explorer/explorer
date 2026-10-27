@@ -89,14 +89,14 @@ pub fn RowMenu(
                     key: "{action:?}",
                     danger: action == RowAction::Delete,
                     on_select: move |()| on_action.call(action),
-                    {label(action)}
+                    {action_label(action)}
                 }
             }
         }
     }
 }
 
-fn label(action: RowAction) -> String {
+pub fn action_label(action: RowAction) -> String {
     match action {
         RowAction::Download => t!("action-download"),
         RowAction::Rename => t!("action-rename"),

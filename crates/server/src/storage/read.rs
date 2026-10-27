@@ -177,6 +177,24 @@ impl Volume {
         Ok(items)
     }
 
+    /// What zipping the named entry `path` includes: a file alone, a folder and its walk.
+    pub fn walk_entry(&self, path: &RelPath) -> Result<Vec<WalkItem>, StorageError> {
+        let meta = self.stat(path)?;
+        match meta.kind {
+            EntryKind::File => Ok(vec![WalkItem::File {
+                path: path.clone(),
+                size: meta.size.unwrap_or(0),
+                modified: meta.modified,
+            }]),
+            EntryKind::Dir => {
+                let mut items = vec![WalkItem::Dir(path.clone())];
+                items.extend(self.walk(path)?);
+                Ok(items)
+            }
+            EntryKind::Other => Err(StorageError::NotFound(path.clone())),
+        }
+    }
+
     pub fn space(&self) -> io::Result<Space> {
         let stat = rustix::fs::fstatvfs(&self.root)?;
         Ok(Space {

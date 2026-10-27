@@ -6,7 +6,8 @@ use shared::api::error::ErrorBody;
 mod urls;
 
 pub use urls::{
-    download_url, encode_component, entries_url, folders_url, rename_url, upload_url, zip_url,
+    download_url, encode_component, entries_url, folders_url, rename_url, upload_url,
+    zip_selection_url, zip_url,
 };
 
 const UNAUTHENTICATED: &str = "unauthenticated";

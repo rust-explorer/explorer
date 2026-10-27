@@ -29,6 +29,15 @@ pub fn zip_url(volume: &str, path: &str) -> String {
     files_url("zip", volume, path)
 }
 
+pub fn zip_selection_url(volume: &str, dir: &str, names: &[&str]) -> String {
+    let mut url = files_url("zip", volume, dir);
+    for name in names {
+        url.push_str("&name=");
+        url.push_str(&encode_component(name));
+    }
+    url
+}
+
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn upload_url(id: &str) -> String {
     format!("/files/uploads/{}", encode_component(id))
@@ -77,6 +86,10 @@ mod tests {
         assert_eq!(
             download_url("a&b", "c&d=1"),
             "/files/download?volume=a%26b&path=c%26d%3D1"
+        );
+        assert_eq!(
+            zip_selection_url("media", "Films/é", &["a b", "c&d"]),
+            "/files/zip?volume=media&path=Films%2F%C3%A9&name=a%20b&name=c%26d"
         );
         assert_eq!(rename_url("my files"), "/api/volumes/my%20files/rename");
     }

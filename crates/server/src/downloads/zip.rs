@@ -8,10 +8,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ::zip::write::{SimpleFileOptions, StreamWriter};
 use ::zip::{CompressionMethod, DateTime, ZipWriter};
 use axum::body::{Body, Bytes};
-use axum::extract::rejection::QueryRejection;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::Response;
+use axum_extra::extract::{Query, QueryRejection};
+use serde::Deserialize;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -19,7 +20,7 @@ use super::attachment_headers;
 use crate::auth::Action;
 use crate::auth::CurrentUser;
 use crate::http::AppState;
-use crate::http::access::{VolumeQuery, authorize, blocking_volume, invalid_query};
+use crate::http::access::{authorize, blocking_volume, invalid_query};
 use crate::http::error::ApiError;
 use crate::storage::{RelPath, Volume, WalkItem};
 
@@ -29,6 +30,15 @@ const ZIP_SEND_TIMEOUT: Duration = Duration::from_secs(60);
 const SEND_POLL: Duration = Duration::from_millis(2);
 
 type Chunk = io::Result<Bytes>;
+
+/// Query of `/files/zip`: with `name`s, only those entries of `path` are archived.
+#[derive(Deserialize)]
+pub struct ZipQuery {
+    volume: String,
+    path: String,
+    #[serde(default)]
+    name: Vec<String>,
+}
 
 /// Answers `HEAD` without walking the tree, which `get` would otherwise do implicitly.
 pub async fn head() -> Response {
@@ -42,16 +52,29 @@ pub async fn head() -> Response {
 pub async fn zip(
     State(state): State<AppState>,
     user: CurrentUser,
-    query: Result<Query<VolumeQuery>, QueryRejection>,
+    query: Result<Query<ZipQuery>, QueryRejection>,
 ) -> Result<Response, ApiError> {
-    let Ok(Query(VolumeQuery { volume, path })) = query else {
+    let Ok(Query(ZipQuery { volume, path, name })) = query else {
         return Err(invalid_query());
     };
     let path = authorize(&state, &user, &volume, &path, Action::Read)?;
 
+    let children = name
+        .iter()
+        .map(|name| path.join(name))
+        .collect::<Result<Vec<_>, _>>()?;
     let items = blocking_volume(&state.volumes, &volume, {
         let path = path.clone();
-        move |vol| vol.walk(&path)
+        move |vol| {
+            if children.is_empty() {
+                return vol.walk(&path);
+            }
+            let mut items = Vec::new();
+            for child in &children {
+                items.extend(vol.walk_entry(child)?);
+            }
+            Ok(items)
+        }
     })
     .await?
     .map_err(|err| ApiError::from_storage(&volume, err))?;
@@ -70,6 +93,7 @@ pub async fn zip(
         path = path.as_str(),
         files,
         bytes,
+        names = name.len(),
         "zip"
     );
 

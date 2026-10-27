@@ -223,6 +223,73 @@ async fn unreadable_file_mid_stream_fails_the_body() {
 }
 
 #[tokio::test]
+async fn zip_of_selected_names() {
+    let mut s = setup().await;
+    let docs = s.data.join("media/Docs");
+    fs::create_dir_all(docs.join("pics/sub")).unwrap();
+    fs::create_dir(docs.join("other")).unwrap();
+    write_file(&docs.join("a.txt"), b"alpha");
+    write_file(&docs.join("b.txt"), b"beta");
+    write_file(&docs.join("pics/p.png"), b"png");
+    write_file(&docs.join("pics/sub/q.png"), b"qng");
+    write_file(&docs.join("other/skipped.txt"), b"no");
+    write_file(&docs.join("unselected.txt"), b"no");
+
+    let res = s
+        .client
+        .get("/files/zip?volume=media&path=Docs&name=a.txt&name=pics&name=b.txt")
+        .await;
+    assert!(header_of(&res, header::CONTENT_DISPOSITION).contains("filename=\"Docs.zip\""));
+    let mut archive = archive_of(res).await;
+    let expected: BTreeMap<String, Option<Vec<u8>>> = [
+        ("a.txt", Some(&b"alpha"[..])),
+        ("b.txt", Some(&b"beta"[..])),
+        ("pics/", None),
+        ("pics/p.png", Some(&b"png"[..])),
+        ("pics/sub/", None),
+        ("pics/sub/q.png", Some(&b"qng"[..])),
+    ]
+    .into_iter()
+    .map(|(name, content)| (name.to_owned(), content.map(<[u8]>::to_vec)))
+    .collect();
+    assert_eq!(entries(&mut archive), expected);
+}
+
+#[tokio::test]
+async fn zip_of_selected_names_at_the_root_is_named_after_the_volume() {
+    let mut s = setup().await;
+    write_file(&s.data.join("media/a%b.txt"), b"alpha");
+    let res = s
+        .client
+        .get("/files/zip?volume=media&path=&name=a%25b.txt")
+        .await;
+    assert!(header_of(&res, header::CONTENT_DISPOSITION).contains("filename=\"media.zip\""));
+    let mut archive = archive_of(res).await;
+    assert_eq!(
+        entries(&mut archive),
+        BTreeMap::from([("a%b.txt".to_owned(), Some(b"alpha".to_vec()))])
+    );
+}
+
+#[tokio::test]
+async fn zip_selection_rejects_bad_names() {
+    let mut s = setup().await;
+    write_file(&s.data.join("media/a.txt"), b"alpha");
+    for (name, status, code) in [
+        ("a%2Fb", StatusCode::BAD_REQUEST, "invalid_path"),
+        ("..", StatusCode::BAD_REQUEST, "invalid_path"),
+        (".", StatusCode::BAD_REQUEST, "invalid_path"),
+        ("", StatusCode::BAD_REQUEST, "invalid_path"),
+        (".explorer-uploads", StatusCode::BAD_REQUEST, "invalid_path"),
+        ("missing.txt", StatusCode::NOT_FOUND, "path_not_found"),
+    ] {
+        let uri = format!("/files/zip?volume=media&path=&name=a.txt&name={name}");
+        let res = s.client.get(&uri).await;
+        assert_eq!(error_of(res, status).await.code, code, "{name:?}");
+    }
+}
+
+#[tokio::test]
 async fn zip_requires_login() {
     let dir = tempfile::tempdir().unwrap();
     let app = common::app_with_web_dir(dir.path()).await;

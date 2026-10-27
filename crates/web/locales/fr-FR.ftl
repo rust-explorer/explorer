@@ -109,6 +109,14 @@ action-rename = Renommer
 action-move-to = Déplacer vers…
 action-copy-to = Copier vers…
 action-delete = Supprimer
+select-all = Sélectionner toutes les entrées
+select-entry = Sélectionner { $name }
+selection-count =
+    { $count ->
+        [one] { $count } sélectionné
+       *[other] { $count } sélectionnés
+    }
+selection-clear = Désélectionner
 rename-title = Renommer { $name }
 rename-name = Nouveau nom
 rename-save = Enregistrer

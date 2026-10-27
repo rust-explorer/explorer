@@ -10,6 +10,7 @@ use crate::components::{
     Breadcrumb, DropZone, ErrorPanel, FileTable, NewFolderButton, Shell, Sidebar, UploadButton,
 };
 use crate::routes::{Segment, Segments};
+use crate::selection::Selection;
 use crate::uploads::Revision;
 
 #[component]
@@ -27,6 +28,12 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
             .await
             .map(|listing| Rc::new(listing.entries));
         (url, result)
+    }));
+
+    let mut selection = use_signal(Selection::default);
+    use_effect(use_reactive!(|url| {
+        let _ = url;
+        selection.write().clear();
     }));
 
     let user = match me.read().clone() {
@@ -84,6 +91,7 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
                 path: path.clone(),
                 entries,
                 read_only: read_only.unwrap_or(true),
+                selection,
             }
         },
         Some(Err(failure)) if !failure.is_unauthenticated() => rsx! {

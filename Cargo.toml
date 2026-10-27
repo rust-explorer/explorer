@@ -10,6 +10,7 @@ repository = "https://github.com/fabienlege/explorer"
 
 [workspace.dependencies]
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+axum-extra = { version = "0.10", default-features = false, features = ["query"] }
 http-body-util = "0.1"
 rustix = { version = "1", default-features = false, features = ["fs", "process", "std"] }
 cap-std = "4.0"
