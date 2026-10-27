@@ -5,11 +5,11 @@ use dioxus_i18n::t;
 use shared::api::browse::{Entry, EntryKind};
 
 use super::file_row::{COLUMNS, FileRow, MUTED, download_href};
-use super::row_menu::{MenuRequest, RowMenu, menu_actions};
+use super::row_menu::{MenuRequest, RowMenu};
 use super::select_cell::SelectAll;
 use super::selection_bar::{SelectionBar, selection_href};
 use super::virtual_list::VirtualList;
-use crate::actions::{RowAction, selection_actions};
+use crate::actions::{RowAction, row_actions, selection_actions};
 use crate::api;
 use crate::components::common::FocusTarget;
 use crate::components::common::icons::{ArrowDownIcon, ArrowUpIcon};
@@ -232,7 +232,7 @@ pub fn FileTable(
                         let entry = rows.read()[index].clone();
                         let menu_open = menu_name.as_deref() == Some(entry.name.as_str());
                         let is_selected = chosen.contains(&entry.name);
-                        let has_menu = !menu_actions(&entry, read_only).is_empty();
+                        let has_menu = !row_actions(entry.kind, read_only).is_empty();
                         let take_focus = focus_menu_of.read().as_deref() == Some(entry.name.as_str());
                         rsx! {
                             FileRow {

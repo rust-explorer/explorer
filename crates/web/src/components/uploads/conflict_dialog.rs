@@ -6,7 +6,7 @@ use crate::uploads::use_uploads;
 
 /// Asks what to do with the first upload whose destination already exists.
 #[component]
-pub fn ConflictDialog() -> Element {
+pub fn UploadConflictDialog() -> Element {
     let uploads = use_uploads();
     let queue = uploads.queue();
     let queue = queue.read();

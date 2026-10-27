@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use dioxus_i18n::t;
 use shared::api::tasks::{Location, TaskSpec};
 
-use super::new_folder::BUTTON;
+use super::form::BUTTON;
 use crate::components::common::{FocusTarget, Modal};
 use crate::tasks::use_tasks;
 

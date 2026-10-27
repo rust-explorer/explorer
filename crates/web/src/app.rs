@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use crate::components::{ActivityPanel, ConflictDialog, TaskConflictDialog};
+use crate::components::{ActivityPanel, TaskConflictDialog, UploadConflictDialog};
 use crate::i18n::use_init_i18n_from_browser;
 use crate::listing::Sort;
 use crate::revision::use_revision_provider;
@@ -32,7 +32,7 @@ pub fn App() -> Element {
         }
         Router::<Route> {}
         ActivityPanel {}
-        ConflictDialog {}
+        UploadConflictDialog {}
         if !upload_waiting() {
             TaskConflictDialog {}
         }

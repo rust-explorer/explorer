@@ -87,7 +87,6 @@ uploads-unreadable =
 conflict-title = { $name } already exists in { $folder }
 conflict-replace = Replace
 conflict-keep-both = Keep both
-conflict-cancel = Cancel
 conflict-apply-all = Apply to all
 upload-drop = Drop to upload to { $folder }
 new-folder = New folder

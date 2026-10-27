@@ -60,11 +60,6 @@ fn menu_origin(at: MenuAt, items: usize, viewport: (f64, f64)) -> (f64, f64) {
     )
 }
 
-/// The actions of the entry's menu that can run here; empty when there is nothing to offer.
-pub fn menu_actions(entry: &Entry, read_only: bool) -> Vec<RowAction> {
-    row_actions(entry.kind, read_only)
-}
-
 #[component]
 pub fn RowMenu(
     request: MenuRequest,
@@ -72,7 +67,7 @@ pub fn RowMenu(
     on_close: EventHandler<bool>,
     on_action: EventHandler<RowAction>,
 ) -> Element {
-    let actions = menu_actions(&request.entry, read_only);
+    let actions = row_actions(request.entry.kind, read_only);
     let at = menu_origin(request.at, actions.len(), viewport());
 
     rsx! {

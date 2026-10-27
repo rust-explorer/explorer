@@ -1,5 +1,6 @@
 mod delete;
 mod folder_picker;
+mod form;
 mod new_folder;
 mod rename;
 mod transfer;

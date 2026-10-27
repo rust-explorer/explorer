@@ -9,7 +9,7 @@ use crate::storage::{InvalidPath, RelPath, StorageError, Volume, WalkItem};
 /// Where a moved entry ended up, and how it got there.
 #[derive(Debug)]
 pub enum MoveOutcome {
-    Renamed(RelPath),
+    Renamed { final_path: RelPath },
     Copied { final_path: RelPath },
 }
 
@@ -68,7 +68,7 @@ pub fn move_entry(
     if source.name() == dest.name() {
         match rename(source, &parent, name, dest_dir, conflict) {
             Err(StorageError::CrossDevice(_)) => {}
-            renamed => return renamed.map(MoveOutcome::Renamed),
+            renamed => return renamed.map(|final_path| MoveOutcome::Renamed { final_path }),
         }
     }
 

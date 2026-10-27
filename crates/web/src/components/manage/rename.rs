@@ -5,7 +5,7 @@ use dioxus_i18n::t;
 use shared::api::browse::{Entry, EntryKind, Rename, Renamed};
 use shared::api::conflict::ConflictPolicy;
 
-use super::new_folder::{BUTTON, INPUT, PRIMARY, Problem};
+use super::form::{BUTTON, INPUT, PRIMARY, Problem};
 use crate::api::{self, ApiFailure};
 use crate::components::common::{ConflictPrompt, FocusTarget, Modal};
 use crate::names::validate_name;

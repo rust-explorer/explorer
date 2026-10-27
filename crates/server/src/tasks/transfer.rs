@@ -33,8 +33,17 @@ pub(super) struct TransferTask {
     pub conflict: ConflictPolicy,
 }
 
-/// What a finished transfer logs: files, bytes and skipped entries for a copy.
-type Done = (RelPath, Option<(u64, u64, u64)>);
+/// Where a finished transfer put the entry and, when it copied, what it copied.
+struct Transferred {
+    final_path: RelPath,
+    copied: Option<Copied>,
+}
+
+struct Copied {
+    files: u64,
+    bytes: u64,
+    skipped: u64,
+}
 
 fn source_and_dest<'a>(
     volumes: &'a Volumes,
@@ -99,7 +108,12 @@ impl TransferTask {
         }
     }
 
-    fn copy(&self, from: &Volume, to: &Volume, progress: &Progress) -> Result<Done, StorageError> {
+    fn copy(
+        &self,
+        from: &Volume,
+        to: &Volume,
+        progress: &Progress,
+    ) -> Result<Transferred, StorageError> {
         let plan = storage::plan_transfer(from, &self.path)?;
         progress.set_files_total(plan.files);
         progress.set_bytes_total(plan.bytes);
@@ -112,7 +126,14 @@ impl TransferTask {
             &plan,
             progress,
         )?;
-        Ok((placed, Some((plan.files, plan.bytes, plan.skipped))))
+        Ok(Transferred {
+            final_path: placed,
+            copied: Some(Copied {
+                files: plan.files,
+                bytes: plan.bytes,
+                skipped: plan.skipped,
+            }),
+        })
     }
 
     /// Plans only across volumes; a same-volume rename that meets a mount point plans itself.
@@ -121,7 +142,7 @@ impl TransferTask {
         from: &Volume,
         to: &Volume,
         progress: &Progress,
-    ) -> Result<Done, StorageError> {
+    ) -> Result<Transferred, StorageError> {
         let plan = if from.name() == to.name() {
             None
         } else {
@@ -140,28 +161,46 @@ impl TransferTask {
             progress,
         )?;
         Ok(match outcome {
-            MoveOutcome::Renamed(placed) => {
+            MoveOutcome::Renamed { final_path } => {
                 progress.set_files_total(1);
                 progress.add_file();
-                (placed, None)
+                Transferred {
+                    final_path,
+                    copied: None,
+                }
             }
-            MoveOutcome::Copied { final_path } => (final_path, Some(progress.counts())),
+            MoveOutcome::Copied { final_path } => {
+                let (files, bytes, skipped) = progress.counts();
+                Transferred {
+                    final_path,
+                    copied: Some(Copied {
+                        files,
+                        bytes,
+                        skipped,
+                    }),
+                }
+            }
         })
     }
 
     fn report(
         &self,
         user: &str,
-        result: Result<Done, StorageError>,
+        result: Result<Transferred, StorageError>,
         progress: &Progress,
     ) -> Result<(), TaskError> {
         let (action, volume, path) = (self.kind.action(), &self.source, self.path.as_str());
         let dest_volume = &self.dest;
         match result {
-            Ok((placed, counts)) => {
-                progress.set_final_path(placed.as_str().to_owned());
-                let final_path = placed.as_str();
-                if let Some((files, bytes, skipped)) = counts {
+            Ok(Transferred { final_path, copied }) => {
+                progress.set_final_path(final_path.as_str().to_owned());
+                let final_path = final_path.as_str();
+                if let Some(Copied {
+                    files,
+                    bytes,
+                    skipped,
+                }) = copied
+                {
                     tracing::info!(
                         user,
                         action,

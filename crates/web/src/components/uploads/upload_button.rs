@@ -10,8 +10,9 @@ use crate::uploads::{Uploads, use_uploads};
 
 const READ_ONLY_ID: &str = "upload-read-only";
 
+/// An item of the Upload menu.
 #[derive(Clone, Copy, PartialEq)]
-enum Picker {
+enum AddChoice {
     Files,
     Folder,
     NewFolder,
@@ -27,11 +28,11 @@ pub fn UploadButton(volume: String, path: String, read_only: bool) -> Element {
     let mut floating_trigger = use_signal(|| None::<FocusTarget>);
     let (dialog_volume, dialog_path) = (volume.clone(), path.clone());
 
-    let open_picker = move |picker| {
-        let input = match picker {
-            Picker::Files => files_input(),
-            Picker::Folder => folder_input(),
-            Picker::NewFolder => {
+    let choose = move |choice| {
+        let input = match choice {
+            AddChoice::Files => files_input(),
+            AddChoice::Folder => folder_input(),
+            AddChoice::NewFolder => {
                 new_folder.set(true);
                 return;
             }
@@ -70,13 +71,13 @@ pub fn UploadButton(volume: String, path: String, read_only: bool) -> Element {
             span { id: READ_ONLY_ID, class: "sr-only", {t!("upload-read-only")} }
         }
         div { class: "hidden md:block",
-            UploadMenu { floating: false, read_only, on_pick: open_picker, on_trigger: |_| {} }
+            UploadMenu { floating: false, read_only, on_choose: choose, on_trigger: |_| {} }
         }
         div { class: "fixed bottom-4 right-4 z-30 md:hidden",
             UploadMenu {
                 floating: true,
                 read_only,
-                on_pick: open_picker,
+                on_choose: choose,
                 on_trigger: move |trigger| floating_trigger.set(Some(trigger)),
             }
         }
@@ -96,7 +97,7 @@ pub fn UploadButton(volume: String, path: String, read_only: bool) -> Element {
 fn UploadMenu(
     floating: bool,
     read_only: bool,
-    on_pick: EventHandler<Picker>,
+    on_choose: EventHandler<AddChoice>,
     on_trigger: EventHandler<FocusTarget>,
 ) -> Element {
     let mut open = use_signal(|| false);
@@ -127,9 +128,9 @@ fn UploadMenu(
             });
         }
     };
-    let mut pick = move |picker| {
+    let mut choose = move |choice| {
         open.set(false);
-        on_pick.call(picker);
+        on_choose.call(choice);
     };
 
     rsx! {
@@ -162,10 +163,10 @@ fn UploadMenu(
                     class: "{menu_class} z-20",
                     label: t!("upload-open"),
                     on_close: close,
-                    MenuItem { on_select: move |()| pick(Picker::Files), {t!("upload-files")} }
-                    MenuItem { on_select: move |()| pick(Picker::Folder), {t!("upload-folder")} }
+                    MenuItem { on_select: move |()| choose(AddChoice::Files), {t!("upload-files")} }
+                    MenuItem { on_select: move |()| choose(AddChoice::Folder), {t!("upload-folder")} }
                     if floating {
-                        MenuItem { on_select: move |()| pick(Picker::NewFolder), {t!("new-folder")} }
+                        MenuItem { on_select: move |()| choose(AddChoice::NewFolder), {t!("new-folder")} }
                     }
                 }
             }

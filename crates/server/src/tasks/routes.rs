@@ -4,7 +4,8 @@ use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
-use shared::api::tasks::{TaskInfo, TaskSpec};
+use shared::api::conflict::ConflictPolicy;
+use shared::api::tasks::{Location, TaskInfo, TaskSpec};
 
 use super::transfer::{TransferKind, TransferTask};
 use super::{Progress, TaskError};
@@ -55,32 +56,31 @@ pub async fn create(
             source,
             dest_dir,
             conflict,
+        } => {
+            transfer_op(
+                &state,
+                &user,
+                TransferKind::Copy,
+                source,
+                dest_dir,
+                *conflict,
+            )
+            .await?
         }
-        | TaskSpec::Move {
+        TaskSpec::Move {
             source,
             dest_dir,
             conflict,
         } => {
-            let (kind, source_access) = match &spec {
-                TaskSpec::Move { .. } => (TransferKind::Move, Action::Write),
-                _ => (TransferKind::Copy, Action::Read),
-            };
-            let task = TransferTask {
-                kind,
-                path: authorize(&state, &user, &source.volume, &source.path, source_access)?,
-                dest_dir: authorize(
-                    &state,
-                    &user,
-                    &dest_dir.volume,
-                    &dest_dir.path,
-                    Action::Write,
-                )?,
-                source: source.volume.clone(),
-                dest: dest_dir.volume.clone(),
-                conflict: *conflict,
-            };
-            task.check(&state.volumes).await?;
-            Box::new(task.op(Arc::clone(&state.volumes), user.sub.clone()))
+            transfer_op(
+                &state,
+                &user,
+                TransferKind::Move,
+                source,
+                dest_dir,
+                *conflict,
+            )
+            .await?
         }
     };
     let request_id = Some(request_id(&headers).to_owned()).filter(|id| !id.is_empty());
@@ -98,6 +98,33 @@ pub async fn cancel(
     } else {
         Err(ApiError::task_not_found())
     }
+}
+
+/// Copy needs to read the source, move to write it; both write the destination.
+async fn transfer_op(
+    state: &AppState,
+    user: &CurrentUser,
+    kind: TransferKind,
+    source: &Location,
+    dest_dir: &Location,
+    conflict: ConflictPolicy,
+) -> Result<Op, ApiError> {
+    let source_access = match kind {
+        TransferKind::Copy => Action::Read,
+        TransferKind::Move => Action::Write,
+    };
+    let task = TransferTask {
+        kind,
+        path: authorize(state, user, &source.volume, &source.path, source_access)?,
+        dest_dir: authorize(state, user, &dest_dir.volume, &dest_dir.path, Action::Write)?,
+        source: source.volume.clone(),
+        dest: dest_dir.volume.clone(),
+        conflict,
+    };
+    task.check(&state.volumes).await?;
+    Ok(Box::new(
+        task.op(Arc::clone(&state.volumes), user.sub.clone()),
+    ))
 }
 
 fn delete_op(

@@ -58,7 +58,7 @@ pub fn ConflictPrompt(
                     r#type: "button",
                     class: BUTTON,
                     onclick: move |_| decide(Decision::Cancel),
-                    {t!("conflict-cancel")}
+                    {t!("cancel")}
                 }
                 if allow_replace {
                     button {

@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use dioxus_i18n::t;
 use shared::api::browse::{Entry, EntryKind, Listing, VolumeInfo};
 
-use super::new_folder::{BUTTON, PRIMARY};
+use super::form::{BUTTON, PRIMARY};
 use crate::api;
 use crate::components::common::icons::FolderIcon;
 use crate::components::common::{FocusTarget, Modal};

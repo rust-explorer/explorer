@@ -595,7 +595,9 @@ fn move_file_same_volume() {
     )
     .unwrap();
 
-    assert!(matches!(outcome, MoveOutcome::Renamed(path) if path == rel("Sub/a.txt")));
+    assert!(
+        matches!(outcome, MoveOutcome::Renamed { final_path } if final_path == rel("Sub/a.txt"))
+    );
     let media = fixture.path("media");
     assert_eq!(fs::read(media.join("Sub/a.txt")).unwrap(), b"hello");
     assert!(!media.join("a.txt").exists());
@@ -620,7 +622,7 @@ fn move_folder_same_volume_keeps_symlinks() {
     )
     .unwrap();
 
-    assert!(matches!(outcome, MoveOutcome::Renamed(path) if path == rel("Sub/F")));
+    assert!(matches!(outcome, MoveOutcome::Renamed { final_path } if final_path == rel("Sub/F")));
     let moved = fixture.path("media").join("Sub/F");
     assert!(
         fs::symlink_metadata(moved.join("link"))
@@ -810,7 +812,9 @@ fn move_keep_both() {
     )
     .unwrap();
 
-    assert!(matches!(same, MoveOutcome::Renamed(path) if path == rel("Sub/a (1).txt")));
+    assert!(
+        matches!(same, MoveOutcome::Renamed { final_path } if final_path == rel("Sub/a (1).txt"))
+    );
     assert!(matches!(across, MoveOutcome::Copied { final_path } if final_path == rel("F (1)")));
     let (media, documents) = (fixture.path("media"), fixture.path("documents"));
     assert_eq!(fs::read(media.join("Sub/a.txt")).unwrap(), b"theirs");
@@ -848,7 +852,7 @@ fn move_replace_file() {
     )
     .unwrap();
 
-    assert!(matches!(same, MoveOutcome::Renamed(path) if path == rel("Sub/a.txt")));
+    assert!(matches!(same, MoveOutcome::Renamed { final_path } if final_path == rel("Sub/a.txt")));
     assert!(matches!(across, MoveOutcome::Copied { final_path } if final_path == rel("b.txt")));
     let media = fixture.path("media");
     assert_eq!(fs::read(media.join("Sub/a.txt")).unwrap(), b"new");
@@ -892,7 +896,7 @@ fn move_target_appearing_after_check_is_kept() {
         )
         .unwrap();
         assert!(
-            matches!(&outcome, MoveOutcome::Renamed(placed) if *placed == rel(expected)),
+            matches!(&outcome, MoveOutcome::Renamed { final_path } if *final_path == rel(expected)),
             "{outcome:?}"
         );
     }

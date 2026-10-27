@@ -12,4 +12,4 @@ pub use manage::{
     DeleteDialog, NewFolderButton, NewFolderDialog, RenameDialog, TransferDialog, TransferMode,
 };
 pub use tasks::TaskConflictDialog;
-pub use uploads::{ConflictDialog, UploadButton};
+pub use uploads::{UploadButton, UploadConflictDialog};

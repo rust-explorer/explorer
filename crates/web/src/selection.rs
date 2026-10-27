@@ -56,14 +56,6 @@ impl Selection {
         self.anchor = None;
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the table walks its rows instead")
-    )]
-    pub fn names(&self) -> impl Iterator<Item = &str> {
-        self.names.iter().map(String::as_str)
-    }
-
     pub fn len(&self) -> usize {
         self.names.len()
     }
@@ -84,7 +76,7 @@ mod tests {
     const ROWS: [&str; 5] = ["a", "b", "c", "d", "e"];
 
     fn names(selection: &Selection) -> Vec<&str> {
-        selection.names().collect()
+        selection.names.iter().map(String::as_str).collect()
     }
 
     #[test]
