@@ -174,3 +174,4 @@ picker-folders = Dossiers
 picker-empty = Aucun dossier ici
 picker-copy-here = Copier ici
 picker-move-here = Déplacer ici
+refresh = Actualiser

@@ -170,3 +170,4 @@ picker-folders = Folders
 picker-empty = No folders here
 picker-copy-here = Copy here
 picker-move-here = Move here
+refresh = Refresh

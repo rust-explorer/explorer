@@ -5,7 +5,7 @@ mod manage;
 mod tasks;
 mod uploads;
 
-pub use browse::{DropZone, FileTable};
+pub use browse::{DropZone, FileTable, RefreshButton};
 pub use common::{ErrorPanel, Notice};
 pub use layout::{ActivityPanel, Breadcrumb, Shell, Sidebar, SignOutButton};
 pub use manage::{

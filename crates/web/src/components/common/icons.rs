@@ -217,3 +217,12 @@ pub fn TrashIcon(#[props(default = "size-4".to_owned())] class: String) -> Eleme
         }
     }
 }
+
+#[component]
+pub fn RefreshIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M20 11a8 8 0 0 0-14.9-3M4 5v3h3M4 13a8 8 0 0 0 14.9 3M20 19v-3h-3" }
+        }
+    }
+}

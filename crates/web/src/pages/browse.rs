@@ -7,7 +7,8 @@ use shared::api::browse::{Listing, VolumeInfo};
 
 use crate::api;
 use crate::components::{
-    Breadcrumb, DropZone, ErrorPanel, FileTable, NewFolderButton, Shell, Sidebar, UploadButton,
+    Breadcrumb, DropZone, ErrorPanel, FileTable, NewFolderButton, RefreshButton, Shell, Sidebar,
+    UploadButton,
 };
 use crate::revision::Revision;
 use crate::routes::{Segment, Segments};
@@ -57,8 +58,10 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
         .and_then(|volumes| volumes.as_ref().ok())
         .and_then(|volumes| volumes.iter().find(|info| info.name == volume.as_str()))
         .map(|info| info.read_only);
+    let busy = !matches!(*listing.state().read(), UseResourceState::Ready);
     let actions = read_only.map(|read_only| {
         rsx! {
+            RefreshButton { busy }
             NewFolderButton { volume: volume.as_str().to_owned(), path: path.joined(), read_only }
             UploadButton { volume: volume.as_str().to_owned(), path: path.joined(), read_only }
         }

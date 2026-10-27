@@ -174,3 +174,4 @@ picker-folders = Carpetas
 picker-empty = No hay carpetas aquí
 picker-copy-here = Copiar aquí
 picker-move-here = Mover aquí
+refresh = Actualizar
