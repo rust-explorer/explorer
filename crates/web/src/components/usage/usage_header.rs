@@ -7,19 +7,18 @@ use shared::api::usage::UsageView;
 use crate::components::common::icons::WarningIcon;
 use crate::format::{format_count, format_modified, format_size, now_ms};
 use crate::routes::{Route, Segments};
-use crate::tasks::use_tasks;
+use crate::tasks::{Task, use_tasks};
 
 const LINK: &str =
     "truncate rounded hover:text-indigo-600 hover:underline dark:hover:text-indigo-400";
 const CURRENT: &str = "truncate font-semibold text-gray-900 dark:text-white";
-pub const PRIMARY: &str = "inline-flex min-h-10 items-center rounded-md bg-indigo-600 px-3 text-sm font-semibold text-white hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:bg-indigo-500 dark:hover:bg-indigo-400";
+const PRIMARY: &str = "inline-flex min-h-10 items-center rounded-md bg-indigo-600 px-3 text-sm font-semibold text-white hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:bg-indigo-500 dark:hover:bg-indigo-400 disabled:cursor-default disabled:opacity-60";
 pub const SECONDARY: &str = "inline-flex min-h-10 items-center rounded-md border border-slate-300 px-3 text-sm font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800";
 const WARNING: &str = "flex items-start gap-1.5 text-sm text-amber-700 dark:text-amber-400";
 
 /// The shown folder within the scan, its totals, when it was scanned, and what to do next.
 #[component]
 pub fn UsageHeader(id: String, view: UsageView) -> Element {
-    let tasks = use_tasks();
     let locale = i18n().language();
     let root = Segments::of(&view.root);
     let path = Segments::of(&view.path);
@@ -77,18 +76,34 @@ pub fn UsageHeader(id: String, view: UsageView) -> Element {
                 }
             }
             div { class: "mt-1 flex flex-wrap items-center gap-2",
-                button {
-                    r#type: "button",
-                    class: PRIMARY,
-                    onclick: move |_| tasks.analyze(rescan.clone(), true, true),
-                    {t!("usage-scan-again")}
-                }
+                ScanAgainButton { source: rescan }
                 Link {
                     to: Route::Browse { volume: view.volume.as_str().into(), path },
                     class: SECONDARY,
                     {t!("usage-open-in-explorer")}
                 }
             }
+        }
+    }
+}
+
+/// Scans `source` anew and opens the result; disabled while a scan of it is going on, so a
+/// double tap starts one scan.
+#[component]
+pub fn ScanAgainButton(source: Location) -> Element {
+    let tasks = use_tasks();
+    let busy = tasks
+        .list()
+        .read()
+        .newest_usage(&source.volume, &source.path)
+        .is_some_and(Task::is_active);
+    rsx! {
+        button {
+            r#type: "button",
+            class: PRIMARY,
+            disabled: busy,
+            onclick: move |_| tasks.analyze(source.clone(), true, true),
+            {t!("usage-scan-again")}
         }
     }
 }

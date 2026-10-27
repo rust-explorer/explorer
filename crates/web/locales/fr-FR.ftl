@@ -210,7 +210,7 @@ folder-size-computing = Calcul de la taille…
 task-analysing = Analyse de { $name }
 task-analysing-counts =
     { $count ->
-        [one] Analyse de { $name } — 1 fichier, { $size }
+        [one] Analyse de { $name } — { $files } fichier, { $size }
        *[other] Analyse de { $name } — { $files } fichiers, { $size }
     }
 task-view = Voir
@@ -220,17 +220,17 @@ usage-items = Contenu
 usage-empty = Ce dossier est vide.
 usage-files =
     { $count ->
-        [one] 1 fichier
+        [one] { $files } fichier
        *[other] { $files } fichiers
     }
 usage-folders =
     { $count ->
-        [one] 1 dossier
+        [one] { $folders } dossier
        *[other] { $folders } dossiers
     }
 usage-other-files =
     { $count ->
-        [one] 1 autre fichier
+        [one] { $files } autre fichier
        *[other] { $files } autres fichiers
     }
 usage-percent = { $percent } %
@@ -246,3 +246,4 @@ usage-cancelled-message = Cette analyse a été arrêtée avant la fin.
 usage-unavailable-title = Cette analyse n’est plus disponible
 usage-unavailable-message = Les résultats ne sont conservés qu’un temps après l’analyse. Analysez à nouveau le dossier pour voir ce qui occupe son espace.
 usage-failed-title = L’analyse a échoué
+usage-scan-finished = Analyse terminée

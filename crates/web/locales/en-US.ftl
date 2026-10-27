@@ -206,7 +206,7 @@ folder-size-computing = Calculating size…
 task-analysing = Analysing { $name }
 task-analysing-counts =
     { $count ->
-        [one] Analysing { $name } — 1 file, { $size }
+        [one] Analysing { $name } — { $files } file, { $size }
        *[other] Analysing { $name } — { $files } files, { $size }
     }
 task-view = View
@@ -216,17 +216,17 @@ usage-items = Contents
 usage-empty = This folder is empty.
 usage-files =
     { $count ->
-        [one] 1 file
+        [one] { $files } file
        *[other] { $files } files
     }
 usage-folders =
     { $count ->
-        [one] 1 folder
+        [one] { $folders } folder
        *[other] { $folders } folders
     }
 usage-other-files =
     { $count ->
-        [one] 1 other file
+        [one] { $files } other file
        *[other] { $files } other files
     }
 usage-percent = { $percent }%
@@ -242,3 +242,4 @@ usage-cancelled-message = This scan was stopped before it finished.
 usage-unavailable-title = This scan is no longer available
 usage-unavailable-message = Results are only kept for a while after a scan. Scan the folder again to see what takes up its space.
 usage-failed-title = The scan failed
+usage-scan-finished = Scan finished

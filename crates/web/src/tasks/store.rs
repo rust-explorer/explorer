@@ -35,6 +35,8 @@ pub struct Task {
     pub(super) open_when_posted: bool,
     /// When this tab saw it finish.
     finished_at_ms: Option<i64>,
+    /// Cleared from the activity panel, but still known for its result.
+    dismissed: bool,
 }
 
 impl Task {
@@ -124,6 +126,11 @@ impl TaskList {
         &self.tasks
     }
 
+    /// The tasks the activity panel lists.
+    pub fn shown(&self) -> impl Iterator<Item = &Task> {
+        self.tasks.iter().filter(|task| !task.dismissed)
+    }
+
     pub fn active_count(&self) -> usize {
         self.tasks.iter().filter(|task| task.is_active()).count()
     }
@@ -171,6 +178,7 @@ impl TaskList {
                     conflict: None,
                     open_when_posted: false,
                     finished_at_ms: None,
+                    dismissed: false,
                 });
                 Effect::Post { key, spec }
             })
@@ -202,6 +210,7 @@ impl TaskList {
                 conflict: None,
                 open_when_posted: false,
                 finished_at_ms: None,
+                dismissed: false,
             });
         }
         let mut effects = Vec::new();
@@ -298,11 +307,16 @@ impl TaskList {
         Vec::new()
     }
 
-    /// Forgets the finished tasks, here and on the server.
+    /// Forgets the finished tasks, here and on the server. A finished scan only leaves the
+    /// panel: its result stays on the server, which drops old ones by itself.
     pub fn clear_finished(&mut self) -> Vec<Effect> {
         let mut effects = Vec::new();
-        self.tasks.retain(|task| {
+        self.tasks.retain_mut(|task| {
             if task.is_active() {
+                return true;
+            }
+            if matches!(task.spec, TaskSpec::Usage { .. }) && task.state() == TaskState::Done {
+                task.dismissed = true;
                 return true;
             }
             if let Some(id) = task.server_id() {

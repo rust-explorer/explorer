@@ -2,6 +2,10 @@ use shared::api::tasks::{Location, TaskSpec, TaskState};
 
 use super::store::{Effect, Task, TaskList};
 
+/// The server keeps the results of a user's newest finished scans only, one per folder: see
+/// `MAX_USAGE_TREES` in `crates/server/src/tasks/mod.rs`.
+pub const MAX_USAGE_TREES: usize = 4;
+
 /// A folder's size as this tab's usage tasks know it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FolderSize {
@@ -32,15 +36,35 @@ impl TaskList {
         }
     }
 
+    /// Whether the server may still have the result of the finished scan `task`: it is among
+    /// the [`MAX_USAGE_TREES`] newest finished scans of distinct folders this tab knows.
+    fn result_kept(&self, task: &Task) -> bool {
+        let mut newer: Vec<&Location> = Vec::new();
+        for other in self.tasks().iter().rev() {
+            if other.state() != TaskState::Done {
+                continue;
+            }
+            let TaskSpec::Usage { source } = &other.spec else {
+                continue;
+            };
+            if other.key == task.key {
+                return newer.len() < MAX_USAGE_TREES;
+            }
+            if !newer.contains(&source) {
+                newer.push(source);
+            }
+        }
+        false
+    }
+
     /// Opens the newest usage task of `source` when there is one, otherwise starts one; with
-    /// `open`, its page opens once its id is known.
+    /// `open`, its page opens once its id is known. A scan still going on is always reused, a
+    /// finished one only without `force_new` and while the server likely keeps its result.
     pub fn analyze(&mut self, source: Location, open: bool, force_new: bool) -> Vec<Effect> {
-        let reused = if force_new {
-            None
-        } else {
-            self.newest_usage(&source.volume, &source.path)
-                .map(|task| (task.key, task.server_id().map(str::to_owned)))
-        };
+        let reused = self
+            .newest_usage(&source.volume, &source.path)
+            .filter(|task| task.is_active() || (!force_new && self.result_kept(task)))
+            .map(|task| (task.key, task.server_id().map(str::to_owned)));
         match reused {
             Some((_, Some(id))) => {
                 if open {
@@ -245,6 +269,68 @@ mod tests {
             list.analyze(location("Films"), true, true),
             [post("Films", 2)]
         );
+    }
+
+    #[test]
+    fn a_forced_rescan_reuses_one_still_going_on() {
+        let mut list = TaskList::default();
+        assert_eq!(
+            list.analyze(location("Films"), false, true),
+            [post("Films", 0)]
+        );
+        // A double tap while the first one is being created.
+        assert_eq!(list.analyze(location("Films"), true, true), []);
+        let effects = list.handle(Event::Posted {
+            key: TaskKey(0),
+            info: Box::new(info("a", "Films", TaskState::Running, 0)),
+        });
+        assert_eq!(effects.first(), Some(&open("a", "Films")));
+        assert_eq!(
+            list.analyze(location("Films"), true, true),
+            [open("a", "Films")]
+        );
+        assert_eq!(list.tasks().len(), 1);
+    }
+
+    #[test]
+    fn analyze_rescans_once_the_server_dropped_the_result() {
+        let mut list = TaskList::default();
+        for (id, path) in [("a", "A"), ("b", "B"), ("c", "C"), ("d", "D")] {
+            scanned(&mut list, info(id, path, TaskState::Done, 1));
+        }
+        // A rescan of a folder replaces its result, so it does not push another one out.
+        scanned(&mut list, info("d2", "D", TaskState::Done, 1));
+        assert_eq!(list.analyze(location("A"), true, false), [open("a", "A")]);
+
+        scanned(&mut list, info("e", "E", TaskState::Done, 1));
+        assert_eq!(list.analyze(location("B"), true, false), [open("b", "B")]);
+        assert_eq!(list.analyze(location("A"), true, false), [post("A", 6)]);
+        // Its size is still known.
+        assert_eq!(list.folder_size("media", "B"), FolderSize::Known(1));
+    }
+
+    #[test]
+    fn cleared_scans_leave_the_panel_but_keep_their_result() {
+        let mut list = TaskList::default();
+        scanned(&mut list, info("a", "Films", TaskState::Done, 500));
+        scanned(&mut list, info("b", "Music", TaskState::Cancelled, 0));
+        scanned(&mut list, info("c", "Photos", TaskState::Running, 0));
+        assert_eq!(
+            list.clear_finished(),
+            [Effect::Delete { id: "b".to_owned() }],
+            "the server keeps the finished scan's result"
+        );
+        let shown: Vec<&str> = list
+            .shown()
+            .filter_map(|task| Some(task.info.as_ref()?.id.as_str()))
+            .collect();
+        assert_eq!(shown, ["c"]);
+        assert_eq!(list.folder_size("media", "Films"), FolderSize::Known(500));
+        assert_eq!(
+            list.analyze(location("Films"), true, false),
+            [open("a", "Films")]
+        );
+        assert_eq!(list.clear_finished(), []);
     }
 
     #[test]

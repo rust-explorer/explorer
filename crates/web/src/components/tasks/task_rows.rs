@@ -15,7 +15,7 @@ const NOTE: &str = "mt-0.5 text-xs text-slate-500 dark:text-slate-400";
 #[component]
 pub fn TaskRows() -> Element {
     let list = use_tasks().list();
-    let tasks = list.read().tasks().to_vec();
+    let tasks: Vec<Task> = list.read().shown().cloned().collect();
 
     rsx! {
         for task in tasks {

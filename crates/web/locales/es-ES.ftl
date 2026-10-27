@@ -210,7 +210,7 @@ folder-size-computing = Calculando el tamaño…
 task-analysing = Analizando { $name }
 task-analysing-counts =
     { $count ->
-        [one] Analizando { $name } — 1 archivo, { $size }
+        [one] Analizando { $name } — { $files } archivo, { $size }
        *[other] Analizando { $name } — { $files } archivos, { $size }
     }
 task-view = Ver
@@ -220,17 +220,17 @@ usage-items = Contenido
 usage-empty = Esta carpeta está vacía.
 usage-files =
     { $count ->
-        [one] 1 archivo
+        [one] { $files } archivo
        *[other] { $files } archivos
     }
 usage-folders =
     { $count ->
-        [one] 1 carpeta
+        [one] { $folders } carpeta
        *[other] { $folders } carpetas
     }
 usage-other-files =
     { $count ->
-        [one] 1 archivo más
+        [one] { $files } archivo más
        *[other] { $files } archivos más
     }
 usage-percent = { $percent } %
@@ -246,3 +246,4 @@ usage-cancelled-message = Este análisis se detuvo antes de terminar.
 usage-unavailable-title = Este análisis ya no está disponible
 usage-unavailable-message = Los resultados solo se conservan un tiempo tras el análisis. Vuelve a analizar la carpeta para ver qué ocupa su espacio.
 usage-failed-title = El análisis ha fallado
+usage-scan-finished = Análisis terminado

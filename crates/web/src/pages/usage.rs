@@ -7,7 +7,7 @@ use shared::api::tasks::{Location, TaskState};
 use shared::api::usage::UsageView;
 
 use crate::api::{self, ApiFailure};
-use crate::components::usage::{PRIMARY, SECONDARY};
+use crate::components::usage::{SECONDARY, ScanAgainButton};
 use crate::components::{
     ErrorPanel, Shell, Sidebar, UsageHeader, UsageList, error_message, file_name,
 };
@@ -37,6 +37,14 @@ pub fn Usage(id: String, volume: Segment, path: Segments) -> Element {
     let wanted = task
         .as_ref()
         .is_none_or(|task| task.state() == TaskState::Done);
+    // Screen readers hear the scan start and end, not every count in between.
+    let active = task.as_ref().is_some_and(Task::is_active);
+    let mut watched = use_signal(|| false);
+    use_effect(use_reactive!(|active| {
+        if active {
+            watched.set(true);
+        }
+    }));
     let url = api::usage_url(&id, &path.joined());
     let mut view = use_resource(use_reactive!(|url, wanted| async move {
         let result = if wanted {
@@ -90,6 +98,13 @@ pub fn Usage(id: String, volume: Segment, path: Segments) -> Element {
         .filter(|(fetched_url, _)| *fetched_url == url && ready)
         .and_then(|(_, result)| result);
 
+    let status = if active {
+        t!("usage-scanning", name: folder_name(&source))
+    } else if watched() && matches!(fetched, Some(Ok(_))) {
+        t!("usage-scan-finished")
+    } else {
+        String::new()
+    };
     let content = match (task, fetched) {
         (Some(task), _) if task.is_active() => rsx! {
             Scanning { task }
@@ -124,8 +139,17 @@ pub fn Usage(id: String, volume: Segment, path: Segments) -> Element {
 
     rsx! {
         Shell { user, sidebar,
+            p { role: "status", class: "sr-only", {status} }
             div { class: "mx-auto w-full max-w-3xl", {content} }
         }
+    }
+}
+
+fn folder_name(source: &Location) -> String {
+    if source.path.is_empty() {
+        source.volume.clone()
+    } else {
+        file_name(&source.path).to_owned()
     }
 }
 
@@ -140,11 +164,7 @@ fn Scanning(task: Task) -> Element {
     let tasks = use_tasks();
     let locale = i18n().language();
     let source = task.spec.source().clone();
-    let name = if source.path.is_empty() {
-        source.volume.clone()
-    } else {
-        file_name(&source.path).to_owned()
-    };
+    let name = folder_name(&source);
     let (files, bytes) = task
         .info
         .as_ref()
@@ -154,7 +174,7 @@ fn Scanning(task: Task) -> Element {
     rsx! {
         section { class: CARD,
             h1 { class: TITLE, {t!("usage-scanning", name: name)} }
-            p { role: "status", class: "{TEXT} tabular-nums",
+            p { class: "{TEXT} tabular-nums",
                 {t!("usage-files", count: files, files: format_count(files, &locale))}
                 " · "
                 {format_size(bytes, &locale)}
@@ -174,7 +194,6 @@ fn Scanning(task: Task) -> Element {
 /// A scan that stopped or is gone, offering to scan `source` again.
 #[component]
 fn Stopped(title: String, message: String, source: Location) -> Element {
-    let tasks = use_tasks();
     let browse = Route::Browse {
         volume: source.volume.as_str().into(),
         path: Segments::of(&source.path),
@@ -184,12 +203,7 @@ fn Stopped(title: String, message: String, source: Location) -> Element {
             h1 { class: TITLE, {title} }
             p { class: TEXT, {message} }
             div { class: "mt-6 flex flex-wrap items-center gap-3",
-                button {
-                    r#type: "button",
-                    class: PRIMARY,
-                    onclick: move |_| tasks.analyze(source.clone(), true, true),
-                    {t!("usage-scan-again")}
-                }
+                ScanAgainButton { source }
                 Link { to: browse, class: SECONDARY, {t!("usage-open-in-explorer")} }
             }
         }
@@ -199,7 +213,6 @@ fn Stopped(title: String, message: String, source: Location) -> Element {
 /// A failed scan: why, the request id to report it with, and a new try.
 #[component]
 fn Failed(failure: ApiFailure, source: Location) -> Element {
-    let tasks = use_tasks();
     let request_id = match &failure {
         ApiFailure::Server(body) => body.request_id.clone(),
         _ => None,
@@ -214,12 +227,7 @@ fn Failed(failure: ApiFailure, source: Location) -> Element {
                 }
             }
             div { class: "mt-6 flex flex-wrap items-center gap-3",
-                button {
-                    r#type: "button",
-                    class: PRIMARY,
-                    onclick: move |_| tasks.analyze(source.clone(), true, true),
-                    {t!("usage-scan-again")}
-                }
+                ScanAgainButton { source }
             }
         }
     }
