@@ -9,7 +9,7 @@ browser ──HTTPS──> reverse proxy ──HTTP──> explorer container
                                             │   ├─ /healthz    health check
                                             │   ├─ /api/*      JSON API
                                             │   ├─ /auth/*     OIDC login/callback/logout
-                                            │   ├─ /files/*    upload (tus) / download / zip
+                                            │   ├─ /files/*    upload (tus) / download / zip / thumbnail
                                             │   └─ /*          web bundle (WASM), SPA fallback
                                             ├─ /data/<volume>  mounted volumes
                                             └─ /config         state (SQLite, thumbnail cache)
@@ -19,7 +19,9 @@ Status: `/healthz`, the web bundle, sign-in (`/auth/*`, `/api/me`), browsing
 (`/api/volumes*`), downloads (`/files/download`, `/files/zip`) and resumable uploads
 (`/files/uploads*`, `/api/uploads`, `/api/volumes/{volume}/folders`) are implemented, and so
 are managing files: new folder, rename, multi-select and zip of several entries, and delete,
-copy and move as background tasks (`/api/volumes/{volume}/rename`, `/api/tasks*`).
+copy and move as background tasks (`/api/volumes/{volume}/rename`, `/api/tasks*`). The polish
+milestone adds a refresh button, favorite folders, search by name, a grid view with image
+thumbnails, space usage, dark mode and a read-only notice.
 
 ## Crates
 
@@ -27,7 +29,7 @@ copy and move as background tasks (`/api/volumes/{volume}/rename`, `/api/tasks*`
 |---|---|---|
 | `explorer-server` | `crates/server` | Axum server, binary `explorer`. |
 | `explorer-web` | `crates/web` | Dioxus web app (WASM), styled with Tailwind, localised (`en`, `fr`, `es`). |
-| `explorer-shared` | `crates/shared` | Types used by both sides: the API DTOs, one module per domain under `api/` (`auth`, `browse`, `conflict`, `error`, `health`, `tasks`, `uploads`; `conflict` holds the conflict policy that uploads, renames, copies and moves share), and the tus metadata encoding. |
+| `explorer-shared` | `crates/shared` | Types used by both sides: the API DTOs, one module per domain under `api/` (`auth`, `browse`, `conflict`, `error`, `favorites`, `health`, `search`, `tasks`, `uploads`, `usage`; `conflict` holds the conflict policy that uploads, renames, copies and moves share), and the tus metadata encoding. |
 
 The web app talks to the server over a plain REST-style JSON API rather than Dioxus
 server functions, so the API stays usable by other clients.
@@ -253,6 +255,89 @@ How tasks run:
   for a transfer): a rename, a delete, a finished transfer (with `files`, `bytes` and
   `skipped` for a copy); failures at `warn`.
 
+## Favorites, search and thumbnails
+
+All of these only read, so they work on read-only volumes.
+
+| Route | Purpose |
+|---|---|
+| `GET /api/favorites` | The user's favorite folders, oldest first: `volume`, `path` and `exists` (false once the volume or the folder is gone or no longer a folder). |
+| `PUT /api/favorites` | Body `{"volume", "path"}`. Adds a folder (it must exist and be readable); adding one that is already there is a no-op. Answers 204. |
+| `DELETE /api/favorites?volume=&path=` | Removes one, whether or not it still exists. Answers 204. |
+| `GET /api/volumes/{volume}/search?q=` | Case-insensitive substring match on names under the whole volume: `{volume, query, hits, truncated}`, each hit with `path`, `kind` (`dir` or `file`), `size` and `modified_ms`. |
+| `GET /files/thumbnail?volume=&path=&v=` | A preview of an image, at most 320 px on its longest side. `v` only busts the browser cache. |
+
+Favorites are stored per user (the OIDC `sub`) in the `favorites` table of `explorer.db`, at
+most 100 per user; the 101st is 409 `favorites_full`. They are bookmarks: nothing checks them
+again until they are listed, and a missing folder is shown greyed out until the user removes
+it.
+
+Search walks the volume breadth-first from its root, so shallow matches come first, under the
+same rules as a zip (the staging folder is skipped, symlinked folders are not entered,
+entries listed as `other` are never matched; an unreadable folder is skipped). The query is
+trimmed and needs at least 2 characters (`invalid_path` otherwise). It stops, with
+`truncated: true`, at 200 hits or after 20 seconds. The walk runs on the blocking pool and
+stops as soon as the client drops the request (a new keystroke, a closed tab), so a
+superseded search does not keep a thread busy. Nothing is indexed.
+
+Thumbnails are made for `jpg`, `jpeg`, `png`, `gif` and `webp` files of at most 64 MiB;
+anything else, a missing file or an image that cannot be decoded is 404
+`thumbnail_unavailable` (a decode failure is logged at `debug` only). The image is decoded
+within limits, shrunk, rotated according to its EXIF orientation and **re-encoded**: PNG when
+it has transparency, JPEG otherwise. The user's bytes are never sent. At most 2 images are
+decoded at once across all users; a request that is cancelled mid-render keeps its slot until
+the work ends. Results are cached as files under `/config/cache/thumbnails` (see
+[configuration.md](configuration.md#thumbnail-cache)), keyed by a hash of the volume, path,
+size, modification time and a rendering version, so an edited file gets a new thumbnail. The
+response carries a strong `ETag` and `Cache-Control: private, max-age=604800`, and `If-None-Match`
+is answered 304. See [security.md](security.md#thumbnails) for the headers.
+
+New error codes (JSON error shape as above):
+
+| Code | Status | Meaning |
+|---|---|---|
+| `favorites_full` | 409 | The user already has 100 favorites. |
+| `thumbnail_unavailable` | 404 | No thumbnail for this file: unsupported type, too large, missing, or not decodable. |
+
+Logs: `favorite_add` and `favorite_remove` at `info`; `search` (with `hits`, `truncated`,
+`elapsed_ms`) and `thumbnail` at `debug`. A search query is only logged at `debug`.
+
+## Space usage
+
+A scan is a task like a copy: `POST /api/tasks` with `{"op": "usage", "source": {volume, path}}`
+(the source must be a folder the user can read, on any volume, read-only ones included). It
+shares the queue of 2 running tasks, can be cancelled while it runs, and reports `files_done`
+and `bytes_done` as it goes. When it is `done`, the result is read with
+`GET /api/tasks/{id}/usage?path=`: one folder of the scanned tree (the scanned folder by
+default; `path` must be at or below it, else 404 `path_not_found`) as `UsageView`: `bytes`,
+`files`, `dirs`, `incomplete`, `collapsed`, and its `items` biggest first. An item is a
+sub-folder, one of the 20 biggest files of the folder, or `other_files` (the smaller files
+together, and anything beyond 200 items). Navigating the tree costs no new scan.
+
+How a scan counts:
+
+- Sizes are the space allocated on disk (`st_blocks` x 512), not the apparent size, so a
+  sparse or compressed file counts for what it takes.
+- A file with several hard links is counted once.
+- It never crosses a filesystem boundary (a nested mount is skipped, like `du -x`) and never
+  follows a symlink; symlinks and other special files count as their own small entry.
+- `.explorer-uploads` is skipped, so staged data is not counted.
+- A folder it cannot read is skipped and marks itself and every folder above it as
+  `incomplete`: its total is a lower bound.
+- A volume is walked by 4 threads. It keeps at most 1,000,000 folders as nodes; beyond that
+  the deeper sub-folders are counted into their last listed ancestor and `collapsed` is set.
+- Folders are opened without following symlinks and checked against the inode seen when they
+  were listed, so a folder swapped for a symlink meanwhile is not entered.
+
+The tree is kept in memory with the task. A user keeps at most 4 finished scans (`MAX_USAGE_TREES`)
+and one per folder: a new scan of a folder replaces the previous one, and the oldest beyond four
+are dropped. A dismissed task, a task older than an hour and a restart lose their result, and
+the usage route then answers 404 `task_not_found`, so the web app offers a new scan. Access is
+checked again on every read of a result.
+
+The scan is logged at `info` (`action` = `usage`, with `files`, `dirs`, `bytes`, `skipped` and
+`elapsed_ms`); a failure at `warn`.
+
 ## Web app
 
 Routes: `/` (opens the first volume, or says there is none), `/browse/<volume>/<path>`,
@@ -280,6 +365,21 @@ refreshes the listing and the free space when one finishes. A tab shows the task
 on load it also lists the user's queued and running tasks once and adopts them, so a reload
 keeps showing them until they finish (an adopted task never asks about a conflict, it is past
 that step).
+
+Polish: a refresh button next to the breadcrumb reloads the listing, the free space and the
+favorites. The star next to the folder name adds or removes a favorite; favorites are listed
+in the sidebar. The search field in the header (an icon that expands on phones) waits 300 ms
+after the last keystroke, needs 2 characters and replaces the listing with the hits, each
+linking to its folder; a "more results exist" note shows when the server truncated. A toggle
+switches the folder between the list and a grid of tiles; images show a thumbnail and fall
+back to the file icon when none is available. The choice is kept in `localStorage`
+(`explorer.view`) and the grid is virtualised by rows. "Analyze space" on a folder queues a
+usage task and opens `/usage/<task>/<volume>/<path>`, a bar list of sub-folders and big
+files that opens a folder on click, with a link back to the listing; a folder row can also
+show its size once a scan covers it. A scan that is closed in the activity panel keeps its
+result for the tab until dismissed. Everything follows the system's light or dark setting
+(`prefers-color-scheme`, `color-scheme: light dark`). On a read-only volume a notice says
+that changes are disabled and the write controls are off or absent.
 
 Uploads: the header has an Upload button (a floating "+" on narrow screens) that offers
 files or a folder, and files or folders can be dropped on the folder listing. On a read-only volume
@@ -347,6 +447,9 @@ One folder per domain under `crates/server/src`:
     folder tree.
   - `transfer` — copy and move: `check` (can it be done now, no folder into itself),
     `copy` (staged files, plan and progress), `move` (rename, or copy then delete the source).
+  - `search` — breadth-first name search with a hit limit, a deadline and cancellation.
+  - `usage` — the space scan: `scan` (parallel walk of a folder by file descriptor) and the
+    tree it builds, with the per-folder views.
   - `error` — storage errors, mapped to API error codes in `http::error`.
 - `browse` — `GET /api/volumes`, `GET /api/volumes/{volume}/entries`,
   `POST /api/volumes/{volume}/folders` and `POST /api/volumes/{volume}/rename`.
@@ -358,6 +461,14 @@ One folder per domain under `crates/server/src`:
     ones.
   - `run` — the queue: a semaphore of 2 permits and a blocking thread per running task.
   - `transfer` — the copy and move tasks, built on `storage`.
+  - `usage` — the usage task (access check, scan, log) and `GET /api/tasks/{id}/usage`.
+- `favorites` — `routes` (`/api/favorites`) and `store` (the `favorites` table, per user, capped at 100).
+- `search` — `GET /api/volumes/{volume}/search`: validation, cancellation when the request is
+  dropped, DTO mapping; the walk is `storage::search`.
+- `thumbnails` — `GET /files/thumbnail`.
+  - `routes` — access, `ETag`, headers, the render permit.
+  - `render` — decoding within limits, orientation, shrinking and re-encoding.
+  - `cache` — the files under `/config/cache/thumbnails`, their key, the touch and the sweep.
 - `uploads` — resumable uploads.
   - `routes` — `GET /api/uploads`, the user's pending uploads.
   - `tus` — the `/files/uploads` tus endpoints: `protocol` (headers, version check,
@@ -375,7 +486,9 @@ Under `crates/web/src`:
 - `api` — fetch helpers and API failures; `urls` builds the API and file URLs.
 - `tasks` — the background task list of the tab: `store` (state machine: tasks, events,
   effects, polling), `conflict` (the existing entry a copy or move would land on),
-  `transport` (the requests).
+  `usage` (the scans started from this tab and their results), `transport` (the requests).
+- `favorites` (the user's favorites, reloaded with the revision), `search` (the query shared by
+  the header field and the browse page), `view_mode` (list or grid, remembered).
 - `selection` (checked rows), `actions` (the row and selection actions by entry kind and
   volume), `names` (name validation), `conflict` (the Replace, Keep both or Cancel decision
   shared with uploads), `revision` (a counter bumped when something changed on disk, so the
@@ -384,8 +497,9 @@ Under `crates/web/src`:
   machine: items, effects and events, the reducer), `controller`, `transport`, `drop`,
   `speed`.
 - `components` — grouped by screen: `layout` (shell, sidebar, breadcrumb, user menu,
-  sign-out, activity panel), `browse` (file table and rows, row menu, selection bar, virtual
-  list, drop zone), `manage` (new folder, rename, delete and move or copy dialogs, folder
-  picker), `tasks` (task rows, conflict dialog), `uploads` (upload button, upload rows,
+  sign-out, activity panel), `browse` (file table, grid and tiles, rows, row menu, selection bar,
+  refresh and view toggle, read-only notice, virtual list, drop zone), `manage` (new folder, rename, delete and move or copy dialogs, folder
+  picker), `favorites` (sidebar list, star), `search` (header field, results), `usage` (analyze
+  button, folder size, header and bar list), `tasks` (task rows, conflict dialog), `uploads` (upload button, upload rows,
   conflict dialog), `common` (icons, menu, modal, conflict prompt, notice, error panel).
-- `pages` — one component per route.
+- `pages` — one component per route (`browse`, `usage`, ...).
