@@ -1,7 +1,7 @@
 # Security
 
-This page describes what Explorer protects against as of the browsing, download and
-upload milestone. To report a vulnerability, follow [SECURITY.md](../SECURITY.md); do not open a
+This page describes what Explorer protects against as of the browsing, download,
+upload and file management milestone. To report a vulnerability, follow [SECURITY.md](../SECURITY.md); do not open a
 public issue.
 
 ## Scope
@@ -44,7 +44,9 @@ Login is a harmless `GET` that only starts a sign-in; the callback is protected 
 `state` parameter, which is bound to the session and usable once.
 
 This covers every write: creating, appending to and cancelling an upload (`POST`, `PATCH`,
-`DELETE` under `/files/uploads`) and creating a folder. Uploads use same-origin `XHR` and
+`DELETE` under `/files/uploads`), creating a folder, renaming, and creating or cancelling a
+task (`POST /api/tasks`, `DELETE /api/tasks/{id}`). The zip of several entries is a `GET` and
+changes nothing. Uploads use same-origin `XHR` and
 `fetch`, so the browser sends an `Origin` the check accepts.
 
 ## Open redirects
@@ -140,6 +142,66 @@ Names that are not valid UTF-8 are skipped with a warning.
 - **Logs.** Uploads are logged at `info` with the user's `sub`, the volume and the path (and
   `bytes` and `final_path` on completion); folder creation and sweeps likewise; failures at
   `warn`. File contents are never logged.
+
+## Managing files
+
+New folder, rename, delete, copy and move reuse the confinement of the sections above: every
+path goes through `(volume, path)` parsing and cap-std, and a symlink or `..` cannot make an
+action reach outside its volume.
+
+- **Write access.** Creating a folder, renaming, deleting and moving need write access to
+  the volume, checked before anything is touched (403 `read_only_volume`); a move checks it on
+  the source volume too, since it removes from it. Copying needs only to read the source, and
+  write access to the destination volume. Creating a task checks all of this up front.
+- **Reserved paths.** `.explorer-uploads` is refused as a path, as a new name and as a
+  destination, wherever it is reached from (including through a symlink to the volume root).
+  It cannot be renamed, deleted, copied, moved or zipped. The volume root itself cannot be
+  renamed, deleted, copied or moved.
+- **Symlinks.** Delete and rename act on the symlink itself and never follow it: deleting a
+  symlink removes the link, not its target. A move within a volume renames the link, and a
+  copy, like a move across volumes, reads through a relative symlink that stays
+  inside the volume, as a download does, so the destination gets a regular file or folder
+  (a symlink to a folder inside a copied folder is skipped and counted as `skipped`, which
+  also rules out cycles, as do sockets, FIFOs and devices); a move across volumes then removes
+  only the link from the source. An absolute, broken or escaping symlink (listed as `other`)
+  cannot be the source of a copy or move (`path_not_found`); deleting or renaming one is
+  allowed, since that touches only the link.
+- **No silent overwrite.** The conflict policy defaults to `fail`. Replace is only for a file
+  over a file: it is refused (`is_a_directory`) when the source or the existing target is a
+  folder, and the web app does not offer it then. A copied folder is created under a free
+  name and is never merged into an existing folder, even one that appeared after the check.
+  A rename never replaces by accident: with `fail` and `keep_both` it uses a no-replace
+  rename, so a name taken meanwhile is not overwritten (with `keep_both`, or with `fail` when
+  the name appeared after the check, the entry gets a "keep both" name: `Film (1).mkv`).
+  A move within a volume is one no-replace rename under the same rules.
+- **Into itself.** Copying or moving a folder into itself or one of its descendants is
+  refused (400 `invalid_destination`). The destination is walked up by device and inode, so a
+  symlink leading into the folder is caught as well; a symlink to the volume root as source
+  is treated as the root. Moving an entry into the folder it already is in is refused too.
+- **Cross-volume moves.** Volumes may be different filesystems, so a move to another volume
+  copies first, then deletes. The source is touched only after the copy is complete: a
+  failed or cancelled copy leaves it whole and removes the partial destination. After that,
+  each copied file is deleted from the source, then the folders left empty. What the copy
+  skipped (see Symlinks) stays in the source, with its folders, and is reported in `skipped`.
+  If a delete fails midway, both copies remain; nothing is lost, but the move is reported as
+  failed. A move within one volume that hits a nested mount falls back to the same copy and delete.
+  Copies use the staging directory of the destination volume, so their data never leaves it
+  until it is renamed into place.
+- **Tasks.** A task belongs to the OIDC `sub` that created it; listing, cancelling or
+  dismissing another user's task is a 404 `task_not_found`, and the ids are 128 random bits.
+  Tasks are kept in memory only: a restart loses them, running ones included, and a
+  delete or move interrupted that way may be half done, and a copy may leave a partial
+  folder or a staged file in `.explorer-uploads` (the hourly sweep removes the staged file
+  after 24 hours). At most 2 tasks run at
+  once for the whole server, so a large copy delays others. A finished task is forgotten after
+  an hour. Failures keep the request id of the request that created the task.
+- **Zip of several entries.** Each `name=` must be a single valid component: empty, `.`,
+  `..`, containing `/`, a control character or the reserved name is `invalid_path`, and a
+  name that does not exist is `path_not_found`. Entries are resolved and walked under the
+  same rules as a folder zip, and need read access only.
+- **Logs.** A new folder, rename, delete and finished copy or move are logged at `info`
+  with the user's `sub`, `action`, `volume`, `path` (and `dest_volume` and `final_path`);
+  failures at `warn`. File contents are never logged.
 
 ## Downloads
 
