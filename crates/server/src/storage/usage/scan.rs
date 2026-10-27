@@ -269,11 +269,12 @@ impl Scan<'_> {
     /// Opens a sub-folder without following symlinks, and only if it is still the folder that
     /// was measured.
     fn open(&self, source: &Source) -> Option<OwnedFd> {
+        let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
         let (parent, name, ino) = match source {
-            Source::Opened(fd) => return fd.try_clone().ok(),
+            // cap-std opens folders with O_PATH on Linux, which cannot be listed: reopen it.
+            Source::Opened(fd) => return rustix::fs::openat(fd, c".", flags, Mode::empty()).ok(),
             Source::At { parent, name, ino } => (parent, name, *ino),
         };
-        let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
         let fd = rustix::fs::openat(parent.as_fd(), name.as_c_str(), flags, Mode::empty()).ok()?;
         let stat = Measured::of(&rustix::fs::fstat(&fd).ok()?);
         (stat.id() == (self.dev, ino)).then_some(fd)
