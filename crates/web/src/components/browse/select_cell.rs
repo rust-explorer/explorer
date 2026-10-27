@@ -32,10 +32,15 @@ pub fn SelectCell(name: String, checked: bool, on_select: EventHandler<bool>) ->
     }
 }
 
-/// The header checkbox: everything, nothing, or partly (`indeterminate`).
+/// The header checkbox: everything, nothing, or partly (`indeterminate`). `input` holds the box,
+/// for dialogs that hand focus back to it.
 #[component]
-pub fn SelectAll(checked: bool, partial: bool, on_toggle: EventHandler<()>) -> Element {
-    let mut input = use_signal(|| None::<Rc<MountedData>>);
+pub fn SelectAll(
+    mut input: Signal<Option<Rc<MountedData>>>,
+    checked: bool,
+    partial: bool,
+    on_toggle: EventHandler<()>,
+) -> Element {
     use_effect(use_reactive!(|checked, partial| {
         if let Some(input) = input() {
             show_state(&input, checked, partial);

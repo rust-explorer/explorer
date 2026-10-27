@@ -60,12 +60,19 @@ pub fn FileTable(
     let mut renaming = use_signal(|| None::<Renaming>);
     let mut deleting = use_signal(|| None::<Deleting>);
     let mut transferring = use_signal(|| None::<Transferring>);
+    // A renamed entry whose ⋯ takes focus once the refreshed listing shows it.
+    let mut focus_menu_of = use_signal(|| None::<String>);
+    let select_all = use_signal(|| None::<Rc<MountedData>>);
     let rows = use_memo(move || Rc::new(sorted(&entries.read(), sort())));
     let now = use_memo(move || {
         let _ = entries.read();
         now_ms()
     });
     let total = rows.read().len();
+    let reveal = focus_menu_of
+        .read()
+        .as_ref()
+        .and_then(|name| rows.read().iter().position(|entry| &entry.name == name));
     use_effect(move || {
         let rows = rows.read();
         let names: Vec<&str> = rows.iter().map(|entry| entry.name.as_str()).collect();
@@ -131,6 +138,8 @@ pub fn FileTable(
 
     let on_selection_action = {
         let (volume, path) = (volume.clone(), path.clone());
+        // The bar goes away on confirm: focus goes back to the select-all box.
+        let trigger = select_all().map(FocusTarget);
         move |action: RowAction| match action {
             RowAction::Download => {
                 let chosen: Vec<(&str, EntryKind)> = selected
@@ -143,13 +152,13 @@ pub fn FileTable(
             }
             RowAction::Delete => deleting.set(Some(Deleting {
                 names: selected.iter().map(|(name, _)| name.clone()).collect(),
-                trigger: None,
+                trigger: trigger.clone(),
                 from_selection: true,
             })),
             RowAction::CopyTo | RowAction::MoveTo => transferring.set(Some(Transferring {
                 mode: transfer_mode(action),
                 entries: selected.clone(),
-                trigger: None,
+                trigger: trigger.clone(),
                 from_selection: true,
             })),
             RowAction::Rename => {}
@@ -190,6 +199,7 @@ pub fn FileTable(
                     aria_rowindex: 1,
                     class: if selected_count == 0 { "{COLUMNS} h-9 text-xs font-medium {MUTED}" } else { "flex h-9 items-center gap-x-3 pl-3 text-xs" },
                     SelectAll {
+                        input: select_all,
                         checked: total > 0 && selected_count == total,
                         partial: selected_count > 0 && selected_count < total,
                         on_toggle: on_select_all,
@@ -217,11 +227,13 @@ pub fn FileTable(
                     class: "min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]",
                     total,
                     row_height: ROW_HEIGHT,
+                    reveal,
                     row: move |index: usize| {
                         let entry = rows.read()[index].clone();
                         let menu_open = menu_name.as_deref() == Some(entry.name.as_str());
                         let is_selected = chosen.contains(&entry.name);
                         let has_menu = !menu_actions(&entry, read_only).is_empty();
+                        let take_focus = focus_menu_of.read().as_deref() == Some(entry.name.as_str());
                         rsx! {
                             FileRow {
                                 volume: volume.clone(),
@@ -232,8 +244,13 @@ pub fn FileTable(
                                 has_menu,
                                 menu_open,
                                 selected: is_selected,
+                                take_focus,
+                                on_focus_taken: move |()| focus_menu_of.set(None),
                                 on_select,
-                                on_menu: move |request| menu.set(Some(request)),
+                                on_menu: move |request| {
+                                    focus_menu_of.set(None);
+                                    menu.set(Some(request));
+                                },
                             }
                         }
                     },
@@ -262,6 +279,7 @@ pub fn FileTable(
                 entries,
                 return_focus: trigger,
                 on_close: move |()| renaming.set(None),
+                on_renamed: move |name| focus_menu_of.set(Some(name)),
             }
         }
         if let Some(Transferring { mode, entries, trigger, from_selection }) = transferring() {

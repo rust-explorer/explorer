@@ -16,7 +16,7 @@ const INPUT_ID: &str = "rename-name";
 const ERROR_ID: &str = "rename-error";
 
 /// Renames `entry`, which lives in `parent` and is listed in `entries`; a taken name asks what
-/// to do and sends again with the chosen policy.
+/// to do and sends again with the chosen policy. `on_renamed` gets the final name.
 #[component]
 pub fn RenameDialog(
     volume: String,
@@ -24,6 +24,7 @@ pub fn RenameDialog(
     entry: Entry,
     entries: ReadSignal<Rc<Vec<Entry>>>,
     on_close: EventHandler<()>,
+    on_renamed: EventHandler<String>,
     #[props(default)] return_focus: Option<FocusTarget>,
 ) -> Element {
     let Revision(mut revision) = use_context();
@@ -55,9 +56,10 @@ pub fn RenameDialog(
         problem.set(None);
         spawn(async move {
             match api::post_json_body::<_, Renamed>(&url, &body).await {
-                Ok(_) => {
+                Ok(renamed) => {
                     *revision.write() += 1;
                     on_close.call(());
+                    on_renamed.call(final_name(&renamed.path).to_owned());
                 }
                 Err(ApiFailure::Server(body)) if body.code == "already_exists" => {
                     busy.set(false);
@@ -189,6 +191,10 @@ fn stem_end(name: &str, kind: EntryKind) -> u32 {
     u32::try_from(stem.encode_utf16().count()).unwrap_or(u32::MAX)
 }
 
+fn final_name(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
 /// Replace is only offered for a file over a file.
 fn allow_replace(source: EntryKind, target: Option<EntryKind>) -> bool {
     source == EntryKind::File && target == Some(EntryKind::File)
@@ -212,6 +218,12 @@ mod tests {
         ] {
             assert_eq!(stem_end(name, kind), end, "{name:?}");
         }
+    }
+
+    #[test]
+    fn final_name_is_the_last_segment() {
+        assert_eq!(final_name("Films/2024/clip (1).mkv"), "clip (1).mkv");
+        assert_eq!(final_name("notes.txt"), "notes.txt");
     }
 
     #[test]

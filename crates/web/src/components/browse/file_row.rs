@@ -32,10 +32,22 @@ pub fn FileRow(
     has_menu: bool,
     menu_open: bool,
     selected: bool,
+    /// Moves focus to the ⋯ button once it is rendered, then calls `on_focus_taken`.
+    #[props(default)]
+    take_focus: bool,
+    #[props(default)] on_focus_taken: EventHandler<()>,
     on_select: EventHandler<(String, bool)>,
     on_menu: EventHandler<MenuRequest>,
 ) -> Element {
     let mut more = use_signal(|| None::<Rc<MountedData>>);
+    use_effect(use_reactive!(|take_focus| {
+        if take_focus && let Some(button) = more() {
+            on_focus_taken.call(());
+            spawn(async move {
+                let _ = button.set_focus(true).await;
+            });
+        }
+    }));
     let locale = i18n().language();
     let size = entry
         .size
