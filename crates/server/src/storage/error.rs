@@ -26,8 +26,9 @@ pub enum StorageError {
     /// A rename onto another filesystem: a mount nested in the volume.
     #[error("on another filesystem than the volume: {}", .0.as_str())]
     CrossDevice(RelPath),
-    /// A rename into the entry itself or one of its descendants.
-    #[error("invalid destination: {}", .0.as_str())]
+    /// The entry (the path of the source) can't go to the chosen folder: into itself, one of
+    /// its descendants, or for a move, the folder it is already in.
+    #[error("invalid destination for {}", .0.as_str())]
     InvalidDestination(RelPath),
     /// A copy or move noticed its task was cancelled; never an HTTP error.
     #[error("cancelled")]

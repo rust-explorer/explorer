@@ -162,6 +162,16 @@ impl ApiError {
     /// Maps a storage failure on `volume`, logging it; an I/O error stays out of the response.
     #[must_use]
     pub fn from_storage(volume: &str, err: StorageError) -> Self {
+        Self::map_storage(volume, err, true)
+    }
+
+    /// Like [`ApiError::from_storage`], for a failure the caller logged with its user and action.
+    #[must_use]
+    pub fn from_logged_storage(volume: &str, err: StorageError) -> Self {
+        Self::map_storage(volume, err, false)
+    }
+
+    fn map_storage(volume: &str, err: StorageError, log: bool) -> Self {
         let (status, code, label, path) = match err {
             StorageError::NotFound(path) => {
                 (StatusCode::NOT_FOUND, "path_not_found", "Not found: ", path)
@@ -191,15 +201,19 @@ impl ApiError {
                 path,
             ),
             StorageError::NoSpace(path) => {
-                tracing::warn!(volume, path = path.as_str(), "not enough space");
+                if log {
+                    tracing::warn!(volume, path = path.as_str(), "not enough space");
+                }
                 return Self::insufficient_storage(volume, path.as_str());
             }
             StorageError::OutsideVolume(path) => {
-                tracing::warn!(
-                    volume,
-                    path = path.as_str(),
-                    "path points outside the volume"
-                );
+                if log {
+                    tracing::warn!(
+                        volume,
+                        path = path.as_str(),
+                        "path points outside the volume"
+                    );
+                }
                 let message = format!(
                     "{} points outside the volume",
                     display_path(volume, path.as_str())
@@ -208,11 +222,13 @@ impl ApiError {
                     .with_details(json!({ "volume": volume, "path": path.as_str() }));
             }
             StorageError::CrossDevice(path) => {
-                tracing::warn!(
-                    volume,
-                    path = path.as_str(),
-                    "the destination is on another filesystem than the volume; mount it as its own volume"
-                );
+                if log {
+                    tracing::warn!(
+                        volume,
+                        path = path.as_str(),
+                        "the destination is on another filesystem than the volume; mount it as its own volume"
+                    );
+                }
                 let message = format!(
                     "{} is on another filesystem than the volume",
                     display_path(volume, path.as_str())
@@ -221,7 +237,9 @@ impl ApiError {
                     .with_details(json!({ "volume": volume, "path": path.as_str() }));
             }
             StorageError::InvalidDestination(path) => {
-                tracing::warn!(volume, path = path.as_str(), "invalid destination");
+                if log {
+                    tracing::warn!(volume, path = path.as_str(), "invalid destination");
+                }
                 let message = format!(
                     "{} can't be moved or copied there",
                     display_path(volume, path.as_str())
@@ -230,28 +248,35 @@ impl ApiError {
                     .with_details(json!({ "volume": volume, "path": path.as_str() }));
             }
             // The caller picks the source volume for it, see [`ApiError::from_transfer`].
-            StorageError::Source(inner) => return Self::from_storage(volume, *inner),
+            StorageError::Source(inner) => return Self::map_storage(volume, *inner, log),
             StorageError::Cancelled => {
                 return Self::internal("a cancellation reported as an error");
             }
             StorageError::InvalidPath(err) => return err.into(),
             StorageError::Io { path, source } => {
+                if !log {
+                    return Self::internal_error();
+                }
                 tracing::warn!(volume, path = path.as_str(), error = %source, "storage error");
                 return Self::internal(source);
             }
         };
-        tracing::warn!(volume, path = path.as_str(), code, "storage request failed");
+        if log {
+            tracing::warn!(volume, path = path.as_str(), code, "storage request failed");
+        }
         let message = format!("{label}{}", display_path(volume, path.as_str()));
         Self::new(status, code, message)
             .with_details(json!({ "volume": volume, "path": path.as_str() }))
     }
 
-    /// Maps a failure of a copy or move with the volume it happened on.
+    /// Maps a failure of a copy or move with the volume it happened on; an invalid destination
+    /// names the source. The caller logs the failure with its user and action.
     #[must_use]
     pub fn from_transfer(source: &str, dest: &str, err: StorageError) -> Self {
         match err {
-            StorageError::Source(inner) => Self::from_storage(source, *inner),
-            other => Self::from_storage(dest, other),
+            StorageError::Source(inner) => Self::from_logged_storage(source, *inner),
+            err @ StorageError::InvalidDestination(_) => Self::from_logged_storage(source, err),
+            other => Self::from_logged_storage(dest, other),
         }
     }
 
@@ -259,6 +284,10 @@ impl ApiError {
     #[must_use]
     pub fn internal(err: impl std::fmt::Display) -> Self {
         tracing::error!(error = %err, "internal error");
+        Self::internal_error()
+    }
+
+    fn internal_error() -> Self {
         Self::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal",
@@ -380,6 +409,19 @@ mod tests {
         assert_eq!(
             dest.details,
             Some(json!({ "volume": "documents", "path": "a.txt" }))
+        );
+    }
+
+    #[test]
+    fn invalid_destination_names_the_source() {
+        let err = ApiError::from_transfer(
+            "media",
+            "documents",
+            StorageError::InvalidDestination(RelPath::parse("Films").unwrap()),
+        );
+        assert_eq!(
+            err.details,
+            Some(json!({ "volume": "media", "path": "Films" }))
         );
     }
 

@@ -61,8 +61,8 @@ fn source_and_dest<'a>(
 impl TransferTask {
     /// Refuses the transfer as the task would fail at once. An existing target answers 409 with
     /// its kind, so that the client knows whether it may offer to replace it.
-    pub async fn check(&self, volumes: &Arc<Volumes>) -> Result<(), ApiError> {
-        let volumes = Arc::clone(volumes);
+    pub async fn check(&self, volumes: &Arc<Volumes>, user: &str) -> Result<(), ApiError> {
+        let (volumes, user) = (Arc::clone(volumes), user.to_owned());
         let (kind, from, to) = (self.kind, self.source.clone(), self.dest.clone());
         let (path, dir, conflict) = (self.path.clone(), self.dest_dir.clone(), self.conflict);
         let span = tracing::Span::current();
@@ -73,6 +73,17 @@ impl TransferTask {
                 TransferKind::Copy => storage::check_transfer(source, &path, dest, &dir, conflict),
                 TransferKind::Move => storage::check_move(source, &path, dest, &dir, conflict),
             };
+            if let Err(err) = &checked {
+                tracing::warn!(
+                    user,
+                    action = kind.action(),
+                    volume = from,
+                    path = path.as_str(),
+                    dest_volume = to,
+                    error = %err,
+                    "transfer refused"
+                );
+            }
             match checked {
                 Ok(()) => Ok(()),
                 Err(StorageError::AlreadyExists(target)) => {
@@ -82,7 +93,7 @@ impl TransferTask {
                     };
                     let details = json!({ "volume": to, "path": target.as_str(), "kind": kind });
                     Err(
-                        ApiError::from_storage(&to, StorageError::AlreadyExists(target))
+                        ApiError::from_logged_storage(&to, StorageError::AlreadyExists(target))
                             .with_details(details),
                     )
                 }

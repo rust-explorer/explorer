@@ -1,5 +1,7 @@
 use std::io;
 
+use rustix::io::Errno;
+
 use shared::api::conflict::ConflictPolicy;
 
 use super::{TransferPlan, TransferProgress, check_transfer, copy, plan_transfer};
@@ -22,7 +24,7 @@ pub fn check_move(
     conflict: ConflictPolicy,
 ) -> Result<(), StorageError> {
     if is_own_folder(source, path, dest, dest_dir) {
-        return Err(StorageError::InvalidDestination(dest_dir.clone()));
+        return Err(StorageError::InvalidDestination(path.clone()));
     }
     check_transfer(source, path, dest, dest_dir, conflict)
 }
@@ -66,7 +68,7 @@ pub fn move_entry(
         .refuse_reserved(path)
         .map_err(StorageError::on_source)?;
     if source.name() == dest.name() {
-        match rename(source, &parent, name, dest_dir, conflict) {
+        match rename(source, path, &parent, name, dest_dir, conflict) {
             Err(StorageError::CrossDevice(_)) => {}
             renamed => return renamed.map(|final_path| MoveOutcome::Renamed { final_path }),
         }
@@ -87,6 +89,7 @@ pub fn move_entry(
 
 fn rename(
     volume: &Volume,
+    path: &RelPath,
     parent: &RelPath,
     name: &str,
     dest_dir: &RelPath,
@@ -101,7 +104,17 @@ fn rename(
         .root
         .open_dir(fs_path(dest_dir))
         .map_err(|err| StorageError::from_io(dest_dir, err))?;
-    volume.place(&from, name, &to, dest_dir, name, conflict)
+    // `EINVAL`: a folder renamed into itself.
+    volume
+        .place(&from, name, &to, dest_dir, name, conflict)
+        .map_err(|err| match err {
+            StorageError::Io { source, .. }
+                if source.raw_os_error() == Some(Errno::INVAL.raw_os_error()) =>
+            {
+                StorageError::InvalidDestination(path.clone())
+            }
+            other => other,
+        })
 }
 
 /// Removes from the source what the copy took: its files, then its folders once empty. A

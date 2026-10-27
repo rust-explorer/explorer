@@ -404,7 +404,8 @@ async fn copy_conflict_is_409_with_details() {
     error_of(res, StatusCode::BAD_REQUEST, "is_a_directory").await;
 
     let res = post_task(&mut s.client, copy_spec(("media", "F"), ("media", "F"))).await;
-    error_of(res, StatusCode::BAD_REQUEST, "invalid_destination").await;
+    let error = error_of(res, StatusCode::BAD_REQUEST, "invalid_destination").await;
+    assert_eq!(error.details, Some(json!({"volume": "media", "path": "F"})));
     assert!(list(&mut s.client).await.is_empty());
     assert_eq!(fs::read(documents.join("a.txt")).unwrap(), b"old");
 }
@@ -491,7 +492,11 @@ async fn move_task_same_volume() {
         move_spec(("media", "Sub/b.txt"), ("media", "Sub")),
     )
     .await;
-    error_of(res, StatusCode::BAD_REQUEST, "invalid_destination").await;
+    let error = error_of(res, StatusCode::BAD_REQUEST, "invalid_destination").await;
+    assert_eq!(
+        error.details,
+        Some(json!({"volume": "media", "path": "Sub/b.txt"}))
+    );
     let res = post_task(&mut s.client, move_spec(("media", "Sub"), ("media", "Sub"))).await;
     error_of(res, StatusCode::BAD_REQUEST, "invalid_destination").await;
     fs::write(media.join("b.txt"), b"other").unwrap();

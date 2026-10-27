@@ -78,6 +78,7 @@ mod tests {
 
     use shared::api::tasks::{Location, TaskState};
 
+    use super::super::registry::Stopped;
     use super::*;
 
     fn spec() -> TaskSpec {
@@ -119,7 +120,10 @@ mod tests {
 
         until(&tasks, |list| list[0].state == TaskState::Running).await;
         assert_eq!(tasks.list("ada")[1].state, TaskState::Queued);
-        assert!(tasks.cancel_or_dismiss("ada", &second.id));
+        assert_eq!(
+            tasks.cancel_or_dismiss("ada", &second.id),
+            Some(Stopped::Cancelled)
+        );
 
         release.send(()).unwrap();
         let list = until(&tasks, |list| list[0].state == TaskState::Done).await;
@@ -153,7 +157,10 @@ mod tests {
         tokio::task::spawn_blocking(move || wait_start.recv().unwrap())
             .await
             .unwrap();
-        assert!(tasks.cancel_or_dismiss("ada", &stopped.id));
+        assert_eq!(
+            tasks.cancel_or_dismiss("ada", &stopped.id),
+            Some(Stopped::Cancelled)
+        );
         release.send(()).unwrap();
         let list = until(&tasks, |list| list[1].state == TaskState::Cancelled).await;
         assert_eq!(list[1].error, None);
@@ -172,7 +179,10 @@ mod tests {
         tokio::task::spawn_blocking(move || wait_start.recv().unwrap())
             .await
             .unwrap();
-        assert!(tasks.cancel_or_dismiss("ada", &task.id));
+        assert_eq!(
+            tasks.cancel_or_dismiss("ada", &task.id),
+            Some(Stopped::Cancelled)
+        );
         release.send(()).unwrap();
         let list = until(&tasks, |list| !list[0].state.is_active()).await;
         assert_eq!(list[0].state, TaskState::Failed);

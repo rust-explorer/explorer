@@ -372,7 +372,7 @@ fn copy_into_itself_is_refused() {
         assert!(
             matches!(
                 check("A", dest_dir),
-                Err(StorageError::InvalidDestination(_))
+                Err(StorageError::InvalidDestination(path)) if path == rel("A")
             ),
             "{dest_dir}"
         );
@@ -731,7 +731,7 @@ fn move_into_descendant_is_refused() {
             ConflictPolicy::KeepBoth,
         );
         assert!(
-            matches!(checked, Err(StorageError::InvalidDestination(_))),
+            matches!(&checked, Err(StorageError::InvalidDestination(path)) if *path == rel("A")),
             "{dest_dir}: {checked:?}"
         );
     }
@@ -746,7 +746,7 @@ fn move_into_descendant_is_refused() {
         &Recorder::default(),
     );
     assert!(
-        matches!(unchecked, Err(StorageError::InvalidDestination(_))),
+        matches!(&unchecked, Err(StorageError::InvalidDestination(path)) if *path == rel("A")),
         "{unchecked:?}"
     );
     assert!(fixture.path("media").join("A/sub/x.txt").is_file());
@@ -769,7 +769,7 @@ fn move_to_own_folder_is_refused() {
                 conflict,
             );
             assert!(
-                matches!(checked, Err(StorageError::InvalidDestination(_))),
+                matches!(&checked, Err(StorageError::InvalidDestination(p)) if *p == rel(path)),
                 "{path} → {dest_dir}: {checked:?}"
             );
         }

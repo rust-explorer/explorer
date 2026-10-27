@@ -137,6 +137,13 @@ struct Entries {
     next_seq: u64,
 }
 
+/// What [`Tasks::cancel_or_dismiss`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stopped {
+    Cancelled,
+    Dismissed,
+}
+
 /// The background tasks of every user, in memory: a restart loses them.
 pub struct Tasks {
     entries: Mutex<Entries>,
@@ -187,14 +194,15 @@ impl Tasks {
         mine.into_iter().map(|(id, entry)| entry.info(id)).collect()
     }
 
-    /// Cancels a queued or running task, or forgets a finished one; false when `id` is unknown
+    /// Cancels a queued or running task, or forgets a finished one; `None` when `id` is unknown
     /// or another user's. A queued task is cancelled at once, a running one when its runner
     /// notices.
-    pub fn cancel_or_dismiss(&self, user: &str, id: &str) -> bool {
+    pub fn cancel_or_dismiss(&self, user: &str, id: &str) -> Option<Stopped> {
         let mut entries = self.lock();
-        let Some(entry) = entries.by_id.get_mut(id).filter(|entry| entry.user == user) else {
-            return false;
-        };
+        let entry = entries
+            .by_id
+            .get_mut(id)
+            .filter(|entry| entry.user == user)?;
         match entry.state {
             TaskState::Queued => {
                 entry.progress.cancel();
@@ -203,9 +211,10 @@ impl Tasks {
             TaskState::Running => entry.progress.cancel(),
             TaskState::Done | TaskState::Failed | TaskState::Cancelled => {
                 entries.by_id.remove(id);
+                return Some(Stopped::Dismissed);
             }
         }
-        true
+        Some(Stopped::Cancelled)
     }
 
     /// Registers a queued task for `user`.
@@ -337,11 +346,12 @@ mod tests {
         let (running, _) = tasks.insert("ada", spec("b"));
         let progress = tasks.start(&running).unwrap();
 
-        assert!(!tasks.cancel_or_dismiss("bob", &queued));
-        assert!(!tasks.cancel_or_dismiss("ada", "unknown"));
+        assert_eq!(tasks.cancel_or_dismiss("bob", &queued), None);
+        assert_eq!(tasks.cancel_or_dismiss("ada", "unknown"), None);
 
-        assert!(tasks.cancel_or_dismiss("ada", &queued));
-        assert!(tasks.cancel_or_dismiss("ada", &running));
+        let cancelled = Some(Stopped::Cancelled);
+        assert_eq!(tasks.cancel_or_dismiss("ada", &queued), cancelled);
+        assert_eq!(tasks.cancel_or_dismiss("ada", &running), cancelled);
         assert!(progress.is_cancelled());
         assert_eq!(
             states(&tasks, "ada"),
@@ -350,10 +360,11 @@ mod tests {
         assert!(tasks.start(&queued).is_none());
 
         tasks.finish(&running, Outcome::Cancelled);
-        assert!(tasks.cancel_or_dismiss("ada", &queued));
-        assert!(tasks.cancel_or_dismiss("ada", &running));
+        let dismissed = Some(Stopped::Dismissed);
+        assert_eq!(tasks.cancel_or_dismiss("ada", &queued), dismissed);
+        assert_eq!(tasks.cancel_or_dismiss("ada", &running), dismissed);
         assert!(tasks.list("ada").is_empty());
-        assert!(!tasks.cancel_or_dismiss("ada", &running));
+        assert_eq!(tasks.cancel_or_dismiss("ada", &running), None);
     }
 
     #[test]

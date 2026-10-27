@@ -232,11 +232,10 @@ fn is_dir_in(dir: &Dir, name: &str) -> bool {
 }
 
 /// Both sides are plain names under open `Dir` handles, so `EXDEV` here is a mount point nested
-/// in the volume, not an escape, and `EINVAL` a folder renamed into itself.
+/// in the volume, not an escape.
 fn rename_error(path: &RelPath, err: Errno) -> StorageError {
     match err {
         Errno::XDEV => StorageError::CrossDevice(path.clone()),
-        Errno::INVAL => StorageError::InvalidDestination(path.clone()),
         _ => StorageError::from_io(path, err.into()),
     }
 }
@@ -272,6 +271,19 @@ mod tests {
         ] {
             assert_eq!(keep_both_name(name, n), expected, "{name:?} {n}");
         }
+    }
+
+    #[test]
+    fn rename_einval_stays_an_io_error() {
+        let path = RelPath::parse("a.txt").unwrap();
+        assert!(matches!(
+            rename_error(&path, Errno::INVAL),
+            StorageError::Io { .. }
+        ));
+        assert!(matches!(
+            rename_error(&path, Errno::XDEV),
+            StorageError::CrossDevice(_)
+        ));
     }
 
     #[test]

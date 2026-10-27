@@ -7,6 +7,7 @@ use axum::http::{HeaderMap, StatusCode};
 use shared::api::conflict::ConflictPolicy;
 use shared::api::tasks::{Location, TaskInfo, TaskSpec};
 
+use super::registry::Stopped;
 use super::transfer::{TransferKind, TransferTask};
 use super::{Progress, TaskError};
 use crate::auth::{Action, CurrentUser};
@@ -44,7 +45,17 @@ pub async fn create(
                 move |vol| vol.check_deletable(&path)
             })
             .await?
-            .map_err(|err| ApiError::from_storage(&source.volume, err))?;
+            .map_err(|err| {
+                tracing::warn!(
+                    user = user.sub,
+                    action = "delete",
+                    volume = source.volume,
+                    path = path.as_str(),
+                    error = %err,
+                    "delete refused"
+                );
+                ApiError::from_logged_storage(&source.volume, err)
+            })?;
             Box::new(delete_op(
                 Arc::clone(&state.volumes),
                 user.sub.clone(),
@@ -93,11 +104,13 @@ pub async fn cancel(
     user: CurrentUser,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    if state.tasks.cancel_or_dismiss(&user.sub, &id) {
-        Ok(StatusCode::NO_CONTENT)
-    } else {
-        Err(ApiError::task_not_found())
-    }
+    let action = match state.tasks.cancel_or_dismiss(&user.sub, &id) {
+        Some(Stopped::Cancelled) => "cancel",
+        Some(Stopped::Dismissed) => "dismiss",
+        None => return Err(ApiError::task_not_found()),
+    };
+    tracing::info!(user = user.sub, action, id, "task stopped");
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Copy needs to read the source, move to write it; both write the destination.
@@ -121,7 +134,7 @@ async fn transfer_op(
         dest: dest_dir.volume.clone(),
         conflict,
     };
-    task.check(&state.volumes).await?;
+    task.check(&state.volumes, &user.sub).await?;
     Ok(Box::new(
         task.op(Arc::clone(&state.volumes), user.sub.clone()),
     ))
@@ -147,7 +160,7 @@ fn delete_op(
                 error = %err,
                 "delete failed"
             );
-            return Err(ApiError::from_storage(&volume, err).into());
+            return Err(ApiError::from_logged_storage(&volume, err).into());
         }
         progress.add_file();
         tracing::info!(

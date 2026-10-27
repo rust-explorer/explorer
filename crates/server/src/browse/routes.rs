@@ -128,7 +128,17 @@ pub async fn create_folder(
         }
     })
     .await?
-    .map_err(|err| ApiError::from_storage(&volume, err))?;
+    .map_err(|err| {
+        tracing::warn!(
+            user = user.sub,
+            action = "create_folder",
+            volume,
+            path = path.as_str(),
+            error = %err,
+            "create folder failed"
+        );
+        ApiError::from_logged_storage(&volume, err)
+    })?;
     tracing::info!(
         user = user.sub,
         action = "create_folder",
@@ -166,7 +176,17 @@ pub async fn rename(
         move |vol| vol.rename(&path, &name, conflict)
     })
     .await?
-    .map_err(|err| ApiError::from_storage(&volume, err))?;
+    .map_err(|err| {
+        tracing::warn!(
+            user = user.sub,
+            action = "rename",
+            volume,
+            path = path.as_str(),
+            error = %err,
+            "rename failed"
+        );
+        ApiError::from_logged_storage(&volume, err)
+    })?;
     tracing::info!(
         user = user.sub,
         action = "rename",

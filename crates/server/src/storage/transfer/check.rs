@@ -82,7 +82,7 @@ fn refuse_into_itself(
     for _ in 0..MAX_DEPTH {
         let current = Identity::of(&dir.dir_metadata().map_err(dest_err)?);
         if current == folder {
-            return Err(StorageError::InvalidDestination(dest_dir.clone()));
+            return Err(StorageError::InvalidDestination(path.clone()));
         }
         if current == root {
             return Ok(());
