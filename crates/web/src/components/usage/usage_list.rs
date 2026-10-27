@@ -87,7 +87,7 @@ fn ItemRow(id: String, volume: String, path: Segments, item: UsageItem, total: u
                 aria_hidden: "true",
                 div {
                     class: "h-1.5 rounded-full bg-indigo-500 dark:bg-indigo-400",
-                    style: "width: {bar_width(item.bytes, total)}",
+                    width: bar_width(item.bytes, total),
                 }
             }
         }
