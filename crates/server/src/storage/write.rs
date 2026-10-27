@@ -39,6 +39,14 @@ pub(super) fn prefixes(path: &RelPath) -> Vec<RelPath> {
 /// Like the read operations, paths are resolved from the volume root with symlinks followed and
 /// confined by cap-std; renames then only take a `Dir` handle and a single name on each side.
 impl Volume {
+    /// Creates one folder under an existing parent; anything already at `dir` is an error.
+    pub fn create_dir(&self, dir: &RelPath) -> Result<(), StorageError> {
+        self.refuse_reserved(dir)?;
+        self.root
+            .create_dir(fs_path(dir))
+            .map_err(|err| StorageError::from_io(dir, err))
+    }
+
     pub fn create_dir_all(&self, dir: &RelPath) -> Result<(), StorageError> {
         self.refuse_reserved(dir)?;
         for prefix in prefixes(dir) {

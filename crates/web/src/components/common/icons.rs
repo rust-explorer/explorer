@@ -151,6 +151,16 @@ pub fn PlusIcon(#[props(default = "size-6".to_owned())] class: String) -> Elemen
 }
 
 #[component]
+pub fn FolderPlusIcon(#[props(default = "size-3.5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" }
+            path { d: "M12 11v5M9.5 13.5h5" }
+        }
+    }
+}
+
+#[component]
 pub fn MinusIcon(#[props(default = "size-4".to_owned())] class: String) -> Element {
     rsx! {
         Icon { class, path { d: "M5 12h14" } }

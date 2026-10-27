@@ -40,4 +40,7 @@ pub struct VolumeInfo {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct CreateFolder {
     pub path: String,
+    /// Fail when the name is taken or the parent is missing, instead of merging.
+    #[serde(default)]
+    pub exclusive: bool,
 }

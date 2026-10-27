@@ -3,6 +3,7 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 use dioxus_i18n::t;
 
+use crate::components::NewFolderDialog;
 use crate::components::common::icons::{ArrowUpIcon, PlusIcon};
 use crate::components::common::{Menu, MenuItem};
 use crate::uploads::{Uploads, use_uploads};
@@ -13,6 +14,7 @@ const READ_ONLY_ID: &str = "upload-read-only";
 enum Picker {
     Files,
     Folder,
+    NewFolder,
 }
 
 /// The header's Upload button, a floating "+" below `md`, and the file pickers behind them.
@@ -21,11 +23,17 @@ pub fn UploadButton(volume: String, path: String, read_only: bool) -> Element {
     let uploads = use_uploads();
     let mut files_input = use_signal(|| None::<Rc<MountedData>>);
     let mut folder_input = use_signal(|| None::<Rc<MountedData>>);
+    let mut new_folder = use_signal(|| false);
+    let (dialog_volume, dialog_path) = (volume.clone(), path.clone());
 
     let open_picker = move |picker| {
         let input = match picker {
             Picker::Files => files_input(),
             Picker::Folder => folder_input(),
+            Picker::NewFolder => {
+                new_folder.set(true);
+                return;
+            }
         };
         if let Some(input) = input {
             click(&input);
@@ -65,6 +73,13 @@ pub fn UploadButton(volume: String, path: String, read_only: bool) -> Element {
         }
         div { class: "fixed bottom-4 right-4 z-30 md:hidden",
             UploadMenu { floating: true, read_only, on_pick: open_picker }
+        }
+        if new_folder() {
+            NewFolderDialog {
+                volume: dialog_volume,
+                path: dialog_path,
+                on_close: move |()| new_folder.set(false),
+            }
         }
     }
 }
@@ -132,6 +147,9 @@ fn UploadMenu(floating: bool, read_only: bool, on_pick: EventHandler<Picker>) ->
                     on_close: move |()| close_and_refocus(),
                     MenuItem { on_select: move |()| pick(Picker::Files), {t!("upload-files")} }
                     MenuItem { on_select: move |()| pick(Picker::Folder), {t!("upload-folder")} }
+                    if floating {
+                        MenuItem { on_select: move |()| pick(Picker::NewFolder), {t!("new-folder")} }
+                    }
                 }
             }
         }

@@ -93,14 +93,15 @@ pub async fn entries(
     }))
 }
 
-/// Creates a folder and its missing parents; an existing folder is fine.
+/// Creates a folder with its missing parents, an existing folder being fine; `exclusive` creates
+/// just that folder and refuses an existing name.
 pub async fn create_folder(
     State(state): State<AppState>,
     user: CurrentUser,
     volume: Result<Path<String>, PathRejection>,
     body: Result<Json<CreateFolder>, JsonRejection>,
 ) -> Result<StatusCode, ApiError> {
-    let (Ok(Path(volume)), Ok(Json(CreateFolder { path }))) = (volume, body) else {
+    let (Ok(Path(volume)), Ok(Json(CreateFolder { path, exclusive }))) = (volume, body) else {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             "invalid_path",
@@ -116,7 +117,13 @@ pub async fn create_folder(
     }
     blocking_volume(&state.volumes, &volume, {
         let path = path.clone();
-        move |vol| vol.create_dir_all(&path)
+        move |vol| {
+            if exclusive {
+                vol.create_dir(&path)
+            } else {
+                vol.create_dir_all(&path)
+            }
+        }
     })
     .await?
     .map_err(|err| ApiError::from_storage(&volume, err))?;

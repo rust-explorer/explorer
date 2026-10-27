@@ -1,12 +1,11 @@
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 use shared::api::auth::LogoutResponse;
 use shared::api::error::ErrorBody;
 
 mod urls;
 
-#[cfg_attr(not(target_arch = "wasm32"), allow(unused_imports))]
-pub use urls::folders_url;
-pub use urls::{download_url, encode_component, entries_url, upload_url, zip_url};
+pub use urls::{download_url, encode_component, entries_url, folders_url, upload_url, zip_url};
 
 const UNAUTHENTICATED: &str = "unauthenticated";
 
@@ -47,6 +46,26 @@ pub async fn get_json<T: DeserializeOwned>(path: &str) -> Result<T, ApiFailure> 
 #[cfg(target_arch = "wasm32")]
 pub async fn post_json<T: DeserializeOwned>(path: &str) -> Result<T, ApiFailure> {
     send(gloo_net::http::Request::post(path)).await
+}
+
+/// POSTs `body` as JSON; an empty success response (204) reads as `null`, so `()` works.
+#[cfg(target_arch = "wasm32")]
+pub async fn post_json_body<B: Serialize, T: DeserializeOwned>(
+    path: &str,
+    body: &B,
+) -> Result<T, ApiFailure> {
+    let request = gloo_net::http::Request::post(path)
+        .credentials(web_sys::RequestCredentials::SameOrigin)
+        .header("accept", "application/json")
+        .json(body)
+        .map_err(|_| ApiFailure::Network)?;
+    let response = request.send().await.map_err(|_| ApiFailure::Network)?;
+    let text = response.text().await.unwrap_or_default();
+    if !response.ok() {
+        return Err(failure(response.status(), &text));
+    }
+    let text = if text.is_empty() { "null" } else { &text };
+    serde_json::from_str(text).map_err(|_| ApiFailure::Network)
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -104,6 +123,14 @@ pub fn get_json<T: DeserializeOwned>(_: &str) -> std::future::Ready<Result<T, Ap
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn post_json<T: DeserializeOwned>(_: &str) -> std::future::Ready<Result<T, ApiFailure>> {
+    std::future::ready(Err(ApiFailure::Network))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn post_json_body<B: Serialize, T: DeserializeOwned>(
+    _: &str,
+    _: &B,
+) -> std::future::Ready<Result<T, ApiFailure>> {
     std::future::ready(Err(ApiFailure::Network))
 }
 

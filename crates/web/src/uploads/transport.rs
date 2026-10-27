@@ -101,6 +101,7 @@ pub async fn create_folder(volume: &str, path: &str) -> Result<(), ApiFailure> {
         .header("Accept", "application/json")
         .json(&CreateFolder {
             path: path.to_owned(),
+            exclusive: false,
         })
         .map_err(|_| ApiFailure::Network)?
         .send()

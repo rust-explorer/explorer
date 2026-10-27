@@ -4,7 +4,8 @@ use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::PathBuf;
 
-use axum::http::StatusCode;
+use axum::body::Body;
+use axum::http::{Request, StatusCode, header};
 use common::client::{Client, json};
 use explorer_server::http::router;
 use serde_json::json;
@@ -200,4 +201,50 @@ async fn escaping_symlink_is_outside_volume() {
         body.details,
         Some(json!({"volume": "media", "path": "escape"}))
     );
+}
+
+async fn create_folder(s: &mut Setup, body: serde_json::Value) -> axum::response::Response {
+    let req = Request::post("/api/volumes/media/folders")
+        .header(header::ORIGIN, "https://files.example.com")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    s.client.send(req).await
+}
+
+#[tokio::test]
+async fn exclusive_create_refuses_existing() {
+    let mut s = setup().await;
+    fs::create_dir(s.data.join("media/Films")).unwrap();
+    fs::write(s.data.join("media/a.txt"), b"x").unwrap();
+    for name in ["Films", "a.txt"] {
+        let res = create_folder(&mut s, json!({"path": name, "exclusive": true})).await;
+        let body = error_of(res, StatusCode::CONFLICT).await;
+        assert_eq!(body.code, "already_exists");
+    }
+    assert!(s.data.join("media/a.txt").is_file());
+}
+
+#[tokio::test]
+async fn exclusive_create_needs_parent() {
+    let mut s = setup().await;
+    let res = create_folder(&mut s, json!({"path": "missing/new", "exclusive": true})).await;
+    let body = error_of(res, StatusCode::NOT_FOUND).await;
+    assert_eq!(body.code, "path_not_found");
+    assert!(!s.data.join("media/missing").exists());
+
+    let res = create_folder(&mut s, json!({"path": "new", "exclusive": true})).await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert!(s.data.join("media/new").is_dir());
+}
+
+#[tokio::test]
+async fn non_exclusive_create_still_merges() {
+    let mut s = setup().await;
+    fs::create_dir(s.data.join("media/Films")).unwrap();
+    let res = create_folder(&mut s, json!({"path": "Films"})).await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let res = create_folder(&mut s, json!({"path": "a/b"})).await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert!(s.data.join("media/a/b").is_dir());
 }

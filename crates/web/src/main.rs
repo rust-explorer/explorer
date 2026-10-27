@@ -5,6 +5,7 @@ mod conflict;
 mod format;
 mod i18n;
 mod listing;
+mod names;
 mod pages;
 mod routes;
 // Only the wasm build picks files, so most of the engine is unreachable on the host.
