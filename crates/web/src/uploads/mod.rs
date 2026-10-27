@@ -7,7 +7,7 @@ mod speed;
 #[cfg(target_arch = "wasm32")]
 mod transport;
 
-pub use controller::{Revision, Uploads, use_uploads, use_uploads_provider};
+pub use controller::{Uploads, use_uploads, use_uploads_provider};
 #[cfg_attr(not(target_arch = "wasm32"), allow(unused_imports))]
 pub use plan::{BatchPlan, FileSpec, PickedFile, plan_batch};
 pub use queue::{Effect, Event, Item, ItemKey, Kind, Queue, Status};

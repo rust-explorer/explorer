@@ -7,7 +7,7 @@ use shared::api::tasks::TaskSpec;
 
 pub use store::{Effect, Event, Task, TaskKey, TaskList};
 
-use crate::uploads::Revision;
+use crate::revision::Revision;
 
 /// The app-wide list of the background tasks this tab started.
 #[derive(Clone, Copy)]
@@ -16,7 +16,6 @@ pub struct TaskStore {
     revision: Signal<u64>,
 }
 
-/// Needs the uploads provider above it, for the shared [`Revision`].
 pub fn use_tasks_provider() -> TaskStore {
     let Revision(revision) = use_context();
     use_context_provider(|| TaskStore {

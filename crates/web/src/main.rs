@@ -8,6 +8,7 @@ mod i18n;
 mod listing;
 mod names;
 mod pages;
+mod revision;
 mod routes;
 mod selection;
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]

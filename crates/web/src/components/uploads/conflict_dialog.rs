@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
-use super::uploads_panel::{destination, file_name};
-use crate::components::common::ConflictPrompt;
+use super::upload_rows::destination;
+use crate::components::common::{ConflictPrompt, file_name};
 use crate::uploads::use_uploads;
 
 /// Asks what to do with the first upload whose destination already exists.

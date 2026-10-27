@@ -76,6 +76,9 @@ pub struct TaskList {
     tasks: Vec<Task>,
     next_key: u64,
     polling: bool,
+    /// The server ids known when the pending poll was issued; a task posted since then may be
+    /// missing from its answer.
+    polled: Vec<String>,
 }
 
 impl TaskList {
@@ -181,7 +184,7 @@ impl TaskList {
             if let Some(info) = infos.iter().find(|info| info.id == current.id) {
                 finished |= !info.state.is_active();
                 task.info = Some(info.clone());
-            } else {
+            } else if self.polled.contains(&current.id) {
                 // Lost with a server restart.
                 task.lost = Some(ApiFailure::Server(ErrorBody {
                     code: TASK_NOT_FOUND.to_owned(),
@@ -196,12 +199,18 @@ impl TaskList {
     }
 
     fn keep_polling(&mut self, effects: &mut Vec<Effect>) {
-        let waiting = self
+        if self.polling {
+            return;
+        }
+        let waiting: Vec<String> = self
             .tasks
             .iter()
-            .any(|task| task.is_active() && task.server_id().is_some());
-        if waiting && !self.polling {
+            .filter(|task| task.is_active())
+            .filter_map(|task| task.server_id().map(str::to_owned))
+            .collect();
+        if !waiting.is_empty() {
             self.polling = true;
+            self.polled = waiting;
             effects.push(Effect::PollAfter { ms: POLL_EVERY_MS });
         }
     }
@@ -368,6 +377,35 @@ mod tests {
             list.tasks()[0].failure(),
             Some(ApiFailure::Server(body)) if body.code == TASK_NOT_FOUND
         ));
+    }
+
+    #[test]
+    fn task_posted_after_the_poll_was_issued_is_not_lost() {
+        let mut list = posted();
+        list.start(vec![delete("c")]);
+        // The POST answers before the GET that was already on its way.
+        let effects = list.handle(Event::Posted {
+            key: TaskKey(2),
+            info: Box::new(info("c", "c", TaskState::Queued)),
+        });
+        assert_eq!(effects, []);
+        let effects = list.handle(Event::Polled(vec![
+            info("a", "a", TaskState::Running),
+            info("b", "b", TaskState::Running),
+        ]));
+        assert_eq!(effects, [POLL]);
+        assert_eq!(
+            states(&list),
+            [TaskState::Running, TaskState::Running, TaskState::Queued]
+        );
+
+        // The next poll was issued knowing `c`: missing from it now, `c` is lost.
+        let effects = list.handle(Event::Polled(vec![
+            info("a", "a", TaskState::Running),
+            info("b", "b", TaskState::Running),
+        ]));
+        assert_eq!(effects, [Effect::Refresh, POLL]);
+        assert_eq!(list.tasks()[2].state(), TaskState::Failed);
     }
 
     #[test]

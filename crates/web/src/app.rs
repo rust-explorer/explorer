@@ -3,6 +3,7 @@ use dioxus::prelude::*;
 use crate::components::{ActivityPanel, ConflictDialog};
 use crate::i18n::use_init_i18n_from_browser;
 use crate::listing::Sort;
+use crate::revision::use_revision_provider;
 use crate::routes::Route;
 use crate::tasks::use_tasks_provider;
 use crate::uploads::use_uploads_provider;
@@ -18,6 +19,7 @@ pub fn App() -> Element {
     use_init_i18n_from_browser();
     // App-wide so the chosen sort survives navigation.
     use_context_provider(|| Signal::new(Sort::default()));
+    use_revision_provider();
     // Uploads and tasks keep running, and their panel stays, across navigation.
     use_uploads_provider();
     use_tasks_provider();

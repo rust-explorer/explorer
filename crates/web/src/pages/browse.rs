@@ -9,9 +9,9 @@ use crate::api;
 use crate::components::{
     Breadcrumb, DropZone, ErrorPanel, FileTable, NewFolderButton, Shell, Sidebar, UploadButton,
 };
+use crate::revision::Revision;
 use crate::routes::{Segment, Segments};
 use crate::selection::Selection;
-use crate::uploads::Revision;
 
 #[component]
 pub fn Browse(volume: Segment, path: Segments) -> Element {

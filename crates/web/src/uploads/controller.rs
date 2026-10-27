@@ -5,10 +5,7 @@ use dioxus::prelude::*;
 use super::{Event, ItemKey, Queue, SpeedMeter};
 use crate::conflict::Decision;
 use crate::format::now_ms;
-
-/// Bumped by `Effect::Refresh`; the browse page's volume and listing resources read it.
-#[derive(Clone, Copy)]
-pub struct Revision(pub Signal<u64>);
+use crate::revision::Revision;
 
 /// The app-wide upload queue and the browser state its transfers need.
 #[derive(Clone, Copy)]
@@ -23,7 +20,7 @@ pub struct Uploads {
 }
 
 pub fn use_uploads_provider() -> Uploads {
-    let revision = use_context_provider(|| Revision(Signal::new(0)));
+    let revision: Revision = use_context();
     let uploads = use_context_provider(|| Uploads {
         queue: Signal::new(Queue::default()),
         meters: CopyValue::new(HashMap::new()),

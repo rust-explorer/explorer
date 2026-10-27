@@ -2,9 +2,8 @@ use dioxus::prelude::*;
 use dioxus_i18n::t;
 use shared::api::tasks::{Location, TaskInfo, TaskSpec, TaskState};
 
-use crate::components::common::FailureNote;
 use crate::components::common::icons::{CheckIcon, CloseIcon};
-use crate::components::uploads::{ICON_BUTTON, file_name};
+use crate::components::common::{FailureNote, ICON_BUTTON, file_name};
 use crate::tasks::{Task, use_tasks};
 
 const NOTE: &str = "mt-0.5 text-xs text-slate-500 dark:text-slate-400";

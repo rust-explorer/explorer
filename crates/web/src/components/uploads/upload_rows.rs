@@ -2,12 +2,10 @@ use dioxus::prelude::*;
 use dioxus_i18n::prelude::i18n;
 use dioxus_i18n::t;
 
-use crate::components::common::FailureNote;
 use crate::components::common::icons::{CheckIcon, CloseIcon};
+use crate::components::common::{FailureNote, ICON_BUTTON, file_name};
 use crate::format::{format_size, format_speed, now_ms};
 use crate::uploads::{Item, Kind, Status, use_uploads};
-
-pub const ICON_BUTTON: &str = "inline-flex size-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-indigo-600 dark:hover:bg-slate-800 dark:hover:text-slate-300";
 
 /// Volume and path the item is uploaded to.
 pub fn destination(item: &Item) -> (&str, &str) {
@@ -15,10 +13,6 @@ pub fn destination(item: &Item) -> (&str, &str) {
         Kind::File(spec) => (&spec.volume, &spec.path),
         Kind::Folder { volume, path } => (volume, path),
     }
-}
-
-pub fn file_name(path: &str) -> &str {
-    path.rsplit('/').next().unwrap_or(path)
 }
 
 fn is_finished(status: &Status) -> bool {

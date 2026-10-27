@@ -1,9 +1,10 @@
 use dioxus::prelude::*;
 use dioxus_i18n::t;
 
+use crate::components::common::ICON_BUTTON;
 use crate::components::common::icons::{CloseIcon, MinusIcon, PlusIcon};
 use crate::components::tasks::TaskRows;
-use crate::components::uploads::{ICON_BUTTON, UploadRows, active_uploads};
+use crate::components::uploads::{UploadRows, active_uploads};
 use crate::tasks::use_tasks;
 use crate::uploads::use_uploads;
 

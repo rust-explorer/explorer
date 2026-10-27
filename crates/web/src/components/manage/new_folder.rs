@@ -6,7 +6,7 @@ use crate::api::{self, ApiFailure};
 use crate::components::common::icons::FolderPlusIcon;
 use crate::components::common::{FocusTarget, Modal, error_message};
 use crate::names::{NameError, validate_name};
-use crate::uploads::Revision;
+use crate::revision::Revision;
 
 const TITLE_ID: &str = "new-folder-title";
 const INPUT_ID: &str = "new-folder-name";
