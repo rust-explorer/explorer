@@ -119,9 +119,9 @@ fn UploadMenu(
     };
     let read_only_text = t!("upload-read-only");
 
-    let mut close_and_refocus = move || {
+    let close = move |restore_focus: bool| {
         open.set(false);
-        if let Some(button) = trigger() {
+        if restore_focus && let Some(button) = trigger() {
             spawn(async move {
                 let _ = button.set_focus(true).await;
             });
@@ -160,7 +160,8 @@ fn UploadMenu(
                 Menu {
                     id: menu_id,
                     class: "{menu_class} z-20",
-                    on_close: move |()| close_and_refocus(),
+                    label: t!("upload-open"),
+                    on_close: close,
                     MenuItem { on_select: move |()| pick(Picker::Files), {t!("upload-files")} }
                     MenuItem { on_select: move |()| pick(Picker::Folder), {t!("upload-folder")} }
                     if floating {

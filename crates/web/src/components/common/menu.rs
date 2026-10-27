@@ -25,8 +25,8 @@ impl NavKey {
     }
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 /// Index to focus after `key`, with Up and Down wrapping around.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 fn next_index(current: usize, len: usize, key: NavKey) -> usize {
     match key {
         NavKey::Down => (current + 1) % len,
@@ -36,14 +36,17 @@ fn next_index(current: usize, len: usize, key: NavKey) -> usize {
     }
 }
 
-/// A `role="menu"` popup. The caller positions it through `class` (and `style` for coordinates)
-/// and restores focus in `on_close`.
+/// A `role="menu"` popup named by `label`. The caller places it through `class`, or at the
+/// client coordinates `at` (set through CSSOM, which the CSP allows, unlike a `style` attribute).
+/// `on_close(true)` asks the caller to hand focus back to the trigger; `false` means focus
+/// already moved outside the menu.
 #[component]
 pub fn Menu(
     id: String,
     class: String,
-    #[props(default)] style: String,
-    on_close: EventHandler<()>,
+    label: String,
+    #[props(default)] at: Option<(f64, f64)>,
+    on_close: EventHandler<bool>,
     children: Element,
 ) -> Element {
     let mut menu = use_signal(|| None::<std::rc::Rc<MountedData>>);
@@ -52,13 +55,15 @@ pub fn Menu(
         // Transparent backdrop: a click anywhere outside the menu closes it.
         div {
             class: "fixed inset-0 z-20",
-            onclick: move |_| on_close.call(()),
+            onclick: move |_| on_close.call(true),
         }
         div {
             id,
             role: "menu",
+            aria_label: label,
             class: "{class} {MENU}",
-            style,
+            left: at.map(|(x, _)| format!("{x}px")),
+            top: at.map(|(_, y)| format!("{y}px")),
             onmounted: move |event| {
                 focus_item(&event.data(), None);
                 menu.set(Some(event.data()));
@@ -66,12 +71,22 @@ pub fn Menu(
             onkeydown: move |event| {
                 let key = event.key();
                 if key == Key::Escape {
-                    on_close.call(());
+                    on_close.call(true);
+                } else if key == Key::Tab {
+                    event.prevent_default();
+                    on_close.call(true);
                 } else if let Some(nav) = NavKey::from_key(&key) {
                     event.prevent_default();
                     if let Some(menu) = menu() {
                         focus_item(&menu, Some(nav));
                     }
+                }
+            },
+            onfocusout: move |event| {
+                if let Some(menu) = menu()
+                    && focus_left(&menu, &event)
+                {
+                    on_close.call(false);
                 }
             },
             {children}
@@ -130,6 +145,27 @@ fn focus_item(menu: &MountedData, key: Option<NavKey>) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn focus_item(_: &MountedData, _: Option<NavKey>) {}
+
+/// Whether focus went to an element outside the menu (not just nowhere, as when it is removed).
+#[cfg(target_arch = "wasm32")]
+fn focus_left(menu: &MountedData, event: &FocusEvent) -> bool {
+    use wasm_bindgen::JsCast as _;
+
+    let Some(menu) = menu.downcast::<web_sys::Element>() else {
+        return false;
+    };
+    event
+        .data()
+        .downcast::<web_sys::FocusEvent>()
+        .and_then(web_sys::FocusEvent::related_target)
+        .and_then(|target| target.dyn_into::<web_sys::Node>().ok())
+        .is_some_and(|target| !menu.contains(Some(&target)))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn focus_left(_: &MountedData, _: &FocusEvent) -> bool {
+    false
+}
 
 #[cfg(test)]
 mod tests {

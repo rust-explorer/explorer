@@ -69,17 +69,18 @@ pub fn menu_actions(entry: &Entry, read_only: bool) -> Vec<RowAction> {
 pub fn RowMenu(
     request: MenuRequest,
     read_only: bool,
-    on_close: EventHandler<()>,
+    on_close: EventHandler<bool>,
     on_action: EventHandler<RowAction>,
 ) -> Element {
     let actions = menu_actions(&request.entry, read_only);
-    let (x, y) = menu_origin(request.at, actions.len(), viewport());
+    let at = menu_origin(request.at, actions.len(), viewport());
 
     rsx! {
         Menu {
             id: ROW_MENU_ID,
             class: "fixed z-20",
-            style: "left: {x}px; top: {y}px;",
+            label: t!("row-menu-open", name: request.entry.name.clone()),
+            at,
             on_close,
             for action in actions {
                 MenuItem {

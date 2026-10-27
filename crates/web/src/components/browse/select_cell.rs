@@ -5,9 +5,14 @@ use dioxus_i18n::t;
 
 const BOX: &str = "size-4 cursor-pointer rounded border-slate-300 accent-indigo-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:border-slate-600";
 
+// The selection owns the state. A click is not cancelled (the browser would revert the box after
+// the next render); it puts the box back as last rendered and the next render shows the outcome.
+
 /// A row's checkbox; a shift-click asks for a range instead of a toggle.
 #[component]
 pub fn SelectCell(name: String, checked: bool, on_select: EventHandler<bool>) -> Element {
+    let mut input = use_signal(|| None::<Rc<MountedData>>);
+
     rsx! {
         div { role: "cell", class: "flex items-center justify-center self-stretch",
             input {
@@ -15,9 +20,11 @@ pub fn SelectCell(name: String, checked: bool, on_select: EventHandler<bool>) ->
                 class: BOX,
                 aria_label: t!("select-entry", name: name.clone()),
                 checked,
+                onmounted: move |event| input.set(Some(event.data())),
                 onclick: move |event: MouseEvent| {
-                    // The state lives in the selection, which also answers a range click.
-                    event.prevent_default();
+                    if let Some(input) = input() {
+                        show_state(&input, checked, false);
+                    }
                     on_select.call(event.modifiers().shift());
                 },
             }
@@ -29,9 +36,9 @@ pub fn SelectCell(name: String, checked: bool, on_select: EventHandler<bool>) ->
 #[component]
 pub fn SelectAll(checked: bool, partial: bool, on_toggle: EventHandler<()>) -> Element {
     let mut input = use_signal(|| None::<Rc<MountedData>>);
-    use_effect(use_reactive!(|partial| {
+    use_effect(use_reactive!(|checked, partial| {
         if let Some(input) = input() {
-            set_indeterminate(&input, partial);
+            show_state(&input, checked, partial);
         }
     }));
 
@@ -42,9 +49,14 @@ pub fn SelectAll(checked: bool, partial: bool, on_toggle: EventHandler<()>) -> E
                 class: BOX,
                 aria_label: t!("select-all"),
                 checked,
-                onmounted: move |event| input.set(Some(event.data())),
-                onclick: move |event: MouseEvent| {
-                    event.prevent_default();
+                onmounted: move |event| {
+                    show_state(&event.data(), checked, partial);
+                    input.set(Some(event.data()));
+                },
+                onclick: move |_| {
+                    if let Some(input) = input() {
+                        show_state(&input, checked, partial);
+                    }
                     on_toggle.call(());
                 },
             }
@@ -53,16 +65,17 @@ pub fn SelectAll(checked: bool, partial: bool, on_toggle: EventHandler<()>) -> E
 }
 
 #[cfg(target_arch = "wasm32")]
-fn set_indeterminate(input: &MountedData, value: bool) {
+fn show_state(input: &MountedData, checked: bool, indeterminate: bool) {
     use wasm_bindgen::JsCast as _;
 
     if let Some(input) = input
         .downcast::<web_sys::Element>()
         .and_then(|e| e.dyn_ref::<web_sys::HtmlInputElement>())
     {
-        input.set_indeterminate(value);
+        input.set_checked(checked);
+        input.set_indeterminate(indeterminate);
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn set_indeterminate(_: &MountedData, _: bool) {}
+fn show_state(_: &MountedData, _: bool, _: bool) {}

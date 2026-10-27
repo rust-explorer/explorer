@@ -244,8 +244,10 @@ pub fn FileTable(
             RowMenu {
                 request,
                 read_only,
-                on_close: move |()| {
-                    if let Some(open) = menu.take() {
+                on_close: move |restore_focus: bool| {
+                    if let Some(open) = menu.take()
+                        && restore_focus
+                    {
                         refocus(open.trigger);
                     }
                 },
