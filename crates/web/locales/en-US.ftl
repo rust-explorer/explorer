@@ -32,6 +32,9 @@ favorites-add = Add to favorites
 favorites-remove-current = Remove from favorites
 breadcrumb = Breadcrumb
 browse-empty = This folder is empty.
+browse-empty-hint = Drop files here or use Upload.
+read-only-notice = Read-only: you can browse, download and copy from this volume, not change it.
+read-only-notice-short = Read-only volume
 table-label = Folder contents
 table-name = Name
 table-size = Size
@@ -172,6 +175,7 @@ move-title =
     }
 picker-volume = Volume
 picker-choose-volume = Choose a volume
+picker-volume-read-only = { $name } (read-only)
 picker-location = Destination folder
 picker-folders = Folders
 picker-empty = No folders here

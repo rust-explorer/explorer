@@ -8,7 +8,7 @@ mod tasks;
 mod uploads;
 pub(crate) mod usage;
 
-pub use browse::{DropZone, FileGrid, FileTable, RefreshButton, ViewToggle};
+pub use browse::{DropZone, FileGrid, FileTable, ReadOnlyNotice, RefreshButton, ViewToggle};
 pub use common::{ErrorPanel, Notice, error_message, file_name};
 pub use layout::{ActivityPanel, Breadcrumb, Shell, Sidebar, SignOutButton};
 pub use manage::{

@@ -25,7 +25,7 @@ struct Shown {
 }
 
 /// Picks a destination folder, starting at `volume`/`path`, among the folders of the writable
-/// volumes. The `blocked` folders of `blocked_volume` and everything under them can't be picked,
+/// volumes (read-only ones are listed, disabled). The `blocked` folders of `blocked_volume` and everything under them can't be picked,
 /// nor, with `start_unpickable`, the starting folder itself (a move to where the entries are).
 #[component]
 pub fn FolderPicker(
@@ -62,14 +62,15 @@ pub fn FolderPicker(
         .read()
         .as_ref()
         .map(|result| result.as_ref().err().cloned());
-    let writable: Vec<String> = match &*volumes.read() {
-        Some(Ok(volumes)) => volumes
-            .iter()
-            .filter(|info| !info.read_only)
-            .map(|info| info.name.clone())
-            .collect(),
+    let all_volumes: Vec<VolumeInfo> = match &*volumes.read() {
+        Some(Ok(volumes)) => volumes.clone(),
         _ => Vec::new(),
     };
+    let writable: Vec<String> = all_volumes
+        .iter()
+        .filter(|info| !info.read_only)
+        .map(|info| info.name.clone())
+        .collect();
     let current = shown();
     let blocked_here = |path: &str| is_blocked(&current.volume, path, &blocked_volume, &blocked);
     let can_pick = writable.contains(&current.volume)
@@ -112,12 +113,17 @@ pub fn FolderPicker(
                         if !writable.contains(&current.volume) {
                             option { value: "", disabled: true, selected: true, {t!("picker-choose-volume")} }
                         }
-                        for name in writable.iter().cloned() {
+                        for info in all_volumes.iter() {
                             option {
-                                key: "{name}",
-                                value: "{name}",
-                                selected: name == current.volume,
-                                {name.clone()}
+                                key: "{info.name}",
+                                value: "{info.name}",
+                                disabled: info.read_only,
+                                selected: !info.read_only && info.name == current.volume,
+                                if info.read_only {
+                                    {t!("picker-volume-read-only", name: info.name.clone())}
+                                } else {
+                                    {info.name.clone()}
+                                }
                             }
                         }
                     }

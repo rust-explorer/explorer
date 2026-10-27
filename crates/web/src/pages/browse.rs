@@ -8,7 +8,8 @@ use shared::api::browse::{Listing, VolumeInfo};
 use crate::api;
 use crate::components::{
     AnalyzeButton, Breadcrumb, DropZone, ErrorPanel, FileGrid, FileTable, NewFolderButton,
-    RefreshButton, SearchField, SearchResults, Shell, Sidebar, UploadButton, ViewToggle,
+    ReadOnlyNotice, RefreshButton, SearchField, SearchResults, Shell, Sidebar, UploadButton,
+    ViewToggle,
 };
 use crate::favorites::use_favorites_sync;
 use crate::revision::Revision;
@@ -144,6 +145,9 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
         Shell { user, sidebar, actions, search,
             DropZone { volume: volume.as_str().to_owned(), path: path.joined(), read_only,
                 Breadcrumb { volume: volume.clone(), path: path.clone() }
+                if read_only == Some(true) {
+                    ReadOnlyNotice {}
+                }
                 {content}
             }
         }

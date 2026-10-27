@@ -32,6 +32,9 @@ favorites-add = Añadir a favoritos
 favorites-remove-current = Quitar de favoritos
 breadcrumb = Ruta de navegación
 browse-empty = Esta carpeta está vacía.
+browse-empty-hint = Suelta archivos aquí o usa Subir.
+read-only-notice = Solo lectura: puedes explorar, descargar y copiar desde este volumen, pero no modificarlo.
+read-only-notice-short = Volumen de solo lectura
 table-label = Contenido de la carpeta
 table-name = Nombre
 table-size = Tamaño
@@ -176,6 +179,7 @@ move-title =
     }
 picker-volume = Volumen
 picker-choose-volume = Elige un volumen
+picker-volume-read-only = { $name } (solo lectura)
 picker-location = Carpeta de destino
 picker-folders = Carpetas
 picker-empty = No hay carpetas aquí

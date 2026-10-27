@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use dioxus_i18n::t;
 use shared::api::browse::{Entry, EntryKind};
 
+use super::empty_folder::EmptyFolder;
 use super::entry_actions::{
     EntryActionsLayer, select, selected_entries, toggle_all, use_entry_actions,
     use_retain_selection,
@@ -116,7 +117,7 @@ pub fn FileGrid(
                 }
             }
             if total == 0 {
-                p { class: "py-10 text-center {MUTED}", {t!("browse-empty")} }
+                EmptyFolder { read_only }
             } else {
                 VirtualList {
                     role: "list",

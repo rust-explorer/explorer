@@ -8,8 +8,6 @@ use crate::components::common::icons::{ArrowUpIcon, PlusIcon};
 use crate::components::common::{FocusTarget, Menu, MenuItem};
 use crate::uploads::{Uploads, use_uploads};
 
-const READ_ONLY_ID: &str = "upload-read-only";
-
 /// An item of the Upload menu.
 #[derive(Clone, Copy, PartialEq)]
 enum AddChoice {
@@ -19,6 +17,7 @@ enum AddChoice {
 }
 
 /// The header's Upload button, a floating "+" below `md`, and the file pickers behind them.
+/// A read-only volume gets none of them: the browse page's notice says why.
 #[component]
 pub fn UploadButton(volume: String, path: String, read_only: bool) -> Element {
     let uploads = use_uploads();
@@ -48,6 +47,10 @@ pub fn UploadButton(volume: String, path: String, read_only: bool) -> Element {
     let on_folder =
         move |event: FormEvent| picked(uploads, &volume, &path, &event, folder_input().as_deref());
 
+    if read_only {
+        return rsx! {};
+    }
+
     rsx! {
         input {
             r#type: "file",
@@ -67,16 +70,12 @@ pub fn UploadButton(volume: String, path: String, read_only: bool) -> Element {
             onmounted: move |event| folder_input.set(Some(event.data())),
             onchange: on_folder,
         }
-        if read_only {
-            span { id: READ_ONLY_ID, class: "sr-only", {t!("upload-read-only")} }
-        }
         div { class: "hidden md:block",
-            UploadMenu { floating: false, read_only, on_choose: choose, on_trigger: |_| {} }
+            UploadMenu { floating: false, on_choose: choose, on_trigger: |_| {} }
         }
         div { class: "fixed bottom-4 right-4 z-30 md:hidden",
             UploadMenu {
                 floating: true,
-                read_only,
                 on_choose: choose,
                 on_trigger: move |trigger| floating_trigger.set(Some(trigger)),
             }
@@ -96,7 +95,6 @@ pub fn UploadButton(volume: String, path: String, read_only: bool) -> Element {
 #[component]
 fn UploadMenu(
     floating: bool,
-    read_only: bool,
     on_choose: EventHandler<AddChoice>,
     on_trigger: EventHandler<FocusTarget>,
 ) -> Element {
@@ -109,16 +107,15 @@ fn UploadMenu(
     };
     let (button_class, menu_class) = if floating {
         (
-            "inline-flex size-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:bg-slate-400 dark:disabled:bg-slate-600",
+            "inline-flex size-14 items-center justify-center rounded-full bg-indigo-600 text-white shadow-lg hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600",
             "absolute bottom-full right-0 mb-2",
         )
     } else {
         (
-            "inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700",
+            "inline-flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600",
             "absolute right-0 top-full mt-2",
         )
     };
-    let read_only_text = t!("upload-read-only");
 
     let close = move |restore_focus: bool| {
         open.set(false);
@@ -138,9 +135,6 @@ fn UploadMenu(
             button {
                 r#type: "button",
                 class: button_class,
-                disabled: read_only,
-                title: if read_only { "{read_only_text}" },
-                aria_describedby: if read_only { READ_ONLY_ID },
                 aria_label: if floating { t!("upload-open") },
                 aria_haspopup: "menu",
                 aria_expanded: open(),

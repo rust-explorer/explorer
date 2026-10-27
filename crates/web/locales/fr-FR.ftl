@@ -32,6 +32,9 @@ favorites-add = Ajouter aux favoris
 favorites-remove-current = Retirer des favoris
 breadcrumb = Fil d'Ariane
 browse-empty = Ce dossier est vide.
+browse-empty-hint = Déposez des fichiers ici ou utilisez Uploader.
+read-only-notice = Lecture seule : vous pouvez parcourir, télécharger et copier depuis ce volume, mais pas le modifier.
+read-only-notice-short = Volume en lecture seule
 table-label = Contenu du dossier
 table-name = Nom
 table-size = Taille
@@ -176,6 +179,7 @@ move-title =
     }
 picker-volume = Volume
 picker-choose-volume = Choisissez un volume
+picker-volume-read-only = { $name } (lecture seule)
 picker-location = Dossier de destination
 picker-folders = Dossiers
 picker-empty = Aucun dossier ici
