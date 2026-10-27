@@ -4,15 +4,16 @@ use shared::api::browse::CreateFolder;
 
 use crate::api::{self, ApiFailure};
 use crate::components::common::icons::FolderPlusIcon;
-use crate::components::common::{Modal, error_message};
+use crate::components::common::{FocusTarget, Modal, error_message};
 use crate::names::{NameError, validate_name};
 use crate::uploads::Revision;
 
 const TITLE_ID: &str = "new-folder-title";
 const INPUT_ID: &str = "new-folder-name";
 const ERROR_ID: &str = "new-folder-error";
-const BUTTON: &str = "rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800";
-const PRIMARY: &str = "rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700";
+pub(super) const BUTTON: &str = "rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800";
+pub(super) const INPUT: &str = "mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:border-slate-700 dark:bg-slate-950 dark:text-white";
+pub(super) const PRIMARY: &str = "rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:bg-slate-300 dark:disabled:bg-slate-700";
 
 /// The header's New folder button and its dialog; below `md` the floating "+" menu opens it.
 #[component]
@@ -36,13 +37,13 @@ pub fn NewFolderButton(volume: String, path: String, read_only: bool) -> Element
     }
 }
 
-enum Problem {
+pub(super) enum Problem {
     Name(NameError),
     Server(ApiFailure),
 }
 
 impl Problem {
-    fn message(&self) -> String {
+    pub(super) fn message(&self) -> String {
         match self {
             Self::Name(NameError::Empty) => t!("name-error-empty"),
             Self::Name(NameError::Slash) => t!("name-error-slash"),
@@ -56,7 +57,12 @@ impl Problem {
 
 /// Asks for a name and creates that folder inside `path`; the dialog stays open on an error.
 #[component]
-pub fn NewFolderDialog(volume: String, path: String, on_close: EventHandler<()>) -> Element {
+pub fn NewFolderDialog(
+    volume: String,
+    path: String,
+    on_close: EventHandler<()>,
+    #[props(default)] return_focus: Option<FocusTarget>,
+) -> Element {
     let Revision(mut revision) = use_context();
     let mut name = use_signal(String::new);
     let mut problem = use_signal(|| None::<Problem>);
@@ -104,7 +110,7 @@ pub fn NewFolderDialog(volume: String, path: String, on_close: EventHandler<()>)
     let message = problem.read().as_ref().map(Problem::message);
 
     rsx! {
-        Modal { labelled_by: TITLE_ID, on_close: move |()| on_close.call(()),
+        Modal { labelled_by: TITLE_ID, on_close: move |()| on_close.call(()), return_focus,
             form { onsubmit: submit,
                 h2 {
                     id: TITLE_ID,
@@ -119,7 +125,7 @@ pub fn NewFolderDialog(volume: String, path: String, on_close: EventHandler<()>)
                 input {
                     id: INPUT_ID,
                     r#type: "text",
-                    class: "mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:border-slate-700 dark:bg-slate-950 dark:text-white",
+                    class: INPUT,
                     autofocus: true,
                     autocomplete: "off",
                     spellcheck: false,

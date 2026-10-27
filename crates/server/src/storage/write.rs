@@ -149,28 +149,52 @@ impl Volume {
         file.sync_all().map_err(staged_err)?;
         drop(file);
 
+        self.place(
+            &staging.dir,
+            id.as_str(),
+            &parent_dir,
+            &parent,
+            name,
+            conflict,
+        )
+    }
+
+    /// Renames `from_name` to `to_name`, or under `Fail` and `KeepBoth` to the first free
+    /// `Name (n)` when that is taken: those never overwrite, even a target that appears meanwhile.
+    pub(super) fn place(
+        &self,
+        from_dir: &Dir,
+        from_name: &str,
+        to_dir: &Dir,
+        to_parent: &RelPath,
+        to_name: &str,
+        conflict: ConflictPolicy,
+    ) -> Result<RelPath, StorageError> {
+        let dest = to_parent.join(to_name)?;
         if conflict == ConflictPolicy::Replace {
-            if self.is_dir_at(dest)? == Some(true) {
-                return Err(StorageError::IsADirectory(dest.clone()));
+            if to_dir.symlink_metadata(to_name).is_ok()
+                && (is_dir_in(to_dir, to_name) || is_dir_in(from_dir, from_name))
+            {
+                return Err(StorageError::IsADirectory(dest));
             }
-            rustix::fs::renameat(&staging.dir, id.as_str(), &parent_dir, name)
-                .map_err(|err| rename_error(dest, err))?;
-            return Ok(dest.clone());
+            rustix::fs::renameat(from_dir, from_name, to_dir, to_name)
+                .map_err(|err| rename_error(&dest, err))?;
+            return Ok(dest);
         }
 
         for n in 0..=KEEP_BOTH_MAX {
             let candidate = if n == 0 {
-                name.to_owned()
+                to_name.to_owned()
             } else {
-                keep_both_name(name, n)
+                keep_both_name(to_name, n)
             };
-            let Ok(target) = parent.join(&candidate) else {
+            let Ok(target) = to_parent.join(&candidate) else {
                 break;
             };
             match rustix::fs::renameat_with(
-                &staging.dir,
-                id.as_str(),
-                &parent_dir,
+                from_dir,
+                from_name,
+                to_dir,
                 candidate.as_str(),
                 RenameFlags::NOREPLACE,
             ) {
@@ -180,7 +204,7 @@ impl Volume {
                             volume = self.name(),
                             path = dest.as_str(),
                             final_path = target.as_str(),
-                            "destination appeared during the upload; keeping both"
+                            "destination appeared meanwhile; keeping both"
                         );
                     }
                     return Ok(target);
@@ -189,7 +213,7 @@ impl Volume {
                 Err(err) => return Err(rename_error(&target, err)),
             }
         }
-        Err(StorageError::AlreadyExists(dest.clone()))
+        Err(StorageError::AlreadyExists(dest))
     }
 
     /// `None` when nothing (or a dangling symlink) is there.
@@ -202,13 +226,19 @@ impl Volume {
     }
 }
 
+/// Follows a symlink, like the read operations; a dangling one is not a folder.
+fn is_dir_in(dir: &Dir, name: &str) -> bool {
+    dir.metadata(name).is_ok_and(|meta| meta.is_dir())
+}
+
 /// Both sides are plain names under open `Dir` handles, so `EXDEV` here is a mount point nested
-/// in the volume, not an escape.
+/// in the volume, not an escape, and `EINVAL` a folder renamed into itself.
 fn rename_error(path: &RelPath, err: Errno) -> StorageError {
-    if err == Errno::XDEV {
-        return StorageError::CrossDevice(path.clone());
+    match err {
+        Errno::XDEV => StorageError::CrossDevice(path.clone()),
+        Errno::INVAL => StorageError::InvalidDestination(path.clone()),
+        _ => StorageError::from_io(path, err.into()),
     }
-    StorageError::from_io(path, err.into())
 }
 
 fn staging_error(err: Errno) -> StorageError {

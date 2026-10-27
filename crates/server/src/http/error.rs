@@ -215,6 +215,16 @@ impl ApiError {
                 return Self::new(StatusCode::INTERNAL_SERVER_ERROR, "cross_device", message)
                     .with_details(json!({ "volume": volume, "path": path.as_str() }));
             }
+            StorageError::InvalidDestination(path) => {
+                tracing::warn!(volume, path = path.as_str(), "invalid destination");
+                let message = format!(
+                    "{} can't be moved or copied there",
+                    display_path(volume, path.as_str())
+                );
+                return Self::new(StatusCode::BAD_REQUEST, "invalid_destination", message)
+                    .with_details(json!({ "volume": volume, "path": path.as_str() }));
+            }
+            StorageError::InvalidPath(err) => return err.into(),
             StorageError::Io { path, source } => {
                 tracing::warn!(volume, path = path.as_str(), error = %source, "storage error");
                 return Self::internal(source);
@@ -305,6 +315,20 @@ mod tests {
         assert_eq!(
             err.details,
             Some(json!({ "volume": "media", "path": "Mounted/a.txt" }))
+        );
+    }
+
+    #[test]
+    fn invalid_destination_is_bad_request() {
+        let err = ApiError::from_storage(
+            "media",
+            StorageError::InvalidDestination(RelPath::parse("Films").unwrap()),
+        );
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert_eq!(err.code, "invalid_destination");
+        assert_eq!(
+            err.details,
+            Some(json!({ "volume": "media", "path": "Films" }))
         );
     }
 }

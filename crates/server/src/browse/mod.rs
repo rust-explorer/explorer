@@ -10,4 +10,5 @@ pub fn routes() -> Router<AppState> {
         .route("/volumes", get(routes::volumes))
         .route("/volumes/{volume}/entries", get(routes::entries))
         .route("/volumes/{volume}/folders", post(routes::create_folder))
+        .route("/volumes/{volume}/rename", post(routes::rename))
 }

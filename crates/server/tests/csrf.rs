@@ -147,6 +147,7 @@ async fn upload_and_folder_writes_need_same_origin() {
         ("PATCH", id),
         ("DELETE", id),
         ("POST", "/api/volumes/media/folders"),
+        ("POST", "/api/volumes/media/rename"),
     ];
     for origin in [None, Some("https://evil.example")] {
         for (method, uri) in targets {

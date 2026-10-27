@@ -6,7 +6,9 @@ use axum::extract::rejection::{JsonRejection, PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use serde::Deserialize;
-use shared::api::browse::{CreateFolder, Entry, EntryKind, Listing, Space, VolumeInfo};
+use shared::api::browse::{
+    CreateFolder, Entry, EntryKind, Listing, Rename, Renamed, Space, VolumeInfo,
+};
 
 use crate::auth::Action;
 use crate::auth::CurrentUser;
@@ -135,6 +137,47 @@ pub async fn create_folder(
         "folder created"
     );
     Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn rename(
+    State(state): State<AppState>,
+    user: CurrentUser,
+    volume: Result<Path<String>, PathRejection>,
+    body: Result<Json<Rename>, JsonRejection>,
+) -> Result<Json<Renamed>, ApiError> {
+    let (
+        Ok(Path(volume)),
+        Ok(Json(Rename {
+            path,
+            name,
+            conflict,
+        })),
+    ) = (volume, body)
+    else {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_path",
+            "A JSON body with a path and a name is required",
+        ));
+    };
+    let path = authorize(&state, &user, &volume, &path, Action::Write)?;
+    let renamed = blocking_volume(&state.volumes, &volume, {
+        let path = path.clone();
+        move |vol| vol.rename(&path, &name, conflict)
+    })
+    .await?
+    .map_err(|err| ApiError::from_storage(&volume, err))?;
+    tracing::info!(
+        user = user.sub,
+        action = "rename",
+        volume,
+        path = path.as_str(),
+        final_path = renamed.as_str(),
+        "entry renamed"
+    );
+    Ok(Json(Renamed {
+        path: renamed.as_str().to_owned(),
+    }))
 }
 
 fn epoch_millis(time: SystemTime) -> Option<i64> {

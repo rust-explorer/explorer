@@ -1,15 +1,15 @@
 mod common;
 
 use std::fs;
-use std::os::unix::fs::symlink;
-use std::path::PathBuf;
+use std::os::unix::fs::{PermissionsExt, symlink};
+use std::path::{Path, PathBuf};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use common::client::{Client, json};
 use explorer_server::http::router;
 use serde_json::json;
-use shared::api::browse::{EntryKind, Listing, VolumeInfo};
+use shared::api::browse::{EntryKind, Listing, Renamed, VolumeInfo};
 use shared::api::error::ErrorBody;
 use tempfile::TempDir;
 
@@ -21,7 +21,16 @@ struct Setup {
 }
 
 async fn setup() -> Setup {
+    setup_with(|_| {}).await
+}
+
+/// `prepare` runs on the data dir, with the volumes created, before they are discovered.
+async fn setup_with(prepare: impl FnOnce(&Path)) -> Setup {
     let dir = tempfile::tempdir().unwrap();
+    for name in ["media", "documents"] {
+        fs::create_dir_all(dir.path().join("data").join(name)).unwrap();
+    }
+    prepare(&dir.path().join("data"));
     let (state, fake) = common::state_with_volumes(dir.path(), &["media", "documents"]).await;
     let data = state.config.data_dir.clone();
     let app = router(state).await.unwrap();
@@ -247,4 +256,104 @@ async fn non_exclusive_create_still_merges() {
     let res = create_folder(&mut s, json!({"path": "a/b"})).await;
     assert_eq!(res.status(), StatusCode::NO_CONTENT);
     assert!(s.data.join("media/a/b").is_dir());
+}
+
+async fn rename(s: &mut Setup, volume: &str, body: serde_json::Value) -> axum::response::Response {
+    let req = Request::post(format!("/api/volumes/{volume}/rename"))
+        .header(header::ORIGIN, "https://files.example.com")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    s.client.send(req).await
+}
+
+#[tokio::test]
+async fn rename_returns_the_final_path() {
+    let mut s = setup().await;
+    let media = s.data.join("media");
+    fs::create_dir(media.join("Films")).unwrap();
+    fs::write(media.join("Films/a.txt"), b"a").unwrap();
+    fs::write(media.join("Films/b.txt"), b"b").unwrap();
+
+    let res = rename(
+        &mut s,
+        "media",
+        json!({"path": "Films/a.txt", "name": "c.txt"}),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let renamed: Renamed = json(res).await;
+    assert_eq!(renamed.path, "Films/c.txt");
+
+    let res = rename(
+        &mut s,
+        "media",
+        json!({"path": "Films/c.txt", "name": "b.txt", "conflict": "keep_both"}),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let renamed: Renamed = json(res).await;
+    assert_eq!(renamed.path, "Films/b (1).txt");
+    assert_eq!(fs::read(media.join("Films/b (1).txt")).unwrap(), b"a");
+}
+
+#[tokio::test]
+async fn rename_onto_existing_is_conflict() {
+    let mut s = setup().await;
+    let media = s.data.join("media");
+    fs::write(media.join("a.txt"), b"a").unwrap();
+    fs::write(media.join("b.txt"), b"b").unwrap();
+
+    let res = rename(&mut s, "media", json!({"path": "a.txt", "name": "b.txt"})).await;
+    let body = error_of(res, StatusCode::CONFLICT).await;
+    assert_eq!(body.code, "already_exists");
+    assert_eq!(
+        body.details,
+        Some(json!({"volume": "media", "path": "b.txt"}))
+    );
+    assert_eq!(fs::read(media.join("a.txt")).unwrap(), b"a");
+}
+
+#[tokio::test]
+async fn rename_on_read_only_volume_is_forbidden() {
+    if rustix::process::geteuid().is_root() {
+        return;
+    }
+    let mut s = setup_with(|data| {
+        fs::write(data.join("documents/a.txt"), b"a").unwrap();
+        fs::set_permissions(data.join("documents"), fs::Permissions::from_mode(0o555)).unwrap();
+    })
+    .await;
+    fs::set_permissions(s.data.join("documents"), fs::Permissions::from_mode(0o755)).unwrap();
+
+    let res = rename(
+        &mut s,
+        "documents",
+        json!({"path": "a.txt", "name": "b.txt"}),
+    )
+    .await;
+    let body = error_of(res, StatusCode::FORBIDDEN).await;
+    assert_eq!(body.code, "read_only_volume");
+    assert!(s.data.join("documents/a.txt").is_file());
+}
+
+#[tokio::test]
+async fn rename_to_a_path_is_invalid() {
+    let mut s = setup().await;
+    let media = s.data.join("media");
+    fs::create_dir(media.join("dir")).unwrap();
+    fs::write(media.join("a.txt"), b"a").unwrap();
+
+    for body in [
+        json!({"path": "a.txt", "name": "dir/b.txt"}),
+        json!({"path": "a.txt", "name": ".."}),
+        json!({"path": "", "name": "x"}),
+        json!({"path": "a.txt", "name": ".explorer-uploads"}),
+    ] {
+        let res = rename(&mut s, "media", body.clone()).await;
+        let error = error_of(res, StatusCode::BAD_REQUEST).await;
+        assert_eq!(error.code, "invalid_path", "{body}");
+    }
+    assert!(media.join("a.txt").is_file());
+    assert_eq!(fs::read_dir(media.join("dir")).unwrap().count(), 0);
 }

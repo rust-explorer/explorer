@@ -79,7 +79,12 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
     let current = current_result(listing.read().as_ref(), &url, ready);
     let content = match current {
         Some(Ok(entries)) => rsx! {
-            FileTable { volume: volume.clone(), path: path.clone(), entries }
+            FileTable {
+                volume: volume.clone(),
+                path: path.clone(),
+                entries,
+                read_only: read_only.unwrap_or(true),
+            }
         },
         Some(Err(failure)) if !failure.is_unauthenticated() => rsx! {
             div { class: "flex justify-center pt-6",

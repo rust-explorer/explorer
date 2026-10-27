@@ -5,7 +5,7 @@ use dioxus_i18n::t;
 
 use crate::components::NewFolderDialog;
 use crate::components::common::icons::{ArrowUpIcon, PlusIcon};
-use crate::components::common::{Menu, MenuItem};
+use crate::components::common::{FocusTarget, Menu, MenuItem};
 use crate::uploads::{Uploads, use_uploads};
 
 const READ_ONLY_ID: &str = "upload-read-only";
@@ -24,6 +24,7 @@ pub fn UploadButton(volume: String, path: String, read_only: bool) -> Element {
     let mut files_input = use_signal(|| None::<Rc<MountedData>>);
     let mut folder_input = use_signal(|| None::<Rc<MountedData>>);
     let mut new_folder = use_signal(|| false);
+    let mut floating_trigger = use_signal(|| None::<FocusTarget>);
     let (dialog_volume, dialog_path) = (volume.clone(), path.clone());
 
     let open_picker = move |picker| {
@@ -69,23 +70,35 @@ pub fn UploadButton(volume: String, path: String, read_only: bool) -> Element {
             span { id: READ_ONLY_ID, class: "sr-only", {t!("upload-read-only")} }
         }
         div { class: "hidden md:block",
-            UploadMenu { floating: false, read_only, on_pick: open_picker }
+            UploadMenu { floating: false, read_only, on_pick: open_picker, on_trigger: |_| {} }
         }
         div { class: "fixed bottom-4 right-4 z-30 md:hidden",
-            UploadMenu { floating: true, read_only, on_pick: open_picker }
+            UploadMenu {
+                floating: true,
+                read_only,
+                on_pick: open_picker,
+                on_trigger: move |trigger| floating_trigger.set(Some(trigger)),
+            }
         }
         if new_folder() {
             NewFolderDialog {
                 volume: dialog_volume,
                 path: dialog_path,
+                return_focus: floating_trigger(),
                 on_close: move |()| new_folder.set(false),
             }
         }
     }
 }
 
+/// `on_trigger` gets the menu's button, which a dialog opened from the menu hands focus back to.
 #[component]
-fn UploadMenu(floating: bool, read_only: bool, on_pick: EventHandler<Picker>) -> Element {
+fn UploadMenu(
+    floating: bool,
+    read_only: bool,
+    on_pick: EventHandler<Picker>,
+    on_trigger: EventHandler<FocusTarget>,
+) -> Element {
     let mut open = use_signal(|| false);
     let mut trigger = use_signal(|| None::<Rc<MountedData>>);
     let menu_id = if floating {
@@ -131,7 +144,10 @@ fn UploadMenu(floating: bool, read_only: bool, on_pick: EventHandler<Picker>) ->
                 aria_haspopup: "menu",
                 aria_expanded: open(),
                 aria_controls: menu_id,
-                onmounted: move |event| trigger.set(Some(event.data())),
+                onmounted: move |event| {
+                    on_trigger.call(FocusTarget(event.data()));
+                    trigger.set(Some(event.data()));
+                },
                 onclick: move |_| open.toggle(),
                 if floating {
                     PlusIcon {}

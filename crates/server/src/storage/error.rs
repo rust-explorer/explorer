@@ -2,7 +2,7 @@ use std::io;
 
 use rustix::io::Errno;
 
-use super::RelPath;
+use super::{InvalidPath, RelPath};
 
 /// The message of cap-std's error for a path that resolves outside its `Dir`.
 const ESCAPE_MESSAGE: &str = "a path led outside of the filesystem";
@@ -26,6 +26,11 @@ pub enum StorageError {
     /// A rename onto another filesystem: a mount nested in the volume.
     #[error("on another filesystem than the volume: {}", .0.as_str())]
     CrossDevice(RelPath),
+    /// A rename into the entry itself or one of its descendants.
+    #[error("invalid destination: {}", .0.as_str())]
+    InvalidDestination(RelPath),
+    #[error(transparent)]
+    InvalidPath(#[from] InvalidPath),
     #[error("i/o error on {}: {source}", .path.as_str())]
     Io { path: RelPath, source: io::Error },
 }

@@ -180,3 +180,14 @@ pub fn CheckIcon(#[props(default = "size-4".to_owned())] class: String) -> Eleme
         Icon { class, path { d: "m5 12 5 5L20 7" } }
     }
 }
+
+#[component]
+pub fn MoreIcon(#[props(default = "size-4".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            circle { cx: "5", cy: "12", r: "1" }
+            circle { cx: "12", cy: "12", r: "1" }
+            circle { cx: "19", cy: "12", r: "1" }
+        }
+    }
+}

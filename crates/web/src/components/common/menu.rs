@@ -36,9 +36,16 @@ fn next_index(current: usize, len: usize, key: NavKey) -> usize {
     }
 }
 
-/// A `role="menu"` popup. The caller positions it through `class` and restores focus in `on_close`.
+/// A `role="menu"` popup. The caller positions it through `class` (and `style` for coordinates)
+/// and restores focus in `on_close`.
 #[component]
-pub fn Menu(id: String, class: String, on_close: EventHandler<()>, children: Element) -> Element {
+pub fn Menu(
+    id: String,
+    class: String,
+    #[props(default)] style: String,
+    on_close: EventHandler<()>,
+    children: Element,
+) -> Element {
     let mut menu = use_signal(|| None::<std::rc::Rc<MountedData>>);
 
     rsx! {
@@ -51,6 +58,7 @@ pub fn Menu(id: String, class: String, on_close: EventHandler<()>, children: Ele
             id,
             role: "menu",
             class: "{class} {MENU}",
+            style,
             onmounted: move |event| {
                 focus_item(&event.data(), None);
                 menu.set(Some(event.data()));

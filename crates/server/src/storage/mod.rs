@@ -1,6 +1,7 @@
 mod error;
 mod path;
 mod read;
+mod rename;
 mod staging;
 mod volumes;
 mod write;

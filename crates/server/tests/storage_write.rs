@@ -481,3 +481,224 @@ fn staging_is_unreachable_through_a_symlink_to_the_root() {
     );
     assert_eq!(names(""), ["a.txt", "self"]);
 }
+
+#[test]
+fn rename_file_and_folder() {
+    let fixture = Fixture::new(|media| {
+        write(&media.join("dir/a.txt"), b"a");
+        write(&media.join("Films/inner.txt"), b"inner");
+    });
+    let media = fixture.media();
+
+    let renamed = media
+        .rename(&rel("dir/a.txt"), "b.txt", ConflictPolicy::Fail)
+        .unwrap();
+    assert_eq!(renamed, rel("dir/b.txt"));
+    let renamed = media
+        .rename(&rel("Films"), "Movies", ConflictPolicy::Fail)
+        .unwrap();
+    assert_eq!(renamed, rel("Movies"));
+
+    let root = fixture.media_path();
+    assert_eq!(names(&root.join("dir")), ["b.txt"]);
+    assert_eq!(fs::read(root.join("Movies/inner.txt")).unwrap(), b"inner");
+    assert!(!root.join("Films").exists());
+}
+
+#[test]
+fn rename_refuses_existing_under_fail() {
+    let fixture = Fixture::new(|media| {
+        write(&media.join("a.txt"), b"a");
+        write(&media.join("b.txt"), b"b");
+        fs::create_dir(media.join("folder")).unwrap();
+    });
+    let media = fixture.media();
+
+    for target in ["b.txt", "folder"] {
+        let result = media.rename(&rel("a.txt"), target, ConflictPolicy::Fail);
+        assert!(
+            matches!(result, Err(StorageError::AlreadyExists(ref p)) if *p == rel(target)),
+            "{result:?}"
+        );
+    }
+    assert_eq!(names(&fixture.media_path()), ["a.txt", "b.txt", "folder"]);
+}
+
+#[test]
+fn rename_keep_both_suffixes() {
+    let fixture = Fixture::new(|media| {
+        write(&media.join("a.txt"), b"a");
+        write(&media.join("b.txt"), b"b");
+        write(&media.join("b (1).txt"), b"b1");
+        fs::create_dir(media.join("x")).unwrap();
+        fs::create_dir(media.join("Films")).unwrap();
+    });
+    let media = fixture.media();
+
+    let renamed = media
+        .rename(&rel("a.txt"), "b.txt", ConflictPolicy::KeepBoth)
+        .unwrap();
+    assert_eq!(renamed, rel("b (2).txt"));
+    let renamed = media
+        .rename(&rel("x"), "Films", ConflictPolicy::KeepBoth)
+        .unwrap();
+    assert_eq!(renamed, rel("Films (1)"));
+
+    let root = fixture.media_path();
+    assert_eq!(fs::read(root.join("b.txt")).unwrap(), b"b");
+    assert_eq!(fs::read(root.join("b (2).txt")).unwrap(), b"a");
+    assert_eq!(
+        names(&root),
+        ["Films", "Films (1)", "b (1).txt", "b (2).txt", "b.txt"]
+    );
+}
+
+#[test]
+fn rename_replace_file_over_file() {
+    let fixture = Fixture::new(|media| {
+        write(&media.join("a.txt"), b"new");
+        write(&media.join("b.txt"), b"old");
+    });
+    let media = fixture.media();
+
+    let renamed = media
+        .rename(&rel("a.txt"), "b.txt", ConflictPolicy::Replace)
+        .unwrap();
+
+    assert_eq!(renamed, rel("b.txt"));
+    let root = fixture.media_path();
+    assert_eq!(names(&root), ["b.txt"]);
+    assert_eq!(fs::read(root.join("b.txt")).unwrap(), b"new");
+}
+
+#[test]
+fn rename_replace_refuses_folders() {
+    let fixture = Fixture::new(|media| {
+        write(&media.join("file.txt"), b"file");
+        write(&media.join("other.txt"), b"other");
+        write(&media.join("folder/inner.txt"), b"inner");
+        fs::create_dir(media.join("empty")).unwrap();
+    });
+    let media = fixture.media();
+
+    for (from, to) in [
+        ("file.txt", "folder"),
+        ("folder", "other.txt"),
+        ("empty", "folder"),
+        ("folder", "empty"),
+    ] {
+        let result = media.rename(&rel(from), to, ConflictPolicy::Replace);
+        assert!(
+            matches!(result, Err(StorageError::IsADirectory(_))),
+            "{from} -> {to}: {result:?}"
+        );
+    }
+    let root = fixture.media_path();
+    assert_eq!(names(&root), ["empty", "file.txt", "folder", "other.txt"]);
+    assert_eq!(fs::read(root.join("folder/inner.txt")).unwrap(), b"inner");
+}
+
+#[test]
+fn rename_symlink_renames_the_link() {
+    let fixture = Fixture::new(|media| {
+        write(&media.join("target.txt"), b"target");
+        fs::create_dir(media.join("dir")).unwrap();
+        symlink("target.txt", media.join("link")).unwrap();
+        symlink("dir", media.join("dirlink")).unwrap();
+    });
+    let media = fixture.media();
+
+    media
+        .rename(&rel("link"), "renamed", ConflictPolicy::Fail)
+        .unwrap();
+    media
+        .rename(&rel("dirlink"), "renamed-dir", ConflictPolicy::Fail)
+        .unwrap();
+
+    let root = fixture.media_path();
+    assert_eq!(
+        names(&root),
+        ["dir", "renamed", "renamed-dir", "target.txt"]
+    );
+    assert_eq!(
+        fs::read_link(root.join("renamed")).unwrap(),
+        Path::new("target.txt")
+    );
+    assert_eq!(
+        fs::read_link(root.join("renamed-dir")).unwrap(),
+        Path::new("dir")
+    );
+    assert_eq!(fs::read(root.join("target.txt")).unwrap(), b"target");
+    assert!(root.join("dir").is_dir());
+}
+
+#[test]
+fn rename_refuses_root_and_reserved() {
+    let fixture = Fixture::new(|media| {
+        write(&media.join("a.txt"), b"a");
+        symlink(".", media.join("root")).unwrap();
+    });
+    let media = fixture.media();
+    media.staging().unwrap();
+
+    assert!(RelPath::parse(".explorer-uploads/x").is_err());
+    let result = media.rename(&RelPath::root(), "x", ConflictPolicy::Fail);
+    assert!(
+        matches!(result, Err(StorageError::InvalidPath(_))),
+        "{result:?}"
+    );
+    for name in [STAGING_DIR, "a/b", "", ".."] {
+        let result = media.rename(&rel("a.txt"), name, ConflictPolicy::Fail);
+        assert!(
+            matches!(result, Err(StorageError::InvalidPath(_))),
+            "{name:?}: {result:?}"
+        );
+    }
+    let result = media.rename(&rel("root/a.txt"), STAGING_DIR, ConflictPolicy::KeepBoth);
+    assert!(
+        matches!(result, Err(StorageError::NotFound(_))),
+        "{result:?}"
+    );
+    let result = media.rename(&rel("root/.explorer-uploads"), "x", ConflictPolicy::Fail);
+    assert!(
+        matches!(result, Err(StorageError::NotFound(_))),
+        "{result:?}"
+    );
+
+    let root = fixture.media_path();
+    assert_eq!(names(&root), [STAGING_DIR, "a.txt", "root"]);
+    assert!(root.join(STAGING_DIR).is_dir());
+}
+
+#[test]
+fn rename_to_same_name_is_noop() {
+    let fixture = Fixture::new(|media| write(&media.join("dir/a.txt"), b"a"));
+    let media = fixture.media();
+
+    for conflict in [
+        ConflictPolicy::Fail,
+        ConflictPolicy::Replace,
+        ConflictPolicy::KeepBoth,
+    ] {
+        let renamed = media.rename(&rel("dir/a.txt"), "a.txt", conflict).unwrap();
+        assert_eq!(renamed, rel("dir/a.txt"));
+    }
+    assert_eq!(names(&fixture.media_path().join("dir")), ["a.txt"]);
+    let result = media.rename(&rel("dir/missing"), "missing", ConflictPolicy::Fail);
+    assert!(
+        matches!(result, Err(StorageError::NotFound(_))),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn rename_missing_source_is_not_found() {
+    let fixture = Fixture::new(|_| {});
+    let result = fixture
+        .media()
+        .rename(&rel("missing"), "other", ConflictPolicy::KeepBoth);
+    assert!(
+        matches!(result, Err(StorageError::NotFound(ref p)) if *p == rel("missing")),
+        "{result:?}"
+    );
+}

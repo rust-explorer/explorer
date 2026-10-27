@@ -39,6 +39,11 @@ pub fn folders_url(volume: &str) -> String {
     format!("/api/volumes/{}/folders", encode_component(volume))
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn rename_url(volume: &str) -> String {
+    format!("/api/volumes/{}/rename", encode_component(volume))
+}
+
 fn files_url(action: &str, volume: &str, path: &str) -> String {
     format!(
         "/files/{action}?volume={}&path={}",
@@ -73,5 +78,6 @@ mod tests {
             download_url("a&b", "c&d=1"),
             "/files/download?volume=a%26b&path=c%26d%3D1"
         );
+        assert_eq!(rename_url("my files"), "/api/volumes/my%20files/rename");
     }
 }
