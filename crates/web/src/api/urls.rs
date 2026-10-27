@@ -33,6 +33,15 @@ pub fn download_url(volume: &str, path: &str) -> String {
     files_url("download", volume, path)
 }
 
+/// `v` changes with the file, so the browser does not keep showing an outdated preview.
+pub fn thumbnail_url(volume: &str, path: &str, modified_ms: Option<i64>) -> String {
+    let mut url = files_url("thumbnail", volume, path);
+    if let Some(ms) = modified_ms {
+        let _ = write!(url, "&v={ms}");
+    }
+    url
+}
+
 pub fn zip_url(volume: &str, path: &str) -> String {
     files_url("zip", volume, path)
 }
@@ -119,6 +128,14 @@ mod tests {
         assert_eq!(
             search_url("my media", "a b&c é"),
             "/api/volumes/my%20media/search?q=a%20b%26c%20%C3%A9"
+        );
+        assert_eq!(
+            thumbnail_url("my media", "Photos/é #.jpg", Some(1_700_000_000_123)),
+            "/files/thumbnail?volume=my%20media&path=Photos%2F%C3%A9%20%23.jpg&v=1700000000123"
+        );
+        assert_eq!(
+            thumbnail_url("media", "a.png", None),
+            "/files/thumbnail?volume=media&path=a.png"
         );
         assert_eq!(rename_url("my files"), "/api/volumes/my%20files/rename");
         assert_eq!(task_url("0a/b"), "/api/tasks/0a%2Fb");

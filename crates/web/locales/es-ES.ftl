@@ -69,6 +69,7 @@ error-cross_device = { $path } está en otro sistema de archivos que su volumen,
 error-invalid_destination = { $path } no se puede mover ni copiar ahí.
 error-task_not_found = Esta tarea ya no existe en el servidor.
 error-favorites_full = No puedes tener más de 100 favoritos. Quita uno primero.
+error-thumbnail_unavailable = No hay vista previa disponible para este archivo.
 upload = Subir
 upload-open = Subir archivos o una carpeta
 upload-files = Archivos…
@@ -181,6 +182,15 @@ picker-empty = No hay carpetas aquí
 picker-copy-here = Copiar aquí
 picker-move-here = Mover aquí
 refresh = Actualizar
+view-mode = Vista
+view-list = Vista de lista
+view-grid = Vista de cuadrícula
+grid-folder = Carpeta
+grid-count =
+    { $count ->
+        [one] 1 elemento
+       *[other] { $count } elementos
+    }
 search-placeholder = Buscar en { $volume }
 search-open = Buscar
 search-close = Cerrar la búsqueda

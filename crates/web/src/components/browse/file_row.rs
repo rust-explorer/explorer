@@ -5,7 +5,7 @@ use dioxus_i18n::prelude::i18n;
 use dioxus_i18n::t;
 use shared::api::browse::{Entry, EntryKind};
 
-use super::row_menu::{Anchor, MenuAt, MenuRequest, ROW_MENU_ID};
+use super::row_menu::{MenuAt, MenuRequest, ROW_MENU_ID, at_pointer, below_button};
 use super::select_cell::SelectCell;
 use crate::api;
 use crate::components::common::FocusTarget;
@@ -86,35 +86,15 @@ pub fn FileRow(
         move |event: MouseEvent| {
             if has_menu {
                 event.prevent_default();
-                let point = event.client_coordinates();
-                open_at(MenuAt::Pointer {
-                    x: point.x,
-                    y: point.y,
-                });
+                open_at(at_pointer(&event));
             }
         }
     };
     let on_more = move |event: MouseEvent| {
-        let point = event.client_coordinates();
-        let fallback = MenuAt::Pointer {
-            x: point.x,
-            y: point.y,
-        };
         let open_at = open_at.clone();
         let button = more();
         spawn(async move {
-            let at = match button {
-                Some(button) => button.get_client_rect().await.map_or(fallback, |rect| {
-                    MenuAt::Below(Anchor {
-                        left: rect.min_x(),
-                        top: rect.min_y(),
-                        right: rect.max_x(),
-                        bottom: rect.max_y(),
-                    })
-                }),
-                None => fallback,
-            };
-            open_at(at);
+            open_at(below_button(button, &event).await);
         });
     };
 
@@ -203,24 +183,29 @@ pub fn FileRow(
     }
 }
 
+/// The icon of an entry's kind or file type; `size` is a Tailwind size class.
 #[component]
-pub fn EntryIcon(kind: EntryKind, name: String) -> Element {
-    const CLASS: &str = "size-5 shrink-0";
-    const FILE: &str = "size-5 shrink-0 text-slate-400 dark:text-slate-500";
+pub fn EntryIcon(
+    kind: EntryKind,
+    name: String,
+    #[props(default = "size-5")] size: &'static str,
+) -> Element {
+    let class = format!("{size} shrink-0");
+    let file = format!("{size} shrink-0 text-slate-400 dark:text-slate-500");
     match kind {
         EntryKind::Dir => rsx! {
-            FolderIcon { class: "{CLASS} text-indigo-500 dark:text-indigo-400" }
+            FolderIcon { class: "{class} text-indigo-500 dark:text-indigo-400" }
         },
         EntryKind::Other => rsx! {
-            FileIcon { class: CLASS }
+            FileIcon { class }
         },
         EntryKind::File => match file_type(&name) {
-            FileType::Video => rsx! { VideoIcon { class: FILE } },
-            FileType::Image => rsx! { ImageIcon { class: FILE } },
-            FileType::Audio => rsx! { AudioIcon { class: FILE } },
-            FileType::Archive => rsx! { ArchiveIcon { class: FILE } },
-            FileType::Document => rsx! { DocumentIcon { class: FILE } },
-            FileType::Other => rsx! { FileIcon { class: FILE } },
+            FileType::Video => rsx! { VideoIcon { class: file } },
+            FileType::Image => rsx! { ImageIcon { class: file } },
+            FileType::Audio => rsx! { AudioIcon { class: file } },
+            FileType::Archive => rsx! { ArchiveIcon { class: file } },
+            FileType::Document => rsx! { DocumentIcon { class: file } },
+            FileType::Other => rsx! { FileIcon { class: file } },
         },
     }
 }

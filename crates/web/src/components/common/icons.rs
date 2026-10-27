@@ -260,3 +260,21 @@ pub fn ArrowLeftIcon(#[props(default = "size-5".to_owned())] class: String) -> E
         }
     }
 }
+
+#[component]
+pub fn ListIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" }
+        }
+    }
+}
+
+#[component]
+pub fn GridIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" }
+        }
+    }
+}

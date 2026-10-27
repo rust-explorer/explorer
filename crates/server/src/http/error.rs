@@ -112,6 +112,15 @@ impl ApiError {
     }
 
     #[must_use]
+    pub fn thumbnail_unavailable() -> Self {
+        Self::new(
+            StatusCode::NOT_FOUND,
+            "thumbnail_unavailable",
+            "No thumbnail for this file",
+        )
+    }
+
+    #[must_use]
     pub fn task_not_found() -> Self {
         Self::new(StatusCode::NOT_FOUND, "task_not_found", "Task not found")
     }

@@ -103,6 +103,7 @@ fn every_api_error_code_has_a_message() {
         "invalid_destination",
         "task_not_found",
         "favorites_full",
+        "thumbnail_unavailable",
     ]
     .iter()
     .map(|code| format!("error-{code}"))

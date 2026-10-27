@@ -18,6 +18,7 @@ mod tasks;
 // Only the wasm build picks files, so most of the engine is unreachable on the host.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 mod uploads;
+mod view_mode;
 
 fn main() {
     dioxus::launch(app::App);

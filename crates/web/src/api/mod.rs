@@ -7,7 +7,7 @@ mod urls;
 
 pub use urls::{
     FAVORITES_URL, download_url, encode_component, entries_url, favorite_url, folders_url,
-    rename_url, search_url, upload_url, zip_selection_url, zip_url,
+    rename_url, search_url, thumbnail_url, upload_url, zip_selection_url, zip_url,
 };
 #[cfg_attr(not(target_arch = "wasm32"), allow(unused_imports))]
 pub use urls::{TASKS_URL, task_url};

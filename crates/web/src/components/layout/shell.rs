@@ -94,7 +94,7 @@ pub fn Shell(
                 }
                 span { class: "inline-block size-3 rounded-sm bg-indigo-600 dark:bg-indigo-400" }
                 span { class: "font-bold text-gray-900 dark:text-white", {t!("app-name")} }
-                div { class: "ml-auto flex items-center gap-3",
+                div { class: "ml-auto flex items-center gap-1 sm:gap-3",
                     if let Some(search) = search {
                         {search}
                     }

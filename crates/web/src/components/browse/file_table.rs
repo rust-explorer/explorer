@@ -4,48 +4,23 @@ use dioxus::prelude::*;
 use dioxus_i18n::t;
 use shared::api::browse::{Entry, EntryKind};
 
-use super::file_row::{COLUMNS, FileRow, MUTED, download_href};
-use super::row_menu::{MenuRequest, RowMenu};
+use super::entry_actions::{
+    EntryActionsLayer, select, selected_entries, toggle_all, use_entry_actions,
+    use_retain_selection,
+};
+use super::file_row::{COLUMNS, FileRow, MUTED};
 use super::select_cell::SelectAll;
-use super::selection_bar::{SelectionBar, selection_href};
+use super::selection_bar::SelectionBar;
 use super::virtual_list::VirtualList;
 use crate::actions::{RowAction, row_actions, selection_actions};
-use crate::api;
 use crate::components::common::FocusTarget;
 use crate::components::common::icons::{ArrowDownIcon, ArrowUpIcon};
-use crate::components::{DeleteDialog, RenameDialog, TransferDialog, TransferMode};
 use crate::format::now_ms;
 use crate::listing::{Sort, SortKey, sorted};
 use crate::routes::{Segment, Segments};
 use crate::selection::Selection;
 
 const ROW_HEIGHT: f64 = 44.0;
-
-/// A rename in progress and the ⋯ button that gets focus back.
-#[derive(Clone, PartialEq)]
-struct Renaming {
-    entry: Entry,
-    trigger: Option<FocusTarget>,
-}
-
-/// Entries waiting for the delete confirmation; from the selection bar, a confirmed delete
-/// clears the selection.
-#[derive(Clone, PartialEq)]
-struct Deleting {
-    names: Vec<String>,
-    trigger: Option<FocusTarget>,
-    from_selection: bool,
-}
-
-/// Entries waiting for a destination folder; from the selection bar, a confirmed copy or move
-/// clears the selection.
-#[derive(Clone, PartialEq)]
-struct Transferring {
-    mode: TransferMode,
-    entries: Vec<(String, EntryKind)>,
-    trigger: Option<FocusTarget>,
-    from_selection: bool,
-}
 
 #[component]
 pub fn FileTable(
@@ -56,12 +31,7 @@ pub fn FileTable(
     selection: Signal<Selection>,
 ) -> Element {
     let mut sort = use_context::<Signal<Sort>>();
-    let mut menu = use_signal(|| None::<MenuRequest>);
-    let mut renaming = use_signal(|| None::<Renaming>);
-    let mut deleting = use_signal(|| None::<Deleting>);
-    let mut transferring = use_signal(|| None::<Transferring>);
-    // A renamed entry whose ⋯ takes focus once the refreshed listing shows it.
-    let mut focus_menu_of = use_signal(|| None::<String>);
+    let actions = use_entry_actions();
     let select_all = use_signal(|| None::<Rc<MountedData>>);
     let rows = use_memo(move || Rc::new(sorted(&entries.read(), sort())));
     let now = use_memo(move || {
@@ -69,118 +39,33 @@ pub fn FileTable(
         now_ms()
     });
     let total = rows.read().len();
-    let reveal = focus_menu_of
-        .read()
+    let focus_pending = actions.focus_pending();
+    let reveal = focus_pending
         .as_ref()
         .and_then(|name| rows.read().iter().position(|entry| &entry.name == name));
-    use_effect(move || {
-        let rows = rows.read();
-        let names: Vec<&str> = rows.iter().map(|entry| entry.name.as_str()).collect();
-        selection.write().retain(&names);
-    });
+    use_retain_selection(rows, selection);
     let chosen = selection();
-    let selected: Vec<(String, EntryKind)> = if chosen.is_empty() {
-        Vec::new()
-    } else {
-        rows.read()
-            .iter()
-            .filter(|entry| chosen.contains(&entry.name))
-            .map(|entry| (entry.name.clone(), entry.kind))
-            .collect()
-    };
+    let selected = selected_entries(&rows.read(), &chosen);
     let bar_actions: Vec<RowAction> = {
         let kinds: Vec<EntryKind> = selected.iter().map(|(_, kind)| *kind).collect();
         selection_actions(&kinds, read_only)
     };
     let selected_count = selected.len();
     let on_sort = move |column: SortKey| sort.set(sort().toggled(column));
-    let menu_name = menu.read().as_ref().map(|open| open.entry.name.clone());
-    let (dialog_volume, dialog_parent) = (volume.as_str().to_owned(), path.joined());
-    let transfer_parent = path.clone();
-
-    let refocus = move |trigger: Option<FocusTarget>| {
-        if let Some(FocusTarget(button)) = trigger {
-            spawn(async move {
-                let _ = button.set_focus(true).await;
-            });
-        }
-    };
-    let on_action = {
-        let (volume, path) = (volume.clone(), path.clone());
-        move |action: RowAction| {
-            let Some(MenuRequest { entry, trigger, .. }) = menu.take() else {
-                return;
-            };
-            match action {
-                RowAction::Rename => renaming.set(Some(Renaming { entry, trigger })),
-                RowAction::Delete => deleting.set(Some(Deleting {
-                    names: vec![entry.name],
-                    trigger,
-                    from_selection: false,
-                })),
-                RowAction::Download => {
-                    if let Some(href) =
-                        download_href(volume.as_str(), &path.child(&entry.name), entry.kind)
-                    {
-                        api::navigate(&href);
-                    }
-                    refocus(trigger);
-                }
-                RowAction::CopyTo | RowAction::MoveTo => transferring.set(Some(Transferring {
-                    mode: transfer_mode(action),
-                    entries: vec![(entry.name, entry.kind)],
-                    trigger,
-                    from_selection: false,
-                })),
-            }
-        }
-    };
+    let menu_name = actions.menu_name();
+    let (layer_volume, layer_path) = (volume.clone(), path.clone());
 
     let on_selection_action = {
         let (volume, path) = (volume.clone(), path.clone());
         // The bar goes away on confirm: focus goes back to the select-all box.
         let trigger = select_all().map(FocusTarget);
-        move |action: RowAction| match action {
-            RowAction::Download => {
-                let chosen: Vec<(&str, EntryKind)> = selected
-                    .iter()
-                    .map(|(name, kind)| (name.as_str(), *kind))
-                    .collect();
-                if let Some(href) = selection_href(volume.as_str(), &path, &chosen) {
-                    api::navigate(&href);
-                }
-            }
-            RowAction::Delete => deleting.set(Some(Deleting {
-                names: selected.iter().map(|(name, _)| name.clone()).collect(),
-                trigger: trigger.clone(),
-                from_selection: true,
-            })),
-            RowAction::CopyTo | RowAction::MoveTo => transferring.set(Some(Transferring {
-                mode: transfer_mode(action),
-                entries: selected.clone(),
-                trigger: trigger.clone(),
-                from_selection: true,
-            })),
-            RowAction::Rename => {}
+        move |action: RowAction| {
+            actions.selection_action(action, volume.as_str(), &path, &selected, trigger.clone());
         }
     };
-    let on_select = move |(name, range): (String, bool)| {
-        let rows = rows.read();
-        let names: Vec<&str> = rows.iter().map(|entry| entry.name.as_str()).collect();
-        selection.with_mut(|selection| {
-            if range {
-                selection.select_range(&names, &name);
-            } else {
-                selection.toggle(&name);
-            }
-        });
-    };
-    let on_select_all = move |()| {
-        let rows = rows.read();
-        let names: Vec<&str> = rows.iter().map(|entry| entry.name.as_str()).collect();
-        let all = selection.read().len() == names.len();
-        selection.with_mut(|selection| selection.set_all(&names, !all));
-    };
+    let on_select =
+        move |(name, range): (String, bool)| select(selection, &rows.read(), &name, range);
+    let on_select_all = move |()| toggle_all(selection, &rows.read());
 
     rsx! {
         div {
@@ -233,7 +118,7 @@ pub fn FileTable(
                         let menu_open = menu_name.as_deref() == Some(entry.name.as_str());
                         let is_selected = chosen.contains(&entry.name);
                         let has_menu = !row_actions(entry.kind, read_only).is_empty();
-                        let take_focus = focus_menu_of.read().as_deref() == Some(entry.name.as_str());
+                        let take_focus = focus_pending.as_deref() == Some(entry.name.as_str());
                         rsx! {
                             FileRow {
                                 volume: volume.clone(),
@@ -245,82 +130,23 @@ pub fn FileTable(
                                 menu_open,
                                 selected: is_selected,
                                 take_focus,
-                                on_focus_taken: move |()| focus_menu_of.set(None),
+                                on_focus_taken: move |()| actions.focus_taken(),
                                 on_select,
-                                on_menu: move |request| {
-                                    focus_menu_of.set(None);
-                                    menu.set(Some(request));
-                                },
+                                on_menu: move |request| actions.open_menu(request),
                             }
                         }
                     },
                 }
             }
         }
-        if let Some(request) = menu() {
-            RowMenu {
-                request,
-                read_only,
-                on_close: move |restore_focus: bool| {
-                    if let Some(open) = menu.take()
-                        && restore_focus
-                    {
-                        refocus(open.trigger);
-                    }
-                },
-                on_action,
-            }
+        EntryActionsLayer {
+            actions,
+            volume: layer_volume,
+            path: layer_path,
+            entries,
+            read_only,
+            selection,
         }
-        if let Some(Renaming { entry, trigger }) = renaming() {
-            RenameDialog {
-                volume: dialog_volume.clone(),
-                parent: dialog_parent.clone(),
-                entry,
-                entries,
-                return_focus: trigger,
-                on_close: move |()| renaming.set(None),
-                on_renamed: move |name| focus_menu_of.set(Some(name)),
-            }
-        }
-        if let Some(Transferring { mode, entries, trigger, from_selection }) = transferring() {
-            TransferDialog {
-                mode,
-                volume: dialog_volume.clone(),
-                parent: transfer_parent.clone(),
-                entries,
-                return_focus: trigger,
-                on_close: move |()| transferring.set(None),
-                on_confirmed: move |()| {
-                    transferring.set(None);
-                    if from_selection {
-                        selection.write().clear();
-                    }
-                },
-            }
-        }
-        if let Some(Deleting { names, trigger, from_selection }) = deleting() {
-            DeleteDialog {
-                volume: dialog_volume,
-                parent: dialog_parent,
-                names,
-                return_focus: trigger,
-                on_close: move |()| deleting.set(None),
-                on_confirmed: move |()| {
-                    deleting.set(None);
-                    if from_selection {
-                        selection.write().clear();
-                    }
-                },
-            }
-        }
-    }
-}
-
-fn transfer_mode(action: RowAction) -> TransferMode {
-    if action == RowAction::MoveTo {
-        TransferMode::Move
-    } else {
-        TransferMode::Copy
     }
 }
 

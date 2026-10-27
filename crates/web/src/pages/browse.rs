@@ -7,14 +7,15 @@ use shared::api::browse::{Listing, VolumeInfo};
 
 use crate::api;
 use crate::components::{
-    Breadcrumb, DropZone, ErrorPanel, FileTable, NewFolderButton, RefreshButton, SearchField,
-    SearchResults, Shell, Sidebar, UploadButton,
+    Breadcrumb, DropZone, ErrorPanel, FileGrid, FileTable, NewFolderButton, RefreshButton,
+    SearchField, SearchResults, Shell, Sidebar, UploadButton, ViewToggle,
 };
 use crate::favorites::use_favorites_sync;
 use crate::revision::Revision;
 use crate::routes::{Segment, Segments};
 use crate::search::{SearchQuery, effective_query};
 use crate::selection::Selection;
+use crate::view_mode::ViewMode;
 
 #[component]
 pub fn Browse(volume: Segment, path: Segments) -> Element {
@@ -36,6 +37,7 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
 
     let mut selection = use_signal(Selection::default);
     let SearchQuery(mut query) = use_context();
+    let view_mode = use_context::<Signal<ViewMode>>();
     use_effect(use_reactive!(|url| {
         let _ = url;
         selection.write().clear();
@@ -67,6 +69,7 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
     let actions = read_only.map(|read_only| {
         rsx! {
             RefreshButton { busy }
+            ViewToggle {}
             NewFolderButton { volume: volume.as_str().to_owned(), path: path.joined(), read_only }
             UploadButton { volume: volume.as_str().to_owned(), path: path.joined(), read_only }
         }
@@ -102,6 +105,15 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
             SearchResults {
                 volume: volume.as_str().to_owned(),
                 query: searching.clone().unwrap_or_default(),
+            }
+        },
+        Some(Ok(entries)) if view_mode() == ViewMode::Grid => rsx! {
+            FileGrid {
+                volume: volume.clone(),
+                path: path.clone(),
+                entries,
+                read_only: read_only.unwrap_or(true),
+                selection,
             }
         },
         Some(Ok(entries)) => rsx! {

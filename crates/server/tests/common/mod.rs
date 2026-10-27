@@ -15,6 +15,7 @@ use explorer_server::favorites::Favorites;
 use explorer_server::http::{AppState, router};
 use explorer_server::storage::Volumes;
 use explorer_server::tasks::Tasks;
+use explorer_server::thumbnails::{self, Thumbnails};
 use explorer_server::uploads::Uploads;
 use fake_oidc::FakeOidc;
 
@@ -66,6 +67,7 @@ pub async fn state_with_volumes(web_dir: &Path, volumes: &[&str]) -> (AppState, 
         oidc: Arc::new(oidc),
         volumes: Arc::new(volumes),
         tasks: Arc::new(Tasks::new()),
+        thumbnails: Arc::new(Thumbnails::new(web_dir.join(thumbnails::CACHE_DIR)).unwrap()),
     };
     (state, fake)
 }

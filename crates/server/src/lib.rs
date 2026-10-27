@@ -10,4 +10,5 @@ pub mod search;
 pub mod storage;
 pub mod tasks;
 pub mod telemetry;
+pub mod thumbnails;
 pub mod uploads;

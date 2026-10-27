@@ -69,6 +69,7 @@ error-cross_device = { $path } se trouve sur un autre système de fichiers que s
 error-invalid_destination = { $path } ne peut pas être déplacé ou copié à cet endroit.
 error-task_not_found = Cette tâche n'existe plus sur le serveur.
 error-favorites_full = Vous ne pouvez pas avoir plus de 100 favoris. Retirez-en un d'abord.
+error-thumbnail_unavailable = Aucun aperçu n'est disponible pour ce fichier.
 upload = Uploader
 upload-open = Uploader des fichiers ou un dossier
 upload-files = Fichiers…
@@ -181,6 +182,15 @@ picker-empty = Aucun dossier ici
 picker-copy-here = Copier ici
 picker-move-here = Déplacer ici
 refresh = Actualiser
+view-mode = Affichage
+view-list = Affichage en liste
+view-grid = Affichage en grille
+grid-folder = Dossier
+grid-count =
+    { $count ->
+        [one] { $count } élément
+       *[other] { $count } éléments
+    }
 search-placeholder = Rechercher dans { $volume }
 search-open = Rechercher
 search-close = Fermer la recherche

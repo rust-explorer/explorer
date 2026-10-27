@@ -69,6 +69,7 @@ error-cross_device = { $path } is on another filesystem than its volume, so noth
 error-invalid_destination = { $path } can't be moved or copied there.
 error-task_not_found = This task no longer exists on the server.
 error-favorites_full = You can't have more than 100 favorites. Remove one first.
+error-thumbnail_unavailable = No preview is available for this file.
 upload = Upload
 upload-open = Upload files or a folder
 upload-files = Files…
@@ -177,6 +178,15 @@ picker-empty = No folders here
 picker-copy-here = Copy here
 picker-move-here = Move here
 refresh = Refresh
+view-mode = View
+view-list = List view
+view-grid = Grid view
+grid-folder = Folder
+grid-count =
+    { $count ->
+        [one] 1 item
+       *[other] { $count } items
+    }
 search-placeholder = Search in { $volume }
 search-open = Search
 search-close = Close search
