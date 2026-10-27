@@ -186,14 +186,17 @@ impl TaskList {
     }
 
     /// Takes over the queued and running tasks the server has for this user, such as those an
-    /// earlier page started before a reload.
+    /// earlier page started before a reload. Finished scans are taken too, for their result,
+    /// but stay out of the panel like the other finished tasks.
     pub fn adopt(&mut self, infos: Vec<TaskInfo>) -> Vec<Effect> {
         for info in infos {
             let known = self
                 .tasks
                 .iter()
                 .any(|task| task.server_id() == Some(info.id.as_str()));
-            if known || !info.state.is_active() {
+            let finished_scan =
+                matches!(info.spec, TaskSpec::Usage { .. }) && info.state == TaskState::Done;
+            if known || !(info.state.is_active() || finished_scan) {
                 continue;
             }
             let (key, batch) = (TaskKey(self.next_key), self.next_batch);
@@ -210,7 +213,7 @@ impl TaskList {
                 conflict: None,
                 open_when_posted: false,
                 finished_at_ms: None,
-                dismissed: false,
+                dismissed: finished_scan,
             });
         }
         let mut effects = Vec::new();
@@ -266,7 +269,7 @@ impl TaskList {
                             source: task.spec.source().clone(),
                         });
                     }
-                    let finished = !info.state.is_active();
+                    let finished = !info.state.is_active() && changes_files(&task.spec);
                     task.info = Some(*info);
                     if finished {
                         effects.push(Effect::Refresh);
@@ -336,7 +339,7 @@ impl TaskList {
         }
     }
 
-    /// Applies a poll; true when a task finished.
+    /// Applies a poll; true when a task that changes files finished.
     fn update(&mut self, infos: &[TaskInfo]) -> bool {
         let mut finished = false;
         for task in &mut self.tasks {
@@ -344,7 +347,7 @@ impl TaskList {
                 continue;
             };
             if let Some(info) = infos.iter().find(|info| info.id == current.id) {
-                finished |= !info.state.is_active();
+                finished |= !info.state.is_active() && changes_files(&task.spec);
                 task.info = Some(info.clone());
             } else if self.polled.contains(&current.id) {
                 // Lost with a server restart.
@@ -354,7 +357,7 @@ impl TaskList {
                     details: None,
                     request_id: None,
                 }));
-                finished = true;
+                finished |= changes_files(&task.spec);
             }
         }
         finished
@@ -433,6 +436,11 @@ impl TaskList {
 /// Replace only suits a file over a file.
 fn suits(task: &Task, decision: Decision) -> bool {
     decision != Decision::Replace || task.allows_replace()
+}
+
+/// A space usage scan only reads: the listing need not reload when it ends.
+fn changes_files(spec: &TaskSpec) -> bool {
+    !matches!(spec, TaskSpec::Usage { .. })
 }
 
 #[cfg(test)]

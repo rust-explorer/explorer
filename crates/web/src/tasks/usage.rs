@@ -349,6 +349,58 @@ mod tests {
     }
 
     #[test]
+    fn a_finished_scan_does_not_refresh_the_listing() {
+        let mut list = TaskList::default();
+        scanned(&mut list, info("a", "Films", TaskState::Running, 10));
+        let effects = list.handle(Event::Polled(vec![info(
+            "a",
+            "Films",
+            TaskState::Done,
+            500,
+        )]));
+        assert_eq!(effects, []);
+
+        list.analyze(location("Music"), false, true);
+        let effects = list.handle(Event::Posted {
+            key: TaskKey(1),
+            info: Box::new(info("b", "Music", TaskState::Done, 1)),
+        });
+        assert_eq!(effects, []);
+    }
+
+    #[test]
+    fn finished_scans_are_adopted_out_of_the_panel() {
+        let mut list = TaskList::default();
+        let effects = list.adopt(vec![
+            info("a", "Films", TaskState::Done, 500),
+            info("b", "Music", TaskState::Failed, 0),
+            info("c", "Photos", TaskState::Running, 0),
+        ]);
+        assert_eq!(
+            effects,
+            [Effect::PollAfter {
+                ms: super::super::store::POLL_EVERY_MS
+            }]
+        );
+        assert_eq!(list.folder_size("media", "Films"), FolderSize::Known(500));
+        assert_eq!(list.folder_size("media", "Music"), FolderSize::Unknown);
+        let shown: Vec<&str> = list
+            .shown()
+            .filter_map(|task| Some(task.info.as_ref()?.id.as_str()))
+            .collect();
+        assert_eq!(shown, ["c"]);
+        assert_eq!(
+            list.analyze(location("Films"), true, false),
+            [open("a", "Films")]
+        );
+        assert_eq!(
+            list.adopt(vec![info("a", "Films", TaskState::Done, 500)]),
+            []
+        );
+        assert_eq!(list.tasks().len(), 2);
+    }
+
+    #[test]
     fn analyze_starts_over_after_a_failed_scan() {
         let mut list = TaskList::default();
         scanned(&mut list, info("a", "Films", TaskState::Failed, 0));
