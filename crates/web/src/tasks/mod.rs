@@ -60,6 +60,12 @@ impl TaskStore {
         self.run(effects);
     }
 
+    /// Scans `source` anew and navigates to its usage page at `at`, a folder under it.
+    pub fn rescan_at(mut self, source: Location, at: String) {
+        let effects = self.list.write().analyze_at(source, Some(at), true);
+        self.run(effects);
+    }
+
     pub fn decide(mut self, key: TaskKey, decision: Decision, apply_to_all: bool) {
         let effects = self.list.write().decide(key, decision, apply_to_all);
         self.run(effects);
@@ -100,8 +106,8 @@ impl TaskStore {
         for effect in effects {
             match effect {
                 Effect::Refresh => *self.revision.write() += 1,
-                Effect::Open { id, source } => {
-                    crate::routes::go(crate::routes::usage_route(&id, &source));
+                Effect::Open { id, at } => {
+                    crate::routes::go(crate::routes::usage_route(&id, &at));
                 }
                 Effect::Post { .. } | Effect::Delete { .. } | Effect::PollAfter { .. } => {}
             }
@@ -141,8 +147,8 @@ impl TaskStore {
                     });
                 }
                 Effect::Refresh => *self.revision.write() += 1,
-                Effect::Open { id, source } => {
-                    crate::routes::go(crate::routes::usage_route(&id, &source));
+                Effect::Open { id, at } => {
+                    crate::routes::go(crate::routes::usage_route(&id, &at));
                 }
             }
         }

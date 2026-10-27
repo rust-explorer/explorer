@@ -61,28 +61,44 @@ impl TaskList {
     /// `open`, its page opens once its id is known. A scan still going on is always reused, a
     /// finished one only without `force_new` and while the server likely keeps its result.
     pub fn analyze(&mut self, source: Location, open: bool, force_new: bool) -> Vec<Effect> {
+        let at = open.then(|| source.path.clone());
+        self.analyze_at(source, at, force_new)
+    }
+
+    /// Like [`TaskList::analyze`], opening the page at `at`, a folder under `source`.
+    pub fn analyze_at(
+        &mut self,
+        source: Location,
+        at: Option<String>,
+        force_new: bool,
+    ) -> Vec<Effect> {
         let reused = self
             .newest_usage(&source.volume, &source.path)
             .filter(|task| task.is_active() || (!force_new && self.result_kept(task)))
             .map(|task| (task.key, task.server_id().map(str::to_owned)));
         match reused {
-            Some((_, Some(id))) => {
-                if open {
-                    vec![Effect::Open { id, source }]
-                } else {
-                    Vec::new()
-                }
-            }
+            Some((_, Some(id))) => at
+                .map(|path| {
+                    let at = Location {
+                        volume: source.volume,
+                        path,
+                    };
+                    Effect::Open { id, at }
+                })
+                .into_iter()
+                .collect(),
             Some((key, None)) => {
-                if let Some(task) = self.task_mut(key) {
-                    task.open_when_posted |= open;
+                if let Some(task) = self.task_mut(key)
+                    && at.is_some()
+                {
+                    task.open_at = at;
                 }
                 Vec::new()
             }
             None => {
                 let effects = self.start_batch(vec![(TaskSpec::Usage { source }, None)]);
                 if let Some(task) = self.tasks_mut().last_mut() {
-                    task.open_when_posted = open;
+                    task.open_at = at;
                 }
                 effects
             }
@@ -135,7 +151,7 @@ mod tests {
     fn open(id: &str, path: &str) -> Effect {
         Effect::Open {
             id: id.to_owned(),
-            source: location(path),
+            at: location(path),
         }
     }
 
@@ -398,6 +414,25 @@ mod tests {
             []
         );
         assert_eq!(list.tasks().len(), 2);
+    }
+
+    #[test]
+    fn a_rescan_opens_at_the_folder_shown() {
+        let mut list = TaskList::default();
+        scanned(&mut list, info("a", "Films", TaskState::Done, 500));
+        assert_eq!(
+            list.analyze_at(location("Films"), Some("Films/2026".to_owned()), true),
+            [post("Films", 1)]
+        );
+        let effects = list.handle(Event::Posted {
+            key: TaskKey(1),
+            info: Box::new(info("b", "Films", TaskState::Running, 0)),
+        });
+        assert_eq!(effects.first(), Some(&open("b", "Films/2026")));
+        assert_eq!(
+            list.analyze_at(location("Films"), Some("Films/x".to_owned()), true),
+            [open("b", "Films/x")]
+        );
     }
 
     #[test]

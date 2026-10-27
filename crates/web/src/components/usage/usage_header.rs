@@ -76,7 +76,7 @@ pub fn UsageHeader(id: String, view: UsageView) -> Element {
                 }
             }
             div { class: "mt-1 flex flex-wrap items-center gap-2",
-                ScanAgainButton { source: rescan }
+                ScanAgainButton { source: rescan, at: view.path.clone() }
                 Link {
                     to: Route::Browse { volume: view.volume.as_str().into(), path },
                     class: SECONDARY,
@@ -87,10 +87,10 @@ pub fn UsageHeader(id: String, view: UsageView) -> Element {
     }
 }
 
-/// Scans `source` anew and opens the result; disabled while a scan of it is going on, so a
-/// double tap starts one scan.
+/// Scans `source` anew and opens the result at `at` (by default `source` itself); disabled
+/// while a scan of it is going on, so a double tap starts one scan.
 #[component]
-pub fn ScanAgainButton(source: Location) -> Element {
+pub fn ScanAgainButton(source: Location, at: Option<String>) -> Element {
     let tasks = use_tasks();
     let busy = tasks
         .list()
@@ -102,7 +102,10 @@ pub fn ScanAgainButton(source: Location) -> Element {
             r#type: "button",
             class: PRIMARY,
             disabled: busy,
-            onclick: move |_| tasks.analyze(source.clone(), true, true),
+            onclick: move |_| {
+                let at = at.clone().unwrap_or_else(|| source.path.clone());
+                tasks.rescan_at(source.clone(), at);
+            },
             {t!("usage-scan-again")}
         }
     }

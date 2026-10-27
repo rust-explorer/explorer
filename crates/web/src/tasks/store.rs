@@ -31,8 +31,8 @@ pub struct Task {
     source_kind: Option<EntryKind>,
     /// The destination exists: the task waits for the user's decision.
     conflict: Option<Conflict>,
-    /// Its page opens once the server gives it an id.
-    pub(super) open_when_posted: bool,
+    /// Its page opens at this folder once the server gives it an id.
+    pub(super) open_at: Option<String>,
     /// When this tab saw it finish.
     finished_at_ms: Option<i64>,
     /// Cleared from the activity panel, but still known for its result.
@@ -95,8 +95,8 @@ pub enum Effect {
     PollAfter { ms: u32 },
     /// Something changed on disk: listings reload.
     Refresh,
-    /// Shows the result page of the usage task `id`.
-    Open { id: String, source: Location },
+    /// Shows the result page of the usage task `id`, at the folder `at`.
+    Open { id: String, at: Location },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -176,7 +176,7 @@ impl TaskList {
                     batch,
                     source_kind,
                     conflict: None,
-                    open_when_posted: false,
+                    open_at: None,
                     finished_at_ms: None,
                     dismissed: false,
                 });
@@ -211,7 +211,7 @@ impl TaskList {
                 batch,
                 source_kind: None,
                 conflict: None,
-                open_when_posted: false,
+                open_at: None,
                 finished_at_ms: None,
                 dismissed: finished_scan,
             });
@@ -263,10 +263,13 @@ impl TaskList {
                             id: info.id.clone(),
                         });
                     }
-                    if std::mem::take(&mut task.open_when_posted) {
+                    if let Some(path) = task.open_at.take() {
                         effects.push(Effect::Open {
                             id: info.id.clone(),
-                            source: task.spec.source().clone(),
+                            at: Location {
+                                volume: task.spec.source().volume.clone(),
+                                path,
+                            },
                         });
                     }
                     let finished = !info.state.is_active() && changes_files(&task.spec);
