@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
-const DIALOG: &str = "m-auto w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 text-left shadow-xl backdrop:bg-slate-900/40 dark:border-slate-800 dark:bg-slate-900";
+const DIALOG: &str = "m-auto w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 text-left shadow-xl dark:border-slate-800 dark:bg-slate-900";
 
 /// A native modal `<dialog>`: the browser traps focus and inerts the page; focus returns to the opener on unmount.
 /// A dialog opened from a menu item gets `return_focus`: the item that had focus is gone by then.
