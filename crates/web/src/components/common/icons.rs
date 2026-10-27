@@ -278,3 +278,21 @@ pub fn GridIcon(#[props(default = "size-5".to_owned())] class: String) -> Elemen
         }
     }
 }
+
+#[component]
+pub fn ChartIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M21 12a9 9 0 1 1-9-9v9zM15 3.5A9 9 0 0 1 20.5 9H15z" }
+        }
+    }
+}
+
+#[component]
+pub fn WarningIcon(#[props(default = "size-4".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M12 4 2.5 20h19zM12 10v4M12 17h.01" }
+        }
+    }
+}

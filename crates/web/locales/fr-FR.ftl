@@ -135,7 +135,6 @@ activity-close = Fermer le panneau d'activité
 task-deleting = Suppression de { $name }
 task-copying = Copie de { $name } vers { $folder }
 task-moving = Déplacement de { $name } vers { $folder }
-task-measuring = Analyse de { $name }
 task-cancel = Annuler { $name }
 task-progress = Progression de la tâche
 task-waiting = En attente
@@ -203,3 +202,47 @@ search-results =
     }
 search-empty = Aucun résultat pour « { $query } » dans { $volume }
 search-truncated = Affichage des { $count } premiers, affinez votre recherche.
+action-analyze-usage = Analyser l’espace
+action-calculate-size = Calculer la taille
+analyze-usage = Analyser l’espace
+folder-size-calculated = Calculée à { $time }
+folder-size-computing = Calcul de la taille…
+task-analysing = Analyse de { $name }
+task-analysing-counts =
+    { $count ->
+        [one] Analyse de { $name } — 1 fichier, { $size }
+       *[other] Analyse de { $name } — { $files } fichiers, { $size }
+    }
+task-view = Voir
+task-view-usage = Voir l’espace occupé par { $name }
+usage-breadcrumb = Dossiers analysés
+usage-items = Contenu
+usage-empty = Ce dossier est vide.
+usage-files =
+    { $count ->
+        [one] 1 fichier
+       *[other] { $files } fichiers
+    }
+usage-folders =
+    { $count ->
+        [one] 1 dossier
+       *[other] { $folders } dossiers
+    }
+usage-other-files =
+    { $count ->
+        [one] 1 autre fichier
+       *[other] { $files } autres fichiers
+    }
+usage-percent = { $percent } %
+usage-percent-small = < 1 %
+usage-scanned-at = Analysé à { $time }
+usage-scan-again = Analyser à nouveau
+usage-open-in-explorer = Ouvrir dans l’explorateur
+usage-incomplete = Certains éléments n’ont pas pu être lus
+usage-collapsed = Trop de dossiers : les sous-dossiers de celui-ci sont comptés mais pas listés
+usage-scanning = Analyse de { $name }…
+usage-cancelled-title = Analyse annulée
+usage-cancelled-message = Cette analyse a été arrêtée avant la fin.
+usage-unavailable-title = Cette analyse n’est plus disponible
+usage-unavailable-message = Les résultats ne sont conservés qu’un temps après l’analyse. Analysez à nouveau le dossier pour voir ce qui occupe son espace.
+usage-failed-title = L’analyse a échoué

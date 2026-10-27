@@ -32,6 +32,28 @@ pub fn format_size(bytes: u64, locale: &LanguageIdentifier) -> String {
     unreachable!("the last unit always returns")
 }
 
+/// A count with the locale's digit grouping: 12,000 / 12 000 / 12.000.
+pub fn format_count(count: u64, locale: &LanguageIdentifier) -> String {
+    let (separator, min_digits) = match locale.language.as_str() {
+        "fr" => ('\u{202f}', 4),
+        // Spanish leaves four-digit numbers alone.
+        "es" => ('.', 5),
+        _ => (',', 4),
+    };
+    let digits = count.to_string();
+    if digits.len() < min_digits {
+        return digits;
+    }
+    let mut grouped = String::with_capacity(digits.len() + digits.len() / 3);
+    for (index, digit) in digits.chars().enumerate() {
+        if index > 0 && (digits.len() - index).is_multiple_of(3) {
+            grouped.push(separator);
+        }
+        grouped.push(digit);
+    }
+    grouped
+}
+
 pub fn format_speed(bytes_per_sec: u64, locale: &LanguageIdentifier) -> String {
     format!("{}/s", format_size(bytes_per_sec, locale))
 }
@@ -154,6 +176,19 @@ mod tests {
         assert_eq!(format_size(999_500, &en), "1 MB");
         assert_eq!(format_size(2_500_000_000_000_000, &en), "2500 TB");
         assert_eq!(format_size(u64::MAX, &en), "18446744 TB");
+    }
+
+    #[test]
+    fn format_count_groups_digits_by_locale() {
+        let en = langid!("en-US");
+        assert_eq!(format_count(0, &en), "0");
+        assert_eq!(format_count(999, &en), "999");
+        assert_eq!(format_count(1000, &en), "1,000");
+        assert_eq!(format_count(120_000, &en), "120,000");
+        assert_eq!(format_count(1_234_567, &en), "1,234,567");
+        assert_eq!(format_count(12_000, &langid!("fr-FR")), "12\u{202f}000");
+        assert_eq!(format_count(1000, &langid!("es-ES")), "1000");
+        assert_eq!(format_count(12_000, &langid!("es-ES")), "12.000");
     }
 
     #[test]

@@ -87,6 +87,15 @@ pub fn task_url(id: &str) -> String {
     format!("{TASKS_URL}/{}", encode_component(id))
 }
 
+/// One folder of a finished usage scan.
+pub fn usage_url(id: &str, path: &str) -> String {
+    format!(
+        "{TASKS_URL}/{}/usage?path={}",
+        encode_component(id),
+        encode_component(path)
+    )
+}
+
 fn files_url(action: &str, volume: &str, path: &str) -> String {
     format!(
         "/files/{action}?volume={}&path={}",
@@ -139,6 +148,10 @@ mod tests {
         );
         assert_eq!(rename_url("my files"), "/api/volumes/my%20files/rename");
         assert_eq!(task_url("0a/b"), "/api/tasks/0a%2Fb");
+        assert_eq!(
+            usage_url("0a", "Films/é #?"),
+            "/api/tasks/0a/usage?path=Films%2F%C3%A9%20%23%3F"
+        );
         assert_eq!(
             favorite_url("my files", "é/x"),
             "/api/favorites?volume=my%20files&path=%C3%A9%2Fx"

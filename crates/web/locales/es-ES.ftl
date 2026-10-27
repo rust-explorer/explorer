@@ -135,7 +135,6 @@ activity-close = Cerrar el panel de actividad
 task-deleting = Eliminando { $name }
 task-copying = Copiando { $name } a { $folder }
 task-moving = Moviendo { $name } a { $folder }
-task-measuring = Analizando { $name }
 task-cancel = Cancelar { $name }
 task-progress = Progreso de la tarea
 task-waiting = En espera
@@ -203,3 +202,47 @@ search-results =
     }
 search-empty = Ningún resultado para «{ $query }» en { $volume }
 search-truncated = Se muestran los { $count } primeros, afina la búsqueda.
+action-analyze-usage = Analizar espacio
+action-calculate-size = Calcular tamaño
+analyze-usage = Analizar espacio
+folder-size-calculated = Calculado a las { $time }
+folder-size-computing = Calculando el tamaño…
+task-analysing = Analizando { $name }
+task-analysing-counts =
+    { $count ->
+        [one] Analizando { $name } — 1 archivo, { $size }
+       *[other] Analizando { $name } — { $files } archivos, { $size }
+    }
+task-view = Ver
+task-view-usage = Ver el espacio que ocupa { $name }
+usage-breadcrumb = Carpetas analizadas
+usage-items = Contenido
+usage-empty = Esta carpeta está vacía.
+usage-files =
+    { $count ->
+        [one] 1 archivo
+       *[other] { $files } archivos
+    }
+usage-folders =
+    { $count ->
+        [one] 1 carpeta
+       *[other] { $folders } carpetas
+    }
+usage-other-files =
+    { $count ->
+        [one] 1 archivo más
+       *[other] { $files } archivos más
+    }
+usage-percent = { $percent } %
+usage-percent-small = < 1 %
+usage-scanned-at = Analizado a las { $time }
+usage-scan-again = Volver a analizar
+usage-open-in-explorer = Abrir en el explorador
+usage-incomplete = Algunos elementos no se pudieron leer
+usage-collapsed = Demasiadas carpetas: las subcarpetas de esta se cuentan, pero no se listan
+usage-scanning = Analizando { $name }…
+usage-cancelled-title = Análisis cancelado
+usage-cancelled-message = Este análisis se detuvo antes de terminar.
+usage-unavailable-title = Este análisis ya no está disponible
+usage-unavailable-message = Los resultados solo se conservan un tiempo tras el análisis. Vuelve a analizar la carpeta para ver qué ocupa su espacio.
+usage-failed-title = El análisis ha fallado

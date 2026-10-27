@@ -1,9 +1,12 @@
 use dioxus::prelude::*;
+use dioxus_i18n::prelude::i18n;
 use dioxus_i18n::t;
 use shared::api::tasks::{Location, TaskInfo, TaskSpec, TaskState};
 
 use crate::components::common::icons::{CheckIcon, CloseIcon};
 use crate::components::common::{FailureNote, ICON_BUTTON, file_name};
+use crate::format::{format_count, format_size};
+use crate::routes::{Route, go, usage_route};
 use crate::tasks::{Task, use_tasks};
 
 const NOTE: &str = "mt-0.5 text-xs text-slate-500 dark:text-slate-400";
@@ -36,7 +39,10 @@ fn TaskRow(task: Task) -> Element {
                 span {
                     class: "min-w-0 flex-1 truncate text-gray-900 dark:text-slate-100",
                     title: "{full_path}",
-                    {label(&task.spec)}
+                    {label(&task.spec, task.info.as_ref())}
+                }
+                if let (TaskSpec::Usage { source }, Some(info), TaskState::Done) = (&task.spec, &task.info, state) {
+                    ViewLink { route: usage_route(&info.id, source), name: name.clone() }
                 }
                 if state == TaskState::Done {
                     span {
@@ -69,7 +75,10 @@ fn TaskStatus(task: Task) -> Element {
             p { class: NOTE, {t!("task-deciding")} }
         };
     }
+    let usage = matches!(task.spec, TaskSpec::Usage { .. });
     match (task.state(), &task.info) {
+        // Its label has the counts.
+        (TaskState::Running, Some(_)) if usage => rsx! {},
         (TaskState::Running, Some(info)) => match percent(info) {
             Some(percent) => rsx! {
                 div {
@@ -108,11 +117,45 @@ fn TaskStatus(task: Task) -> Element {
     }
 }
 
-fn label(spec: &TaskSpec) -> String {
+/// Opens the result of a finished usage scan. The panel lives outside the router's pages, so it
+/// navigates by hand.
+#[component]
+fn ViewLink(route: Route, name: String) -> Element {
+    rsx! {
+        a {
+            href: route.to_string(),
+            class: "shrink-0 rounded px-1 text-xs font-medium text-indigo-600 hover:underline focus-visible:outline-2 focus-visible:outline-indigo-600 dark:text-indigo-400",
+            aria_label: t!("task-view-usage", name: name),
+            onclick: move |event: MouseEvent| {
+                let modifiers = event.modifiers();
+                if modifiers.ctrl() || modifiers.meta() || modifiers.shift() {
+                    return;
+                }
+                event.prevent_default();
+                go(route.clone());
+            },
+            {t!("task-view")}
+        }
+    }
+}
+
+fn label(spec: &TaskSpec, info: Option<&TaskInfo>) -> String {
     let name = entry_name(spec.source()).to_owned();
     match spec {
         TaskSpec::Delete { .. } => t!("task-deleting", name: name),
-        TaskSpec::Usage { .. } => t!("task-measuring", name: name),
+        TaskSpec::Usage { .. } => match info.filter(|info| info.state != TaskState::Queued) {
+            Some(info) => {
+                let locale = i18n().language();
+                t!(
+                    "task-analysing-counts",
+                    name: name,
+                    count: info.files_done,
+                    files: format_count(info.files_done, &locale),
+                    size: format_size(info.bytes_done, &locale)
+                )
+            }
+            None => t!("task-analysing", name: name),
+        },
         TaskSpec::Copy { dest_dir, .. } => {
             t!("task-copying", name: name, folder: entry_name(dest_dir).to_owned())
         }

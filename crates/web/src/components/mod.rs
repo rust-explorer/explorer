@@ -6,9 +6,10 @@ mod manage;
 mod search;
 mod tasks;
 mod uploads;
+pub(crate) mod usage;
 
 pub use browse::{DropZone, FileGrid, FileTable, RefreshButton, ViewToggle};
-pub use common::{ErrorPanel, Notice};
+pub use common::{ErrorPanel, Notice, error_message, file_name};
 pub use layout::{ActivityPanel, Breadcrumb, Shell, Sidebar, SignOutButton};
 pub use manage::{
     DeleteDialog, NewFolderButton, NewFolderDialog, RenameDialog, TransferDialog, TransferMode,
@@ -16,3 +17,4 @@ pub use manage::{
 pub use search::{SearchField, SearchResults};
 pub use tasks::TaskConflictDialog;
 pub use uploads::{UploadButton, UploadConflictDialog};
+pub use usage::{AnalyzeButton, UsageHeader, UsageList};

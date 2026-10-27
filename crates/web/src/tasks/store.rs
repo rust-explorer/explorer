@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use shared::api::browse::EntryKind;
 use shared::api::conflict::ConflictPolicy;
 use shared::api::error::ErrorBody;
-use shared::api::tasks::{TaskInfo, TaskSpec, TaskState};
+use shared::api::tasks::{Location, TaskInfo, TaskSpec, TaskState};
 
 use super::conflict::{Conflict, policy_of, with_policy};
 use crate::api::ApiFailure;
@@ -31,6 +31,10 @@ pub struct Task {
     source_kind: Option<EntryKind>,
     /// The destination exists: the task waits for the user's decision.
     conflict: Option<Conflict>,
+    /// Its page opens once the server gives it an id.
+    pub(super) open_when_posted: bool,
+    /// When this tab saw it finish.
+    finished_at_ms: Option<i64>,
 }
 
 impl Task {
@@ -66,8 +70,12 @@ impl Task {
         })
     }
 
+    pub fn finished_at_ms(&self) -> Option<i64> {
+        self.finished_at_ms
+    }
+
     /// The server's id, while the server has the task.
-    fn server_id(&self) -> Option<&str> {
+    pub fn server_id(&self) -> Option<&str> {
         self.info
             .as_ref()
             .filter(|_| self.lost.is_none())
@@ -85,6 +93,8 @@ pub enum Effect {
     PollAfter { ms: u32 },
     /// Something changed on disk: listings reload.
     Refresh,
+    /// Shows the result page of the usage task `id`.
+    Open { id: String, source: Location },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -142,7 +152,7 @@ impl TaskList {
         )
     }
 
-    fn start_batch(&mut self, specs: Vec<(TaskSpec, Option<EntryKind>)>) -> Vec<Effect> {
+    pub(super) fn start_batch(&mut self, specs: Vec<(TaskSpec, Option<EntryKind>)>) -> Vec<Effect> {
         let batch = self.next_batch;
         self.next_batch += 1;
         specs
@@ -159,6 +169,8 @@ impl TaskList {
                     batch,
                     source_kind,
                     conflict: None,
+                    open_when_posted: false,
+                    finished_at_ms: None,
                 });
                 Effect::Post { key, spec }
             })
@@ -188,6 +200,8 @@ impl TaskList {
                 batch,
                 source_kind: None,
                 conflict: None,
+                open_when_posted: false,
+                finished_at_ms: None,
             });
         }
         let mut effects = Vec::new();
@@ -235,6 +249,12 @@ impl TaskList {
                     if task.cancel_requested && info.state.is_active() {
                         effects.push(Effect::Delete {
                             id: info.id.clone(),
+                        });
+                    }
+                    if std::mem::take(&mut task.open_when_posted) {
+                        effects.push(Effect::Open {
+                            id: info.id.clone(),
+                            source: task.spec.source().clone(),
                         });
                     }
                     let finished = !info.state.is_active();
@@ -291,6 +311,15 @@ impl TaskList {
             false
         });
         effects
+    }
+
+    /// Notes `now_ms` as the finish time of the tasks that just finished.
+    pub fn stamp_finished(&mut self, now_ms: i64) {
+        for task in &mut self.tasks {
+            if !task.is_active() && task.finished_at_ms.is_none() {
+                task.finished_at_ms = Some(now_ms);
+            }
+        }
     }
 
     /// Applies a poll; true when a task finished.
@@ -378,7 +407,11 @@ impl TaskList {
         }
     }
 
-    fn task_mut(&mut self, key: TaskKey) -> Option<&mut Task> {
+    pub(super) fn tasks_mut(&mut self) -> &mut Vec<Task> {
+        &mut self.tasks
+    }
+
+    pub(super) fn task_mut(&mut self, key: TaskKey) -> Option<&mut Task> {
         self.tasks.iter_mut().find(|task| task.key == key)
     }
 }

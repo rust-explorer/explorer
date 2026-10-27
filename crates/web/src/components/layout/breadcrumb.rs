@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 use dioxus_i18n::t;
 
 use crate::components::favorites::FavoriteToggle;
+use crate::components::usage::AnalyzeButton;
 use crate::routes::{Route, Segment, Segments};
 
 const LINK_CLASS: &str =
@@ -44,6 +45,12 @@ pub fn Breadcrumb(volume: Segment, path: Segments) -> Element {
                 }
             }
             FavoriteToggle { volume: volume.as_str().to_owned(), path: path.joined() }
+            // The header has no room for it on phones.
+            AnalyzeButton {
+                volume: volume.as_str().to_owned(),
+                path: path.joined(),
+                class: "inline-flex md:hidden",
+            }
         }
     }
 }

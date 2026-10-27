@@ -12,6 +12,7 @@ use super::select_cell::SelectBox;
 use crate::api;
 use crate::components::common::FocusTarget;
 use crate::components::common::icons::MoreIcon;
+use crate::components::usage::FolderSizeLabel;
 use crate::format::format_size;
 use crate::listing::{FileType, file_type};
 use crate::routes::{Route, Segment, Segments};
@@ -107,7 +108,13 @@ pub fn FileTile(
             TilePreview { volume: volume.as_str().to_owned(), path: child.joined(), entry: entry.clone() }
         }
         span { class: "mt-2 line-clamp-2 h-10 break-words text-sm leading-5", {entry.name.clone()} }
-        span { class: "h-4 truncate text-xs leading-4 {MUTED}", {detail} }
+        span { class: "h-4 truncate text-xs leading-4 {MUTED}",
+            if entry.kind == EntryKind::Dir {
+                FolderSizeLabel { volume: volume.as_str().to_owned(), path: child.joined(), unknown: detail }
+            } else {
+                {detail}
+            }
+        }
     };
 
     rsx! {

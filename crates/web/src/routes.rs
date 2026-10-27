@@ -5,12 +5,15 @@ use std::str::FromStr;
 use dioxus::prelude::*;
 use dioxus::router::{FromRouteSegments, ToRouteSegments};
 
+use shared::api::tasks::Location;
+
 use crate::api::encode_component;
 use crate::pages::access_denied::AccessDenied;
 use crate::pages::browse::Browse;
 use crate::pages::home::Home;
 use crate::pages::not_found::NotFound;
 use crate::pages::signin_error::SigninError;
+use crate::pages::usage::Usage;
 
 #[derive(Routable, Clone, PartialEq, Debug)]
 pub enum Route {
@@ -18,12 +21,34 @@ pub enum Route {
     Home {},
     #[route("/browse/:volume/:..path")]
     Browse { volume: Segment, path: Segments },
+    #[route("/usage/:id/:volume/:..path")]
+    Usage {
+        id: String,
+        volume: Segment,
+        path: Segments,
+    },
     #[route("/access-denied")]
     AccessDenied {},
     #[route("/signin-error?:reason")]
     SigninError { reason: String },
     #[route("/:..segments")]
     NotFound { segments: Vec<String> },
+}
+
+/// The usage page of the scan `id` of `source`, at the scanned folder.
+pub fn usage_route(id: &str, source: &Location) -> Route {
+    Route::Usage {
+        id: id.to_owned(),
+        volume: source.volume.as_str().into(),
+        path: Segments::of(&source.path),
+    }
+}
+
+/// Navigates from anywhere, even from outside the router's components.
+pub fn go(route: Route) {
+    if let Some(router) = dioxus::router::root_router() {
+        router.push(route);
+    }
 }
 
 // Dioxus percent-encodes route segments but leaves `%` alone while decoding it on parse, so a
@@ -71,6 +96,16 @@ impl FromStr for Segment {
 pub struct Segments(Vec<String>);
 
 impl Segments {
+    /// From the `/`-separated form the API uses.
+    pub fn of(path: &str) -> Self {
+        Self(
+            path.split('/')
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+                .collect(),
+        )
+    }
+
     pub fn names(&self) -> &[String] {
         &self.0
     }
@@ -173,6 +208,35 @@ mod tests {
         assert_eq!(path.prefix(1).joined(), "a");
         assert_eq!(path.prefix(5), path);
         assert_eq!(Segments::default().joined(), "");
+        assert_eq!(Segments::of("a/b c"), path);
+        assert_eq!(Segments::of(""), Segments::default());
+    }
+
+    fn usage(id: &str, volume: &str, path: &[&str]) -> Route {
+        Route::Usage {
+            id: id.to_owned(),
+            volume: volume.into(),
+            path: path
+                .iter()
+                .map(|&name| name.to_owned())
+                .collect::<Vec<_>>()
+                .into(),
+        }
+    }
+
+    #[test]
+    fn usage_route_round_trips_nested_paths() {
+        let route = usage("0f3a", "my media", &["Films 2026", "é #?%", "x y"]);
+        let url = route.to_string();
+        assert_eq!(
+            url,
+            "/usage/0f3a/my%20media/Films%202026/%C3%A9%20%23%3F%25/x%20y"
+        );
+        assert_eq!(url.parse::<Route>().ok(), Some(route));
+        assert_eq!(
+            "/usage/0f3a/media".parse::<Route>().ok(),
+            Some(usage("0f3a", "media", &[]))
+        );
     }
 
     #[test]

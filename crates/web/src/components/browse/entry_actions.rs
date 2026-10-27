@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 use shared::api::browse::{Entry, EntryKind};
+use shared::api::tasks::Location;
 
 use super::file_row::download_href;
 use super::row_menu::{MenuRequest, RowMenu};
@@ -12,6 +13,7 @@ use crate::components::common::FocusTarget;
 use crate::components::{DeleteDialog, RenameDialog, TransferDialog, TransferMode};
 use crate::routes::{Segment, Segments};
 use crate::selection::Selection;
+use crate::tasks::{FolderSize, use_tasks};
 
 /// A rename in progress and the ⋯ button that gets focus back.
 #[derive(Clone, PartialEq)]
@@ -115,7 +117,7 @@ impl EntryActions {
                 trigger,
                 from_selection: true,
             })),
-            RowAction::Rename => {}
+            RowAction::Rename | RowAction::AnalyzeUsage | RowAction::CalculateSize => {}
         }
     }
 }
@@ -194,6 +196,7 @@ pub fn EntryActionsLayer(
     } = actions;
     let (dialog_volume, dialog_parent) = (volume.as_str().to_owned(), path.joined());
     let transfer_parent = path.clone();
+    let tasks = use_tasks();
 
     let on_action = move |action: RowAction| {
         let Some(MenuRequest { entry, trigger, .. }) = menu.take() else {
@@ -220,6 +223,25 @@ pub fn EntryActionsLayer(
                 trigger,
                 from_selection: false,
             })),
+            RowAction::AnalyzeUsage | RowAction::CalculateSize => {
+                let source = Location {
+                    volume: volume.as_str().to_owned(),
+                    path: path.child(&entry.name).joined(),
+                };
+                let open = action == RowAction::AnalyzeUsage;
+                // Asking again for a size already known measures it anew.
+                let known = matches!(
+                    tasks
+                        .list()
+                        .read()
+                        .folder_size(&source.volume, &source.path),
+                    FolderSize::Known(_)
+                );
+                tasks.analyze(source, open, !open && known);
+                if !open {
+                    refocus(trigger);
+                }
+            }
         }
     };
 

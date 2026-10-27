@@ -127,6 +127,8 @@ pub fn action_label(action: RowAction) -> String {
         RowAction::Rename => t!("action-rename"),
         RowAction::MoveTo => t!("action-move-to"),
         RowAction::CopyTo => t!("action-copy-to"),
+        RowAction::AnalyzeUsage => t!("action-analyze-usage"),
+        RowAction::CalculateSize => t!("action-calculate-size"),
         RowAction::Delete => t!("action-delete"),
     }
 }

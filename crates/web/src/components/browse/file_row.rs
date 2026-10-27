@@ -13,6 +13,7 @@ use crate::components::common::icons::{
     ArchiveIcon, AudioIcon, DocumentIcon, DownloadIcon, FileIcon, FolderIcon, ImageIcon, MoreIcon,
     VideoIcon,
 };
+use crate::components::usage::FolderSizeLabel;
 use crate::format::{format_modified, format_size};
 use crate::listing::{FileType, file_type};
 use crate::routes::{Route, Segment, Segments};
@@ -102,7 +103,17 @@ pub fn FileRow(
         EntryIcon { kind: entry.kind, name: entry.name.clone() }
         span { class: "flex min-w-0 flex-col",
             span { class: "truncate", {entry.name.clone()} }
-            if !details.is_empty() {
+            if entry.kind == EntryKind::Dir {
+                span { class: "truncate text-xs md:hidden {MUTED}",
+                    FolderSizeLabel {
+                        volume: volume.as_str().to_owned(),
+                        path: child.joined(),
+                        unknown: "",
+                        separator: !details.is_empty(),
+                    }
+                    {details}
+                }
+            } else if !details.is_empty() {
                 span { class: "truncate text-xs md:hidden {MUTED}", {details} }
             }
         }
@@ -149,7 +160,13 @@ pub fn FileRow(
                     },
                 }
             }
-            div { role: "cell", class: "hidden truncate md:block {MUTED}", {size.unwrap_or_else(|| "—".to_owned())} }
+            div { role: "cell", class: "hidden truncate md:block {MUTED}",
+                if entry.kind == EntryKind::Dir {
+                    FolderSizeLabel { volume: volume.as_str().to_owned(), path: child.joined() }
+                } else {
+                    {size.unwrap_or_else(|| "—".to_owned())}
+                }
+            }
             div { role: "cell", class: "hidden truncate md:block {MUTED}", {modified.unwrap_or_else(|| "—".to_owned())} }
             div { role: "cell", class: "flex justify-end gap-1 pr-1",
                 if let Some(href) = download_href(volume.as_str(), &child, entry.kind) {

@@ -68,7 +68,7 @@ fn ActionIcon(action: RowAction) -> Element {
         RowAction::MoveTo => rsx! { MoveIcon {} },
         RowAction::CopyTo => rsx! { CopyIcon {} },
         RowAction::Delete => rsx! { TrashIcon {} },
-        RowAction::Rename => rsx! {},
+        RowAction::Rename | RowAction::AnalyzeUsage | RowAction::CalculateSize => rsx! {},
     }
 }
 

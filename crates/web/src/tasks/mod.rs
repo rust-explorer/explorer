@@ -2,12 +2,14 @@ mod conflict;
 mod store;
 #[cfg(target_arch = "wasm32")]
 mod transport;
+mod usage;
 
 use dioxus::prelude::*;
 use shared::api::browse::EntryKind;
-use shared::api::tasks::TaskSpec;
+use shared::api::tasks::{Location, TaskSpec};
 
 pub use store::{Effect, Event, Task, TaskKey, TaskList};
+pub use usage::FolderSize;
 
 use crate::conflict::Decision;
 use crate::revision::Revision;
@@ -51,6 +53,13 @@ impl TaskStore {
         self.run(effects);
     }
 
+    /// Opens the newest queued, running or finished usage task of exactly `source` if there is
+    /// one, otherwise starts one; with `open`, navigates to its usage page once its id is known.
+    pub fn analyze(mut self, source: Location, open: bool, force_new: bool) {
+        let effects = self.list.write().analyze(source, open, force_new);
+        self.run(effects);
+    }
+
     pub fn decide(mut self, key: TaskKey, decision: Decision, apply_to_all: bool) {
         let effects = self.list.write().decide(key, decision, apply_to_all);
         self.run(effects);
@@ -77,15 +86,24 @@ impl TaskStore {
     }
 
     fn dispatch(mut self, event: Event) {
-        let effects = self.list.write().handle(event);
+        let effects = {
+            let mut list = self.list.write();
+            let effects = list.handle(event);
+            list.stamp_finished(crate::format::now_ms());
+            effects
+        };
         self.run(effects);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn run(mut self, effects: Vec<Effect>) {
         for effect in effects {
-            if effect == Effect::Refresh {
-                *self.revision.write() += 1;
+            match effect {
+                Effect::Refresh => *self.revision.write() += 1,
+                Effect::Open { id, source } => {
+                    crate::routes::go(crate::routes::usage_route(&id, &source));
+                }
+                Effect::Post { .. } | Effect::Delete { .. } | Effect::PollAfter { .. } => {}
             }
         }
     }
@@ -123,6 +141,9 @@ impl TaskStore {
                     });
                 }
                 Effect::Refresh => *self.revision.write() += 1,
+                Effect::Open { id, source } => {
+                    crate::routes::go(crate::routes::usage_route(&id, &source));
+                }
             }
         }
     }

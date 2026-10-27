@@ -7,8 +7,8 @@ use shared::api::browse::{Listing, VolumeInfo};
 
 use crate::api;
 use crate::components::{
-    Breadcrumb, DropZone, ErrorPanel, FileGrid, FileTable, NewFolderButton, RefreshButton,
-    SearchField, SearchResults, Shell, Sidebar, UploadButton, ViewToggle,
+    AnalyzeButton, Breadcrumb, DropZone, ErrorPanel, FileGrid, FileTable, NewFolderButton,
+    RefreshButton, SearchField, SearchResults, Shell, Sidebar, UploadButton, ViewToggle,
 };
 use crate::favorites::use_favorites_sync;
 use crate::revision::Revision;
@@ -70,6 +70,11 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
         rsx! {
             RefreshButton { busy }
             ViewToggle {}
+            AnalyzeButton {
+                volume: volume.as_str().to_owned(),
+                path: path.joined(),
+                class: "hidden md:inline-flex",
+            }
             NewFolderButton { volume: volume.as_str().to_owned(), path: path.joined(), read_only }
             UploadButton { volume: volume.as_str().to_owned(), path: path.joined(), read_only }
         }

@@ -131,7 +131,6 @@ activity-close = Close the activity panel
 task-deleting = Deleting { $name }
 task-copying = Copying { $name } to { $folder }
 task-moving = Moving { $name } to { $folder }
-task-measuring = Measuring { $name }
 task-cancel = Cancel { $name }
 task-progress = Task progress
 task-waiting = Waiting
@@ -199,3 +198,47 @@ search-results =
     }
 search-empty = No result for “{ $query }” in { $volume }
 search-truncated = Showing the first { $count }, refine your search.
+action-analyze-usage = Analyse space
+action-calculate-size = Calculate size
+analyze-usage = Analyse space
+folder-size-calculated = Calculated at { $time }
+folder-size-computing = Calculating size…
+task-analysing = Analysing { $name }
+task-analysing-counts =
+    { $count ->
+        [one] Analysing { $name } — 1 file, { $size }
+       *[other] Analysing { $name } — { $files } files, { $size }
+    }
+task-view = View
+task-view-usage = View the space used by { $name }
+usage-breadcrumb = Scanned folders
+usage-items = Contents
+usage-empty = This folder is empty.
+usage-files =
+    { $count ->
+        [one] 1 file
+       *[other] { $files } files
+    }
+usage-folders =
+    { $count ->
+        [one] 1 folder
+       *[other] { $folders } folders
+    }
+usage-other-files =
+    { $count ->
+        [one] 1 other file
+       *[other] { $files } other files
+    }
+usage-percent = { $percent }%
+usage-percent-small = <1%
+usage-scanned-at = Scanned at { $time }
+usage-scan-again = Scan again
+usage-open-in-explorer = Open in explorer
+usage-incomplete = Some items could not be read
+usage-collapsed = Too many folders: sub-folders of this one are counted but not listed
+usage-scanning = Analysing { $name }…
+usage-cancelled-title = Scan cancelled
+usage-cancelled-message = This scan was stopped before it finished.
+usage-unavailable-title = This scan is no longer available
+usage-unavailable-message = Results are only kept for a while after a scan. Scan the folder again to see what takes up its space.
+usage-failed-title = The scan failed
