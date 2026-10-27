@@ -10,16 +10,6 @@ pub enum RowAction {
     Delete,
 }
 
-impl RowAction {
-    /// Whether the feature behind the action is built yet; the others stay out of the menu.
-    pub fn available(self) -> bool {
-        matches!(
-            self,
-            Self::Download | Self::Rename | Self::MoveTo | Self::CopyTo | Self::Delete
-        )
-    }
-}
-
 /// The actions for an entry of `kind`, in menu order; a read-only volume only lets things out.
 pub fn row_actions(kind: EntryKind, read_only: bool) -> Vec<RowAction> {
     use RowAction::{CopyTo, Delete, Download, MoveTo, Rename};
@@ -66,13 +56,6 @@ mod tests {
                 expected,
                 "{kind:?} {read_only}"
             );
-        }
-    }
-
-    #[test]
-    fn only_built_actions_are_available() {
-        for action in [Download, Rename, MoveTo, CopyTo, Delete] {
-            assert!(action.available(), "{action:?}");
         }
     }
 

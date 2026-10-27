@@ -84,9 +84,6 @@ pub fn FileTable(
     let bar_actions: Vec<RowAction> = {
         let kinds: Vec<EntryKind> = selected.iter().map(|(_, kind)| *kind).collect();
         selection_actions(&kinds, read_only)
-            .into_iter()
-            .filter(|action| action.available())
-            .collect()
     };
     let selected_count = selected.len();
     let on_sort = move |column: SortKey| sort.set(sort().toggled(column));

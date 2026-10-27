@@ -63,9 +63,6 @@ fn menu_origin(at: MenuAt, items: usize, viewport: (f64, f64)) -> (f64, f64) {
 /// The actions of the entry's menu that can run here; empty when there is nothing to offer.
 pub fn menu_actions(entry: &Entry, read_only: bool) -> Vec<RowAction> {
     row_actions(entry.kind, read_only)
-        .into_iter()
-        .filter(|action| action.available())
-        .collect()
 }
 
 #[component]
