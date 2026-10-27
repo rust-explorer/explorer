@@ -179,6 +179,7 @@ action reach outside its volume.
   refused (400 `invalid_destination`). The destination is walked up by device and inode, so a
   symlink leading into the folder is caught as well; a symlink to the volume root as source
   is treated as the root. Moving an entry into the folder it already is in is refused too.
+  The error's `details` name the entry being moved or copied, on its source volume.
 - **Cross-volume moves.** Volumes may be different filesystems, so a move to another volume
   copies first, then deletes. The source is touched only after the copy is complete: a
   failed or cancelled copy leaves it whole and removes the partial destination. After that,
@@ -197,12 +198,15 @@ action reach outside its volume.
   once for the whole server, so a large copy delays others. A finished task is forgotten after
   an hour. Failures keep the request id of the request that created the task.
 - **Zip of several entries.** Each `name=` must be a single valid component: empty, `.`,
-  `..`, containing `/`, a control character or the reserved name is `invalid_path`, and a
+  `..`, containing `/`, a control character, or the reserved name at the volume root is
+  `invalid_path`, and a
   name that does not exist is `path_not_found`. Entries are resolved and walked under the
   same rules as a folder zip, and need read access only.
 - **Logs.** A new folder, rename, delete and finished copy or move are logged at `info`
   with the user's `sub`, `action`, `volume`, `path` (and `dest_volume` and `final_path`);
-  failures at `warn`. File contents are never logged.
+  failures, refused ones included, once at `warn` with the same fields and the error. A
+  cancelled or dismissed task is logged at `info` with the user's `sub`, `action` (`cancel`
+  or `dismiss`) and the task id. File contents are never logged.
 
 ## Downloads
 

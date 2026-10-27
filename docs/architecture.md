@@ -221,7 +221,7 @@ New error codes (JSON error shape as above):
 
 | Code | Status | Meaning |
 |---|---|---|
-| `invalid_destination` | 400 | A copy or move of a folder into itself or one of its descendants, or a move into the folder the entry is already in. |
+| `invalid_destination` | 400 | A copy or move of a folder into itself or one of its descendants, or a move into the folder the entry is already in. `details` name the entry, on its source volume. |
 | `task_not_found` | 404 | Unknown task id, or another user's. |
 
 Existing codes also apply: `already_exists` (409), `is_a_directory` (`replace` over or of a
@@ -264,7 +264,7 @@ entries keeps the DOM small. Sizes use SI units (1 kB = 1000 B). Each file row l
 `/files/download` and each folder row to `/files/zip`; these are plain links, so the
 browser handles the download and shows any failure in its own download list.
 
-Managing files: each row has a menu (Rename, Move, Copy, Delete, Download) and a checkbox;
+Managing files: each row has a menu (Download, Rename, Move to, Copy to, Delete) and a checkbox;
 checking rows, with shift-click for a range, shows a bar to download them as a zip (one
 `name=` per entry), move, copy or delete them, and renaming is offered for one entry at a time.
 New folder is in the header. On a read-only volume only Download and Copy remain, and entries listed as `other` (symlinks the
