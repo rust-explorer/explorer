@@ -112,6 +112,7 @@ fn label(spec: &TaskSpec) -> String {
     let name = entry_name(spec.source()).to_owned();
     match spec {
         TaskSpec::Delete { .. } => t!("task-deleting", name: name),
+        TaskSpec::Usage { .. } => t!("task-measuring", name: name),
         TaskSpec::Copy { dest_dir, .. } => {
             t!("task-copying", name: name, folder: entry_name(dest_dir).to_owned())
         }

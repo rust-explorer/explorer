@@ -6,6 +6,7 @@ mod rename;
 mod search;
 mod staging;
 mod transfer;
+mod usage;
 mod volumes;
 mod write;
 
@@ -17,6 +18,10 @@ pub use staging::{StagedId, Staging};
 pub use transfer::{
     COPY_CHUNK, MoveOutcome, TransferPlan, TransferProgress, check_move, check_transfer, copy,
     move_entry, plan_transfer,
+};
+pub use usage::{
+    USAGE_MAX_DIRS, USAGE_THREADS, USAGE_TOP_FILES, USAGE_VIEW_LIMIT, UsageNodeView, UsageTree,
+    usage, usage_with_max_dirs,
 };
 pub use volumes::{Volume, Volumes};
 pub use write::keep_both_name;

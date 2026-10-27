@@ -7,3 +7,4 @@ pub mod health;
 pub mod search;
 pub mod tasks;
 pub mod uploads;
+pub mod usage;

@@ -9,6 +9,7 @@ use shared::api::tasks::{TaskInfo, TaskSpec, TaskState};
 use tokio::sync::Semaphore;
 
 use super::{FINISHED_TTL, MAX_RUNNING};
+use crate::storage::UsageTree;
 
 const ID_LEN: usize = 32;
 
@@ -22,6 +23,7 @@ pub struct Progress {
     files_total: OnceLock<u64>,
     bytes_total: OnceLock<u64>,
     final_path: OnceLock<String>,
+    usage: OnceLock<Arc<UsageTree>>,
 }
 
 impl Progress {
@@ -52,6 +54,11 @@ impl Progress {
 
     pub fn set_final_path(&self, path: String) {
         let _ = self.final_path.set(path);
+    }
+
+    /// A usage scan's result, kept as long as the task.
+    pub fn set_usage(&self, tree: UsageTree) {
+        let _ = self.usage.set(Arc::new(tree));
     }
 
     /// Files and bytes done, and entries skipped, so far.
@@ -137,6 +144,17 @@ struct Entries {
     next_seq: u64,
 }
 
+impl Entries {
+    /// Forgets tasks finished more than [`FINISHED_TTL`] before `now`.
+    fn prune(&mut self, now: Instant) {
+        self.by_id.retain(|_, entry| {
+            entry
+                .finished_at
+                .is_none_or(|at| now.saturating_duration_since(at) <= FINISHED_TTL)
+        });
+    }
+}
+
 /// What [`Tasks::cancel_or_dismiss`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stopped {
@@ -180,11 +198,7 @@ impl Tasks {
     /// [`FINISHED_TTL`] before.
     fn list_at(&self, user: &str, now: Instant) -> Vec<TaskInfo> {
         let mut entries = self.lock();
-        entries.by_id.retain(|_, entry| {
-            entry
-                .finished_at
-                .is_none_or(|at| now.saturating_duration_since(at) <= FINISHED_TTL)
-        });
+        entries.prune(now);
         let mut mine: Vec<(&String, &Entry)> = entries
             .by_id
             .iter()
@@ -192,6 +206,21 @@ impl Tasks {
             .collect();
         mine.sort_by_key(|(_, entry)| entry.seq);
         mine.into_iter().map(|(id, entry)| entry.info(id)).collect()
+    }
+
+    /// The volume and tree of a finished usage scan of `user`.
+    pub fn usage(&self, user: &str, id: &str) -> Option<(String, Arc<UsageTree>)> {
+        let mut entries = self.lock();
+        entries.prune(Instant::now());
+        let entry = entries
+            .by_id
+            .get(id)
+            .filter(|entry| entry.user == user && entry.state == TaskState::Done)?;
+        let TaskSpec::Usage { source } = &entry.spec else {
+            return None;
+        };
+        let tree = entry.progress.usage.get()?;
+        Some((source.volume.clone(), Arc::clone(tree)))
     }
 
     /// Cancels a queued or running task, or forgets a finished one; `None` when `id` is unknown
@@ -387,6 +416,38 @@ mod tests {
         assert_eq!((info.bytes_done, info.bytes_total), (40, Some(100)));
         assert_eq!(info.skipped, 1);
         assert_eq!(info.final_path.as_deref(), Some("b/a"));
+    }
+
+    #[test]
+    fn usage_is_kept_for_its_done_task_only() {
+        let data = tempfile::tempdir().unwrap();
+        std::fs::create_dir(data.path().join("media")).unwrap();
+        let volumes = crate::storage::Volumes::discover(data.path()).unwrap();
+        let scan = || {
+            let progress = Progress::default();
+            let media = volumes.get("media").unwrap();
+            crate::storage::usage(media, &crate::storage::RelPath::root(), &progress).unwrap()
+        };
+        let usage = TaskSpec::Usage {
+            source: Location {
+                volume: "media".to_owned(),
+                path: String::new(),
+            },
+        };
+        let tasks = Tasks::new();
+        let (id, _) = tasks.insert("ada", usage);
+        tasks.start(&id).unwrap().set_usage(scan());
+        assert!(tasks.usage("ada", &id).is_none());
+        tasks.finish(&id, Outcome::Done);
+        let (volume, tree) = tasks.usage("ada", &id).unwrap();
+        assert_eq!(volume, "media");
+        assert!(tree.root().is_root());
+        assert!(tasks.usage("bob", &id).is_none());
+
+        let (delete, _) = tasks.insert("ada", spec("a"));
+        tasks.start(&delete).unwrap().set_usage(scan());
+        tasks.finish(&delete, Outcome::Done);
+        assert!(tasks.usage("ada", &delete).is_none());
     }
 
     #[test]

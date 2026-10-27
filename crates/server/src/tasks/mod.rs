@@ -2,6 +2,7 @@ mod registry;
 mod routes;
 mod run;
 mod transfer;
+mod usage;
 
 use std::time::Duration;
 
@@ -22,4 +23,5 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/tasks", get(routes::list).post(routes::create))
         .route("/tasks/{id}", delete(routes::cancel))
+        .route("/tasks/{id}/usage", get(usage::view))
 }

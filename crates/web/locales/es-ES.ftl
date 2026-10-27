@@ -135,6 +135,7 @@ activity-close = Cerrar el panel de actividad
 task-deleting = Eliminando { $name }
 task-copying = Copiando { $name } a { $folder }
 task-moving = Moviendo { $name } a { $folder }
+task-measuring = Analizando { $name }
 task-cancel = Cancelar { $name }
 task-progress = Progreso de la tarea
 task-waiting = En espera
