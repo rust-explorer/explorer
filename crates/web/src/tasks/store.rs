@@ -15,7 +15,7 @@ const TASK_NOT_FOUND: &str = "task_not_found";
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TaskKey(pub u64);
 
-/// A task this tab started.
+/// A task this tab started, or adopted from the server after a reload.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Task {
     pub key: TaskKey,
@@ -165,6 +165,36 @@ impl TaskList {
             .collect()
     }
 
+    /// Takes over the queued and running tasks the server has for this user, such as those an
+    /// earlier page started before a reload.
+    pub fn adopt(&mut self, infos: Vec<TaskInfo>) -> Vec<Effect> {
+        for info in infos {
+            let known = self
+                .tasks
+                .iter()
+                .any(|task| task.server_id() == Some(info.id.as_str()));
+            if known || !info.state.is_active() {
+                continue;
+            }
+            let (key, batch) = (TaskKey(self.next_key), self.next_batch);
+            self.next_key += 1;
+            self.next_batch += 1;
+            self.tasks.push(Task {
+                key,
+                spec: info.spec.clone(),
+                info: Some(info),
+                lost: None,
+                cancel_requested: false,
+                batch,
+                source_kind: None,
+                conflict: None,
+            });
+        }
+        let mut effects = Vec::new();
+        self.keep_polling(&mut effects);
+        effects
+    }
+
     /// Answers the conflict of `key`, or of every task of its batch waiting with one that the
     /// decision suits; a later conflict in the batch then gets the same answer.
     pub fn decide(&mut self, key: TaskKey, decision: Decision, apply_to_all: bool) -> Vec<Effect> {
@@ -198,6 +228,9 @@ impl TaskList {
         let mut effects = Vec::new();
         match event {
             Event::Posted { key, info } => {
+                // An adoption may have listed it before this answer.
+                self.tasks
+                    .retain(|task| task.key == key || task.server_id() != Some(info.id.as_str()));
                 if let Some(task) = self.task_mut(key) {
                     if task.cancel_requested && info.state.is_active() {
                         effects.push(Effect::Delete {
@@ -542,6 +575,59 @@ mod tests {
         ]));
         assert_eq!(effects, [Effect::Refresh, POLL]);
         assert_eq!(list.tasks()[2].state(), TaskState::Failed);
+    }
+
+    #[test]
+    fn adopts_the_running_tasks_of_an_earlier_page_and_polls() {
+        let mut list = TaskList::default();
+        let effects = list.adopt(vec![
+            info("a", "a", TaskState::Running),
+            info("b", "b", TaskState::Done),
+            info("c", "c", TaskState::Queued),
+        ]);
+        assert_eq!(effects, [POLL]);
+        let ids: Vec<&str> = list
+            .tasks()
+            .iter()
+            .filter_map(|task| Some(task.info.as_ref()?.id.as_str()))
+            .collect();
+        assert_eq!(ids, ["a", "c"]);
+        assert_eq!(list.tasks()[0].spec, delete("a"));
+        assert_ne!(list.tasks()[0].batch, list.tasks()[1].batch);
+        assert!(!list.tasks()[0].allows_replace());
+
+        let effects = list.handle(Event::Polled(vec![
+            info("a", "a", TaskState::Done),
+            info("c", "c", TaskState::Done),
+        ]));
+        assert_eq!(effects, [Effect::Refresh]);
+        assert_eq!(list.cancel(list.tasks()[0].key), []);
+    }
+
+    #[test]
+    fn adopting_nothing_active_does_not_poll() {
+        let mut list = TaskList::default();
+        assert_eq!(list.adopt(vec![info("a", "a", TaskState::Done)]), []);
+        assert!(list.tasks().is_empty());
+    }
+
+    #[test]
+    fn adoption_and_a_post_of_the_same_task_keep_one_row() {
+        // Started before the adoption answer: the list already has it.
+        let mut list = posted();
+        assert_eq!(list.adopt(vec![info("a", "a", TaskState::Running)]), []);
+        assert_eq!(list.tasks().len(), 2);
+
+        // Adopted before its own POST answered.
+        let mut list = TaskList::default();
+        list.start(vec![delete("a")]);
+        list.adopt(vec![info("a", "a", TaskState::Queued)]);
+        list.handle(Event::Posted {
+            key: TaskKey(0),
+            info: Box::new(info("a", "a", TaskState::Running)),
+        });
+        let keys: Vec<TaskKey> = list.tasks().iter().map(|task| task.key).collect();
+        assert_eq!(keys, [TaskKey(0)]);
     }
 
     #[test]

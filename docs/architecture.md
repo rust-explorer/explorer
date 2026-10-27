@@ -276,8 +276,10 @@ both or Cancel prompt as uploads, with "apply to all"; Replace is only offered f
 a file. Delete, Move and Copy become tasks that appear in the activity panel (with the uploads)
 with their progress, a cancel or dismiss button and, for a task that skipped entries, how many.
 The tab polls `GET /api/tasks` every second while one of its tasks is queued or running, and
-refreshes the listing and the free space when one finishes. A tab only shows the tasks it
-started.
+refreshes the listing and the free space when one finishes. A tab shows the tasks it started;
+on load it also lists the user's queued and running tasks once and adopts them, so a reload
+keeps showing them until they finish (an adopted task never asks about a conflict, it is past
+that step).
 
 Uploads: the header has an Upload button (a floating "+" on narrow screens) that offers
 files or a folder, and files or folders can be dropped on the folder listing. On a read-only volume

@@ -12,7 +12,8 @@ pub use store::{Effect, Event, Task, TaskKey, TaskList};
 use crate::conflict::Decision;
 use crate::revision::Revision;
 
-/// The app-wide list of the background tasks this tab started.
+/// The app-wide list of the background tasks this tab started, plus those still running from
+/// before a reload.
 #[derive(Clone, Copy)]
 pub struct TaskStore {
     list: Signal<TaskList>,
@@ -21,10 +22,13 @@ pub struct TaskStore {
 
 pub fn use_tasks_provider() -> TaskStore {
     let Revision(revision) = use_context();
-    use_context_provider(|| TaskStore {
+    let store = use_context_provider(|| TaskStore {
         list: Signal::new(TaskList::default()),
         revision,
-    })
+    });
+    #[cfg(target_arch = "wasm32")]
+    use_hook(|| store.adopt_running());
+    store
 }
 
 pub fn use_tasks() -> TaskStore {
@@ -60,6 +64,16 @@ impl TaskStore {
     pub fn clear_finished(mut self) {
         let effects = self.list.write().clear_finished();
         self.run(effects);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn adopt_running(mut self) {
+        dioxus::core::spawn_forever(async move {
+            if let Ok(infos) = transport::list().await {
+                let effects = self.list.write().adopt(infos);
+                self.run(effects);
+            }
+        });
     }
 
     fn dispatch(mut self, event: Event) {
