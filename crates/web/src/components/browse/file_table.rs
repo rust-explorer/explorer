@@ -11,9 +11,9 @@ use super::selection_bar::{SelectionBar, selection_href};
 use super::virtual_list::VirtualList;
 use crate::actions::{RowAction, selection_actions};
 use crate::api;
-use crate::components::RenameDialog;
 use crate::components::common::FocusTarget;
 use crate::components::common::icons::{ArrowDownIcon, ArrowUpIcon};
+use crate::components::{DeleteDialog, RenameDialog};
 use crate::format::now_ms;
 use crate::listing::{Sort, SortKey, sorted};
 use crate::routes::{Segment, Segments};
@@ -28,6 +28,15 @@ struct Renaming {
     trigger: Option<FocusTarget>,
 }
 
+/// Entries waiting for the delete confirmation; from the selection bar, a confirmed delete
+/// clears the selection.
+#[derive(Clone, PartialEq)]
+struct Deleting {
+    names: Vec<String>,
+    trigger: Option<FocusTarget>,
+    from_selection: bool,
+}
+
 #[component]
 pub fn FileTable(
     volume: Segment,
@@ -39,6 +48,7 @@ pub fn FileTable(
     let mut sort = use_context::<Signal<Sort>>();
     let mut menu = use_signal(|| None::<MenuRequest>);
     let mut renaming = use_signal(|| None::<Renaming>);
+    let mut deleting = use_signal(|| None::<Deleting>);
     let rows = use_memo(move || Rc::new(sorted(&entries.read(), sort())));
     let now = use_memo(move || {
         let _ = entries.read();
@@ -87,6 +97,11 @@ pub fn FileTable(
             };
             match action {
                 RowAction::Rename => renaming.set(Some(Renaming { entry, trigger })),
+                RowAction::Delete => deleting.set(Some(Deleting {
+                    names: vec![entry.name],
+                    trigger,
+                    from_selection: false,
+                })),
                 RowAction::Download => {
                     if let Some(href) =
                         download_href(volume.as_str(), &path.child(&entry.name), entry.kind)
@@ -95,24 +110,29 @@ pub fn FileTable(
                     }
                     refocus(trigger);
                 }
-                RowAction::MoveTo | RowAction::CopyTo | RowAction::Delete => refocus(trigger),
+                RowAction::MoveTo | RowAction::CopyTo => refocus(trigger),
             }
         }
     };
 
     let on_selection_action = {
         let (volume, path) = (volume.clone(), path.clone());
-        move |action: RowAction| {
-            if action != RowAction::Download {
-                return;
+        move |action: RowAction| match action {
+            RowAction::Download => {
+                let chosen: Vec<(&str, EntryKind)> = selected
+                    .iter()
+                    .map(|(name, kind)| (name.as_str(), *kind))
+                    .collect();
+                if let Some(href) = selection_href(volume.as_str(), &path, &chosen) {
+                    api::navigate(&href);
+                }
             }
-            let chosen: Vec<(&str, EntryKind)> = selected
-                .iter()
-                .map(|(name, kind)| (name.as_str(), *kind))
-                .collect();
-            if let Some(href) = selection_href(volume.as_str(), &path, &chosen) {
-                api::navigate(&href);
-            }
+            RowAction::Delete => deleting.set(Some(Deleting {
+                names: selected.iter().map(|(name, _)| name.clone()).collect(),
+                trigger: None,
+                from_selection: true,
+            })),
+            RowAction::Rename | RowAction::MoveTo | RowAction::CopyTo => {}
         }
     };
     let on_select = move |(name, range): (String, bool)| {
@@ -214,12 +234,27 @@ pub fn FileTable(
         }
         if let Some(Renaming { entry, trigger }) = renaming() {
             RenameDialog {
-                volume: dialog_volume,
-                parent: dialog_parent,
+                volume: dialog_volume.clone(),
+                parent: dialog_parent.clone(),
                 entry,
                 entries,
                 return_focus: trigger,
                 on_close: move |()| renaming.set(None),
+            }
+        }
+        if let Some(Deleting { names, trigger, from_selection }) = deleting() {
+            DeleteDialog {
+                volume: dialog_volume,
+                parent: dialog_parent,
+                names,
+                return_focus: trigger,
+                on_close: move |()| deleting.set(None),
+                on_confirmed: move |()| {
+                    deleting.set(None);
+                    if from_selection {
+                        selection.write().clear();
+                    }
+                },
             }
         }
     }

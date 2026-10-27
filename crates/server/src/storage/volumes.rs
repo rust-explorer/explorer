@@ -7,7 +7,7 @@ use rustix::fs::{Access, AtFlags};
 use rustix::io::Errno;
 
 /// A mounted volume. Its methods are split by concern: reading in `read.rs`, writing and uploads
-/// in `write.rs`, renaming in `rename.rs`.
+/// in `write.rs`, renaming in `rename.rs`, deleting in `delete.rs`.
 pub struct Volume {
     name: String,
     pub(super) root: Dir,

@@ -4,4 +4,4 @@ mod uploads_panel;
 
 pub use conflict_dialog::ConflictDialog;
 pub use upload_button::UploadButton;
-pub use uploads_panel::UploadsPanel;
+pub use uploads_panel::{ICON_BUTTON, UploadRows, active_uploads, file_name};

@@ -10,6 +10,8 @@ mod names;
 mod pages;
 mod routes;
 mod selection;
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+mod tasks;
 // Only the wasm build picks files, so most of the engine is unreachable on the host.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 mod uploads;

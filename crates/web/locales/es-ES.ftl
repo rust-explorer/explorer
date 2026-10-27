@@ -62,6 +62,7 @@ error-unsupported_tus_version = El servidor no admite esta versión del protocol
 error-unsupported_media_type = El servidor ha rechazado el formato de esta subida.
 error-cross_device = { $path } está en otro sistema de archivos que su volumen, así que la subida no se puede guardar ahí. Un administrador puede montar esa carpeta como un volumen propio.
 error-invalid_destination = { $path } no se puede mover ni copiar ahí.
+error-task_not_found = Esta tarea ya no existe en el servidor.
 upload = Subir
 upload-open = Subir archivos o una carpeta
 upload-files = Archivos…
@@ -120,3 +121,33 @@ selection-clear = Borrar selección
 rename-title = Cambiar el nombre de { $name }
 rename-name = Nuevo nombre
 rename-save = Guardar
+activity-title =
+    { $count ->
+        [0] Actividad
+        [one] Actividad · 1 en curso
+       *[other] Actividad · { $count } en curso
+    }
+activity-collapse = Contraer el panel de actividad
+activity-expand = Expandir el panel de actividad
+activity-close = Cerrar el panel de actividad
+task-deleting = Eliminando { $name }
+task-copying = Copiando { $name } a { $folder }
+task-moving = Moviendo { $name } a { $folder }
+task-cancel = Cancelar { $name }
+task-progress = Progreso de la tarea
+task-waiting = En espera
+task-files = { $done } / { $total }
+task-files-done =
+    { $count ->
+        [one] 1 elemento
+       *[other] { $count } elementos
+    }
+task-done = Terminada
+task-cancelled = Cancelada
+delete-title =
+    { $count ->
+        [one] ¿Eliminar { $name }?
+       *[other] ¿Eliminar { $count } elementos?
+    }
+delete-warning = Las carpetas se eliminan con todo su contenido. Esta acción no se puede deshacer.
+delete-confirm = Eliminar

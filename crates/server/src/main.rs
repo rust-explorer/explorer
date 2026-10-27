@@ -12,6 +12,7 @@ use explorer_server::healthcheck;
 use explorer_server::http::static_files::check_bundle;
 use explorer_server::http::{AppState, router};
 use explorer_server::storage::Volumes;
+use explorer_server::tasks::Tasks;
 use explorer_server::telemetry;
 use explorer_server::uploads::{self, Uploads};
 use tokio::net::TcpListener;
@@ -96,7 +97,9 @@ async fn main() -> ExitCode {
         oidc: Arc::new(oidc),
         volumes: Arc::clone(&volumes),
         uploads: Arc::clone(&upload_registry),
+        tasks: Arc::new(Tasks::new()),
     };
+    tracing::info!("no background task to recover: tasks live in memory only");
     let app = match router(state).await {
         Ok(app) => app,
         Err(err) => {

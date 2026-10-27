@@ -6,5 +6,6 @@ pub mod downloads;
 pub mod healthcheck;
 pub mod http;
 pub mod storage;
+pub mod tasks;
 pub mod telemetry;
 pub mod uploads;

@@ -13,7 +13,7 @@ pub enum RowAction {
 impl RowAction {
     /// Whether the feature behind the action is built yet; the others stay out of the menu.
     pub fn available(self) -> bool {
-        matches!(self, Self::Download | Self::Rename)
+        matches!(self, Self::Download | Self::Rename | Self::Delete)
     }
 }
 
@@ -68,9 +68,10 @@ mod tests {
 
     #[test]
     fn only_built_actions_are_available() {
-        assert!(Download.available());
-        assert!(Rename.available());
-        for action in [MoveTo, CopyTo, Delete] {
+        for action in [Download, Rename, Delete] {
+            assert!(action.available(), "{action:?}");
+        }
+        for action in [MoveTo, CopyTo] {
             assert!(!action.available(), "{action:?}");
         }
     }

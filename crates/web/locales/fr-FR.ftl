@@ -62,6 +62,7 @@ error-unsupported_tus_version = Le serveur ne prend pas en charge cette version 
 error-unsupported_media_type = Le serveur a refusé le format de cet upload.
 error-cross_device = { $path } se trouve sur un autre système de fichiers que son volume, l'upload ne peut donc pas y être enregistré. Un administrateur peut monter ce dossier comme un volume à part entière.
 error-invalid_destination = { $path } ne peut pas être déplacé ou copié à cet endroit.
+error-task_not_found = Cette tâche n'existe plus sur le serveur.
 upload = Uploader
 upload-open = Uploader des fichiers ou un dossier
 upload-files = Fichiers…
@@ -120,3 +121,33 @@ selection-clear = Désélectionner
 rename-title = Renommer { $name }
 rename-name = Nouveau nom
 rename-save = Enregistrer
+activity-title =
+    { $count ->
+        [0] Activité
+        [one] Activité · 1 en cours
+       *[other] Activité · { $count } en cours
+    }
+activity-collapse = Réduire le panneau d'activité
+activity-expand = Développer le panneau d'activité
+activity-close = Fermer le panneau d'activité
+task-deleting = Suppression de { $name }
+task-copying = Copie de { $name } vers { $folder }
+task-moving = Déplacement de { $name } vers { $folder }
+task-cancel = Annuler { $name }
+task-progress = Progression de la tâche
+task-waiting = En attente
+task-files = { $done } / { $total }
+task-files-done =
+    { $count ->
+        [one] 1 élément
+       *[other] { $count } éléments
+    }
+task-done = Terminé
+task-cancelled = Annulé
+delete-title =
+    { $count ->
+        [one] Supprimer { $name } ?
+       *[other] Supprimer { $count } éléments ?
+    }
+delete-warning = Les dossiers sont supprimés avec tout leur contenu. Cette action est irréversible.
+delete-confirm = Supprimer

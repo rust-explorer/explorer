@@ -79,6 +79,24 @@ pub fn ErrorPanel(failure: ApiFailure, on_retry: EventHandler<()>) -> Element {
     }
 }
 
+/// A failure in a list row: its message and the request id to report it with.
+#[component]
+pub fn FailureNote(failure: ApiFailure) -> Element {
+    let reference = match &failure {
+        ApiFailure::Server(body) => body.request_id.clone(),
+        _ => None,
+    };
+
+    rsx! {
+        p { class: "mt-0.5 text-xs text-red-700 dark:text-red-400", {error_message(&failure)} }
+        if let Some(id) = reference {
+            p { class: "font-mono text-xs text-slate-500 dark:text-slate-400",
+                {t!("error-reference", id: id)}
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;

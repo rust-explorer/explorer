@@ -140,7 +140,7 @@ async fn cross_site_form_post_to_logout_is_rejected() {
 }
 
 #[tokio::test]
-async fn upload_and_folder_writes_need_same_origin() {
+async fn upload_folder_and_task_writes_need_same_origin() {
     let id = "/files/uploads/0123456789abcdef0123456789abcdef";
     let targets = [
         ("POST", "/files/uploads"),
@@ -148,6 +148,8 @@ async fn upload_and_folder_writes_need_same_origin() {
         ("DELETE", id),
         ("POST", "/api/volumes/media/folders"),
         ("POST", "/api/volumes/media/rename"),
+        ("POST", "/api/tasks"),
+        ("DELETE", "/api/tasks/0123456789abcdef0123456789abcdef"),
     ];
     for origin in [None, Some("https://evil.example")] {
         for (method, uri) in targets {

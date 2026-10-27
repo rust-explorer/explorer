@@ -101,6 +101,11 @@ impl ApiError {
         )
     }
 
+    #[must_use]
+    pub fn task_not_found() -> Self {
+        Self::new(StatusCode::NOT_FOUND, "task_not_found", "Task not found")
+    }
+
     /// `offset` is where the upload actually stands.
     #[must_use]
     pub fn offset_mismatch(offset: u64) -> Self {
@@ -248,6 +253,19 @@ impl ApiError {
     }
 }
 
+impl ApiError {
+    /// The JSON body this error answers with, for a failure reported later, as a task's.
+    #[must_use]
+    pub fn to_body(&self, request_id: Option<String>) -> ErrorBody {
+        ErrorBody {
+            code: self.code.to_owned(),
+            message: self.message.clone(),
+            details: self.details.clone(),
+            request_id,
+        }
+    }
+}
+
 impl From<InvalidPath> for ApiError {
     fn from(err: InvalidPath) -> Self {
         Self::new(
@@ -268,12 +286,7 @@ fn display_path(volume: &str, path: &str) -> String {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let body = ErrorBody {
-            code: self.code.to_owned(),
-            message: self.message,
-            details: self.details,
-            request_id: None,
-        };
+        let body = self.to_body(None);
         let mut response = (self.status, Json(body.clone())).into_response();
         // Lets `attach_request_id` rebuild the body once the request id is known.
         response.extensions_mut().insert(body);
@@ -316,6 +329,22 @@ mod tests {
             err.details,
             Some(json!({ "volume": "media", "path": "Mounted/a.txt" }))
         );
+    }
+
+    #[test]
+    fn body_carries_the_request_id() {
+        let body = ApiError::from_storage(
+            "media",
+            StorageError::NotFound(RelPath::parse("a.txt").unwrap()),
+        )
+        .to_body(Some("req-1".to_owned()));
+        assert_eq!(body.code, "path_not_found");
+        assert_eq!(body.message, "Not found: media/a.txt");
+        assert_eq!(
+            body.details,
+            Some(json!({ "volume": "media", "path": "a.txt" }))
+        );
+        assert_eq!(body.request_id.as_deref(), Some("req-1"));
     }
 
     #[test]

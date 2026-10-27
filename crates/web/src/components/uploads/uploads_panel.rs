@@ -2,14 +2,12 @@ use dioxus::prelude::*;
 use dioxus_i18n::prelude::i18n;
 use dioxus_i18n::t;
 
-use crate::api::ApiFailure;
-use crate::components::common::error_message;
-use crate::components::common::icons::{CheckIcon, CloseIcon, MinusIcon, PlusIcon};
+use crate::components::common::FailureNote;
+use crate::components::common::icons::{CheckIcon, CloseIcon};
 use crate::format::{format_size, format_speed, now_ms};
 use crate::uploads::{Item, Kind, Status, use_uploads};
 
-const LIST_ID: &str = "uploads-list";
-const ICON_BUTTON: &str = "inline-flex size-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-indigo-600 dark:hover:bg-slate-800 dark:hover:text-slate-300";
+pub const ICON_BUTTON: &str = "inline-flex size-6 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-indigo-600 dark:hover:bg-slate-800 dark:hover:text-slate-300";
 
 /// Volume and path the item is uploaded to.
 pub fn destination(item: &Item) -> (&str, &str) {
@@ -30,72 +28,23 @@ fn is_finished(status: &Status) -> bool {
     )
 }
 
-#[component]
-pub fn UploadsPanel() -> Element {
-    let uploads = use_uploads();
-    let queue = uploads.queue();
-    let mut collapsed = use_signal(|| false);
-    let queue = queue.read();
-    let skipped = queue.skipped();
-    if queue.items().is_empty() && skipped == 0 {
-        return rsx! {};
-    }
-    let active = queue
-        .items()
+/// Uploads that are not finished yet.
+pub fn active_uploads(items: &[Item]) -> usize {
+    items
         .iter()
         .filter(|item| !is_finished(&item.status))
-        .count();
-    let collapse_label = if collapsed() {
-        t!("uploads-expand")
-    } else {
-        t!("uploads-collapse")
-    };
+        .count()
+}
+
+/// The upload rows of the activity panel.
+#[component]
+pub fn UploadRows() -> Element {
+    let queue = use_uploads().queue();
+    let items = queue.read().items().to_vec();
 
     rsx! {
-        section {
-            class: "fixed inset-x-4 bottom-20 z-30 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-lg md:inset-x-auto md:bottom-4 md:right-4 md:w-80 dark:border-slate-700 dark:bg-slate-900",
-            aria_label: t!("uploads-title", count: active),
-            div { class: "flex items-center gap-1",
-                h2 { class: "flex-1 font-semibold text-gray-900 dark:text-white",
-                    {t!("uploads-title", count: active)}
-                }
-                button {
-                    r#type: "button",
-                    class: ICON_BUTTON,
-                    aria_label: "{collapse_label}",
-                    title: "{collapse_label}",
-                    aria_expanded: !collapsed(),
-                    aria_controls: LIST_ID,
-                    onclick: move |_| collapsed.toggle(),
-                    if collapsed() {
-                        PlusIcon { class: "size-4" }
-                    } else {
-                        MinusIcon {}
-                    }
-                }
-                if active == 0 {
-                    button {
-                        r#type: "button",
-                        class: ICON_BUTTON,
-                        aria_label: t!("uploads-close"),
-                        title: t!("uploads-close"),
-                        onclick: move |_| uploads.clear_finished(),
-                        CloseIcon {}
-                    }
-                }
-            }
-            if skipped > 0 {
-                p { class: "mt-1 text-xs text-amber-700 dark:text-amber-400",
-                    {t!("uploads-unreadable", count: skipped)}
-                }
-            }
-            if !collapsed() {
-                ul { id: LIST_ID, class: "mt-1 max-h-80 overflow-y-auto",
-                    for item in queue.items().iter().cloned() {
-                        UploadRow { key: "{item.key.0}", item }
-                    }
-                }
-            }
+        for item in items {
+            UploadRow { key: "{item.key.0}", item }
         }
     }
 }
@@ -215,23 +164,6 @@ fn RetryCountdown(at_ms: i64) -> Element {
     rsx! {
         p { class: "mt-0.5 text-xs text-amber-700 dark:text-amber-400",
             {t!("uploads-retrying", seconds: seconds)}
-        }
-    }
-}
-
-#[component]
-fn FailureNote(failure: ApiFailure) -> Element {
-    let reference = match &failure {
-        ApiFailure::Server(body) => body.request_id.clone(),
-        _ => None,
-    };
-
-    rsx! {
-        p { class: "mt-0.5 text-xs text-red-700 dark:text-red-400", {error_message(&failure)} }
-        if let Some(id) = reference {
-            p { class: "font-mono text-xs text-slate-500 dark:text-slate-400",
-                {t!("error-reference", id: id)}
-            }
         }
     }
 }

@@ -53,6 +53,13 @@ pub fn rename_url(volume: &str) -> String {
     format!("/api/volumes/{}/rename", encode_component(volume))
 }
 
+pub const TASKS_URL: &str = "/api/tasks";
+
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub fn task_url(id: &str) -> String {
+    format!("{TASKS_URL}/{}", encode_component(id))
+}
+
 fn files_url(action: &str, volume: &str, path: &str) -> String {
     format!(
         "/files/{action}?volume={}&path={}",
@@ -92,5 +99,6 @@ mod tests {
             "/files/zip?volume=media&path=Films%2F%C3%A9&name=a%20b&name=c%26d"
         );
         assert_eq!(rename_url("my files"), "/api/volumes/my%20files/rename");
+        assert_eq!(task_url("0a/b"), "/api/tasks/0a%2Fb");
     }
 }

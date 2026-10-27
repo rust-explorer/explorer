@@ -100,6 +100,8 @@ fn every_api_error_code_has_a_message() {
         "internal",
         "forbidden",
         "cross_device",
+        "invalid_destination",
+        "task_not_found",
     ]
     .iter()
     .map(|code| format!("error-{code}"))
