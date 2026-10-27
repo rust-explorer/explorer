@@ -44,6 +44,12 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
         selection.write().clear();
         query.set(String::new());
     }));
+    // The results replace the listing: a selection there would act on rows out of sight.
+    use_effect(move || {
+        if effective_query(&query.read()).is_some() && !selection.peek().is_empty() {
+            selection.write().clear();
+        }
+    });
 
     let user = match me.read().clone() {
         Some(Ok(user)) => user,
