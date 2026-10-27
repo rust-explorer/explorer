@@ -19,6 +19,14 @@ pub fn SearchField(volume: String) -> Element {
     let mut generation = use_signal(|| 0_u64);
     let mut input = use_signal(|| None::<Rc<MountedData>>);
 
+    // Navigation clears the query: the field follows, and a pending keystroke is dropped.
+    use_effect(move || {
+        if query.read().is_empty() && !text.peek().is_empty() {
+            generation.with_mut(|generation| *generation += 1);
+            text.set(String::new());
+        }
+    });
+
     use_effect(move || {
         if open()
             && let Some(input) = input.peek().clone()
