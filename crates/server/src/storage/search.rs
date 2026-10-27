@@ -5,7 +5,7 @@ use std::time::{Instant, SystemTime};
 use super::read::EntryKind;
 use super::{RelPath, StorageError, Volume};
 
-pub const SEARCH_LIMIT: usize = 200;
+pub use shared::api::search::SEARCH_LIMIT;
 
 #[derive(Debug, Clone)]
 pub struct SearchHit {

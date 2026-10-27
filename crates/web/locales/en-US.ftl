@@ -202,6 +202,7 @@ search-results =
     }
 search-empty = No result for “{ $query }” in { $volume }
 search-truncated = Showing the first { $count }, refine your search.
+search-timed-out = The search took too long; results may be incomplete.
 action-analyze-usage = Analyse space
 action-calculate-size = Calculate size
 analyze-usage = Analyse space

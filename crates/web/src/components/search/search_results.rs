@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use dioxus_i18n::prelude::i18n;
 use dioxus_i18n::t;
 use shared::api::browse::EntryKind;
-use shared::api::search::{SearchHit, SearchResults as Results};
+use shared::api::search::{SEARCH_LIMIT, SearchHit, SearchResults as Results};
 use unic_langid::LanguageIdentifier;
 
 use crate::api;
@@ -61,8 +61,14 @@ fn Hits(found: Results) -> Element {
                 {t!("search-results", count: count, query: found.query.clone(), volume: found.volume.clone())}
             }
         }
-        if found.truncated {
-            p { class: "mb-2 text-sm {MUTED}", {t!("search-truncated", count: count)} }
+        match truncation(&found) {
+            Some(Truncation::Limit) => rsx! {
+                p { class: "mb-2 text-sm {MUTED}", {t!("search-truncated", count: count)} }
+            },
+            Some(Truncation::Deadline) => rsx! {
+                p { class: "mb-2 text-sm {MUTED}", {t!("search-timed-out")} }
+            },
+            None => rsx! {},
         }
         if count > 0 {
             ul { class: "overflow-hidden rounded-lg border border-slate-200 bg-white text-sm dark:border-slate-800 dark:bg-slate-900",
@@ -126,6 +132,23 @@ fn HitRow(volume: String, hit: SearchHit, now: i64, locale: LanguageIdentifier) 
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum Truncation {
+    Limit,
+    Deadline,
+}
+
+/// Why the results stopped short: a search that ran out of time has fewer hits than the limit.
+fn truncation(found: &Results) -> Option<Truncation> {
+    if !found.truncated {
+        None
+    } else if found.hits.len() >= SEARCH_LIMIT {
+        Some(Truncation::Limit)
+    } else {
+        Some(Truncation::Deadline)
+    }
+}
+
 /// The folder part and the name of a volume-relative path.
 fn split_path(path: &str) -> (&str, &str) {
     path.rsplit_once('/').unwrap_or(("", path))
@@ -149,5 +172,35 @@ mod tests {
         assert_eq!(split_path("c.txt"), ("", "c.txt"));
         assert_eq!(segments("a/b").joined(), "a/b");
         assert_eq!(segments("").joined(), "");
+    }
+
+    fn found(hits: usize, truncated: bool) -> Results {
+        let hit = SearchHit {
+            path: "a.txt".to_owned(),
+            kind: EntryKind::File,
+            size: Some(1),
+            modified_ms: None,
+        };
+        Results {
+            volume: "media".to_owned(),
+            query: "a".to_owned(),
+            hits: vec![hit; hits],
+            truncated,
+        }
+    }
+
+    #[test]
+    fn truncation_tells_the_hit_limit_from_the_deadline() {
+        assert_eq!(truncation(&found(3, false)), None);
+        assert_eq!(truncation(&found(SEARCH_LIMIT, false)), None);
+        assert_eq!(
+            truncation(&found(SEARCH_LIMIT, true)),
+            Some(Truncation::Limit)
+        );
+        assert_eq!(truncation(&found(0, true)), Some(Truncation::Deadline));
+        assert_eq!(
+            truncation(&found(SEARCH_LIMIT - 1, true)),
+            Some(Truncation::Deadline)
+        );
     }
 }
