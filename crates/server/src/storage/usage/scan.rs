@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::ffi::{CStr, CString};
 use std::io;
 use std::os::fd::{AsFd, OwnedFd};
@@ -9,6 +8,7 @@ use rustix::io::Errno;
 
 use super::super::path::STAGING_DIR;
 use super::super::read::fs_path;
+use super::hard_links::{HardLink, HardLinks};
 use super::{USAGE_THREADS, USAGE_TOP_FILES, UsageNode};
 use crate::storage::{RelPath, StorageError, TransferProgress, Volume};
 
@@ -34,22 +34,24 @@ pub(super) fn scan(
         .filter(|stat| stat.is_dir)
         .map(Measured::id);
 
+    progress.add_bytes(start_stat.bytes);
     let scan = Scan {
         dev: start_stat.dev,
         root_id: volume_root.id(),
         staging,
         max_dirs,
         progress,
-        hard_links: Mutex::default(),
         state: Mutex::new(State {
             jobs: vec![Job {
                 dir: Source::Opened(start),
+                path: Vec::new(),
                 node: 0,
                 collapsed: false,
             }],
             busy: 0,
             cancelled: false,
             failed: false,
+            hard_links: HardLinks::default(),
             nodes: vec![UsageNode {
                 bytes: start_stat.bytes,
                 ..UsageNode::default()
@@ -72,13 +74,14 @@ pub(super) fn scan(
             source: io::Error::other("a usage worker panicked"),
         });
     }
-    let state = scan
+    let mut state = scan
         .state
         .into_inner()
         .unwrap_or_else(PoisonError::into_inner);
     if state.cancelled {
         return Err(StorageError::Cancelled);
     }
+    state.hard_links.settle(&mut state.nodes);
     Ok(state.nodes)
 }
 
@@ -128,9 +131,11 @@ enum Source {
     },
 }
 
-/// `collapsed`: the folder has no node of its own and counts into `node`.
+/// `path`: the folder's names from the scanned folder down. `collapsed`: the folder has no node
+/// of its own and counts into `node`.
 struct Job {
     dir: Source,
+    path: Vec<CString>,
     node: usize,
     collapsed: bool,
 }
@@ -142,6 +147,7 @@ struct State {
     /// A worker panicked: the others stop too.
     failed: bool,
     nodes: Vec<UsageNode>,
+    hard_links: HardLinks,
 }
 
 struct Scan<'a> {
@@ -150,7 +156,6 @@ struct Scan<'a> {
     staging: Option<(u64, u64)>,
     max_dirs: usize,
     progress: &'a (dyn TransferProgress + Sync),
-    hard_links: Mutex<HashSet<(u64, u64)>>,
     state: Mutex<State>,
     wake: Condvar,
 }
@@ -175,6 +180,7 @@ impl Drop for Busy<'_, '_> {
 #[derive(Default)]
 struct Read {
     files: Vec<(String, u64)>,
+    hard_links: Vec<(CString, Measured)>,
     subdirs: Vec<Subdir>,
     incomplete: bool,
 }
@@ -297,13 +303,8 @@ impl Scan<'_> {
             return;
         }
         if stat.is_file && stat.nlink > 1 {
-            let mut seen = self
-                .hard_links
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner);
-            if !seen.insert(stat.id()) {
-                return;
-            }
+            read.hard_links.push((name.to_owned(), stat));
+            return;
         }
         self.progress.add_file();
         self.progress.add_bytes(stat.bytes);
@@ -320,8 +321,26 @@ impl Scan<'_> {
             node.top_files.extend(read.files);
             keep_biggest(node);
         }
+        for (name, stat) in read.hard_links {
+            let mut path = job.path.clone();
+            path.push(name);
+            let link = HardLink {
+                name: lossy(path.last().expect("just pushed")),
+                path,
+                node: target,
+                collapsed: job.collapsed,
+                bytes: stat.bytes,
+            };
+            if state.hard_links.offer(stat.id(), link) {
+                self.progress.add_file();
+                self.progress.add_bytes(stat.bytes);
+            }
+        }
         for subdir in read.subdirs {
+            self.progress.add_bytes(subdir.stat.bytes);
             let name = lossy(&subdir.name);
+            let mut path = job.path.clone();
+            path.push(subdir.name.clone());
             let dir = Source::At {
                 parent: subdir.parent,
                 name: subdir.name,
@@ -338,6 +357,7 @@ impl Scan<'_> {
                 state.nodes[target].children.push(index);
                 Job {
                     dir,
+                    path,
                     node: index,
                     collapsed: false,
                 }
@@ -348,6 +368,7 @@ impl Scan<'_> {
                 node.collapsed = true;
                 Job {
                     dir,
+                    path,
                     node: target,
                     collapsed: true,
                 }
@@ -358,7 +379,7 @@ impl Scan<'_> {
 }
 
 /// Keeps the [`USAGE_TOP_FILES`] biggest files by name and folds the others into a count.
-fn keep_biggest(node: &mut UsageNode) {
+pub(super) fn keep_biggest(node: &mut UsageNode) {
     if node.top_files.len() <= USAGE_TOP_FILES {
         return;
     }
@@ -370,6 +391,6 @@ fn keep_biggest(node: &mut UsageNode) {
     }
 }
 
-fn lossy(name: &CStr) -> String {
+pub(super) fn lossy(name: &CStr) -> String {
     String::from_utf8_lossy(name.to_bytes()).into_owned()
 }

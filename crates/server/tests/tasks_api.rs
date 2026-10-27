@@ -612,6 +612,7 @@ async fn usage_task_runs_and_is_browsable() {
         ("Films", UsageKind::Dir)
     );
     assert_eq!(root.items[0].bytes + allocated(&media), root.bytes);
+    assert_eq!(done.bytes_done, root.bytes);
 
     let res = s
         .client

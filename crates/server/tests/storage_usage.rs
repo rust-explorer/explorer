@@ -103,7 +103,6 @@ fn usage_sums_allocated_sizes() {
     let media = fixture.media();
     let sub = allocated_all(&media, &["Sub", "Sub/b.bin", "Sub/Deep", "Sub/Deep/c.bin"]);
     let total = allocated(&media) + allocated(&media.join("a.bin")) + sub;
-    let file_bytes = allocated_all(&media, &["a.bin", "Sub/b.bin", "Sub/Deep/c.bin"]);
 
     let counter = Counter::default();
     let tree = usage(
@@ -115,7 +114,7 @@ fn usage_sums_allocated_sizes() {
     assert!(tree.root().is_root());
     assert_eq!(tree.totals(), (total, 3, 2));
     assert_eq!(counter.files.load(Ordering::Relaxed), 3);
-    assert_eq!(counter.bytes.load(Ordering::Relaxed), file_bytes);
+    assert_eq!(counter.bytes.load(Ordering::Relaxed), total);
     assert_eq!(counter.skipped.load(Ordering::Relaxed), 0);
 
     let root = view(&tree, "");
@@ -177,6 +176,42 @@ fn usage_counts_hard_links_once() {
     let total = allocated_all(&media, &["", "a.bin", "Sub"]);
     let tree = fixture.scan("").unwrap();
     assert_eq!(tree.totals(), (total, 1, 1));
+}
+
+#[test]
+fn usage_credits_a_hard_link_to_the_first_path() {
+    let fixture = Fixture::new(|media| {
+        write(&media.join("A/x.bin"), 100_000);
+        fs::create_dir(media.join("B")).unwrap();
+        fs::hard_link(media.join("A/x.bin"), media.join("B/y.bin")).unwrap();
+        fs::hard_link(media.join("A/x.bin"), media.join("z.bin")).unwrap();
+    });
+    let media = fixture.media();
+    let file = allocated(&media.join("z.bin"));
+    let total = allocated_all(&media, &["", "A", "B"]) + file;
+    for _ in 0..20 {
+        let counter = Counter::default();
+        let tree = usage(
+            fixture.volumes.get("media").unwrap(),
+            &RelPath::root(),
+            &counter,
+        )
+        .unwrap();
+        assert_eq!(tree.totals(), (total, 1, 2));
+        assert_eq!(counter.bytes.load(Ordering::Relaxed), total);
+        assert_eq!(counter.files.load(Ordering::Relaxed), 1);
+        let root = view(&tree, "");
+        let names: Vec<&str> = root.items.iter().map(|item| item.name.as_str()).collect();
+        assert_eq!(names, ["A", "B"]);
+        let children: u64 = root.items.iter().map(|item| item.bytes).sum();
+        assert_eq!(children + allocated(&media), root.bytes);
+        assert_eq!(item(&root, "A").bytes, allocated(&media.join("A")) + file);
+        assert_eq!(item(&root, "B").bytes, allocated(&media.join("B")));
+        let a = view(&tree, "A");
+        assert_eq!((a.files, a.items.len()), (1, 1));
+        assert_eq!(a.items[0].name, "x.bin");
+        assert_eq!(view(&tree, "B").files, 0);
+    }
 }
 
 #[test]

@@ -1,3 +1,4 @@
+mod hard_links;
 mod scan;
 
 use std::time::SystemTime;
