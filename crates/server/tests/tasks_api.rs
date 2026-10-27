@@ -715,3 +715,28 @@ async fn usage_before_done_is_404() {
         .await;
     }
 }
+
+#[tokio::test]
+async fn rescanning_a_folder_drops_the_older_tree() {
+    let mut s = setup().await;
+    fs::create_dir(s.data.join("media/F")).unwrap();
+    let first = usage_task(&mut s.client, "media", "F").await;
+    finished(&mut s.client, &first.id).await;
+    let second = usage_task(&mut s.client, "media", "F").await;
+    finished(&mut s.client, &second.id).await;
+
+    error_of(
+        s.client
+            .get(&format!("/api/tasks/{}/usage", first.id))
+            .await,
+        StatusCode::NOT_FOUND,
+        "task_not_found",
+    )
+    .await;
+    let res = s
+        .client
+        .get(&format!("/api/tasks/{}/usage", second.id))
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(list(&mut s.client).await.len(), 2);
+}

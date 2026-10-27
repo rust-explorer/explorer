@@ -18,6 +18,8 @@ pub use run::TaskError;
 pub const MAX_RUNNING: usize = 2;
 /// A finished task stays listed this long unless dismissed.
 pub const FINISHED_TTL: Duration = Duration::from_secs(3600);
+/// Finished usage scans whose result a user keeps; older ones answer as expired.
+pub const MAX_USAGE_TREES: usize = 4;
 
 pub fn routes() -> Router<AppState> {
     Router::new()

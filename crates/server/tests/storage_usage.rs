@@ -361,3 +361,38 @@ fn usage_skips_staging() {
             .all(|item| item.name != STAGING_DIR)
     );
 }
+
+/// Panics on the first file it is told about.
+struct Panicking;
+
+impl TransferProgress for Panicking {
+    fn is_cancelled(&self) -> bool {
+        false
+    }
+
+    fn add_bytes(&self, _: u64) {}
+
+    fn add_file(&self) {
+        panic!("injected panic");
+    }
+
+    fn skip(&self) {}
+}
+
+#[test]
+fn usage_fails_when_a_worker_panics() {
+    // One folder: the other workers wait for the one that panics.
+    let fixture = Fixture::new(|media| write(&media.join("x.bin"), 1_000));
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let media = fixture.volumes.get("media").unwrap();
+        let result = usage(media, &RelPath::root(), &Panicking);
+        sender
+            .send(matches!(result, Err(StorageError::Io { .. })))
+            .unwrap();
+    });
+    let failed = receiver
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the scan hung after a worker panicked");
+    assert!(failed);
+}

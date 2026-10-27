@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::ffi::{CStr, CString};
+use std::io;
 use std::os::fd::{AsFd, OwnedFd};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
@@ -48,6 +49,7 @@ pub(super) fn scan(
             }],
             busy: 0,
             cancelled: false,
+            failed: false,
             nodes: vec![UsageNode {
                 bytes: start_stat.bytes,
                 ..UsageNode::default()
@@ -55,11 +57,21 @@ pub(super) fn scan(
         }),
         wake: Condvar::new(),
     };
-    std::thread::scope(|threads| {
-        for _ in 0..USAGE_THREADS {
-            threads.spawn(|| scan.work());
-        }
+    let panicked = std::thread::scope(|threads| {
+        let workers: Vec<_> = (0..USAGE_THREADS)
+            .map(|_| threads.spawn(|| scan.work()))
+            .collect();
+        workers
+            .into_iter()
+            .map(std::thread::ScopedJoinHandle::join)
+            .any(|joined| joined.is_err())
     });
+    if panicked {
+        return Err(StorageError::Io {
+            path: path.clone(),
+            source: io::Error::other("a usage worker panicked"),
+        });
+    }
     let state = scan
         .state
         .into_inner()
@@ -127,6 +139,8 @@ struct State {
     jobs: Vec<Job>,
     busy: usize,
     cancelled: bool,
+    /// A worker panicked: the others stop too.
+    failed: bool,
     nodes: Vec<UsageNode>,
 }
 
@@ -139,6 +153,22 @@ struct Scan<'a> {
     hard_links: Mutex<HashSet<(u64, u64)>>,
     state: Mutex<State>,
     wake: Condvar,
+}
+
+/// Ends a worker's job however the worker leaves it, panics included, so that the others never
+/// wait for it forever.
+struct Busy<'s, 'a> {
+    scan: &'s Scan<'a>,
+}
+
+impl Drop for Busy<'_, '_> {
+    fn drop(&mut self) {
+        let mut state = self.scan.lock();
+        state.busy -= 1;
+        state.failed |= std::thread::panicking();
+        drop(state);
+        self.scan.wake.notify_all();
+    }
 }
 
 /// What reading one folder found, merged into the tree afterwards under the lock.
@@ -161,7 +191,7 @@ impl Scan<'_> {
             let job = {
                 let mut state = self.lock();
                 loop {
-                    if state.cancelled {
+                    if state.cancelled || state.failed {
                         return;
                     }
                     if let Some(job) = state.jobs.pop() {
@@ -178,17 +208,14 @@ impl Scan<'_> {
                         .unwrap_or_else(PoisonError::into_inner);
                 }
             };
+            let _busy = Busy { scan: self };
             if self.progress.is_cancelled() {
                 self.lock().cancelled = true;
-                self.wake.notify_all();
                 return;
             }
             let read = self.read(&job.dir);
             let mut state = self.lock();
             self.merge(&mut state, &job, read);
-            state.busy -= 1;
-            drop(state);
-            self.wake.notify_all();
         }
     }
 

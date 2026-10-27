@@ -99,7 +99,8 @@ pub struct ViewQuery {
     path: Option<String>,
 }
 
-/// One folder of a finished scan; the scanned folder itself by default.
+/// One folder of a finished scan; the scanned folder itself by default. Access is checked again:
+/// it may have changed since the scan.
 pub async fn view(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -113,6 +114,7 @@ pub async fn view(
         .tasks
         .usage(&user.sub, &id)
         .ok_or_else(ApiError::task_not_found)?;
+    authorize(&state, &user, &volume, tree.root().as_str(), Action::Read)?;
     let path = match query.path {
         Some(raw) => RelPath::parse(&raw)?,
         None => tree.root().clone(),
