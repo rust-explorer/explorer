@@ -200,7 +200,8 @@ Also keep in mind:
   the folder is hidden from listings and zips. Abandoned uploads are removed after 24 hours.
   Do not delete or rename it while uploads are running.
 - Uploads are staged inside the volume, so the final move must stay on one filesystem. If a
-  folder inside a volume is a separate mount (another disk or dataset), uploads into it fail
+  folder inside a volume is a separate mount (another disk or dataset), uploads into it, and
+  copies into it, fail
   with `cross_device` ("on another filesystem than its volume") and the log says the
   destination is on another filesystem. Mount that folder as its own volume under `/data`
   instead.

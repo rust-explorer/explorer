@@ -236,8 +236,10 @@ How tasks run:
   task that was running stops with the process. A task belongs to the `sub` that created it.
   A finished task is listed for one hour unless dismissed.
 - At most 2 tasks run at once, across all users; the others stay `queued`. Each runs on
-  Tokio's blocking pool. A queued task is cancelled at once, a running one when it next
-  checks (between 1 MiB chunks, and between entries of a folder).
+  Tokio's blocking pool. A queued task is cancelled at once; a running copy, or the copy
+  phase of a move, when it next checks (between 1 MiB chunks, and between entries of a
+  folder). A running delete cannot be cancelled: it is a single removal and ends `done`, and
+  the deleting phase of a move runs to the end too.
 - Delete removes a file, a symlink (not its target) or a folder tree. It is not a trash:
   deleted data is gone.
 - Copy streams each file through a staged file in the destination volume's staging directory

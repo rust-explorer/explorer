@@ -164,7 +164,8 @@ action reach outside its volume.
   (a symlink to a folder inside a copied folder is skipped and counted as `skipped`, which
   also rules out cycles, as do sockets, FIFOs and devices); a move across volumes then removes
   only the link from the source. An absolute, broken or escaping symlink (listed as `other`)
-  cannot be the source of a copy or move (`path_not_found`); deleting or renaming one is
+  cannot be the source of a copy or move: `outside_volume` for an absolute or escaping one,
+  `path_not_found` for a broken one. Deleting or renaming one is
   allowed, since that touches only the link.
 - **No silent overwrite.** The conflict policy defaults to `fail`. Replace is only for a file
   over a file: it is refused (`is_a_directory`) when the source or the existing target is a
@@ -183,8 +184,8 @@ action reach outside its volume.
   failed or cancelled copy leaves it whole and removes the partial destination. After that,
   each copied file is deleted from the source, then the folders left empty. What the copy
   skipped (see Symlinks) stays in the source, with its folders, and is reported in `skipped`.
-  If a delete fails midway, both copies remain; nothing is lost, but the move is reported as
-  failed. A move within one volume that hits a nested mount falls back to the same copy and delete.
+  If a delete fails midway, the destination is complete and the source may be partly
+  removed; nothing is lost, but the move is reported as failed. A move within one volume that hits a nested mount falls back to the same copy and delete.
   Copies use the staging directory of the destination volume, so their data never leaves it
   until it is renamed into place.
 - **Tasks.** A task belongs to the OIDC `sub` that created it; listing, cancelling or
