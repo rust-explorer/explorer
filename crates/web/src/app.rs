@@ -21,8 +21,10 @@ pub fn App() -> Element {
     use_context_provider(|| Signal::new(Sort::default()));
     use_revision_provider();
     // Uploads and tasks keep running, and their panel stays, across navigation.
-    use_uploads_provider();
+    let uploads = use_uploads_provider();
     use_tasks_provider();
+    // One conflict prompt at a time: the uploads' first.
+    let upload_waiting = use_memo(move || uploads.queue().read().pending_decision().is_some());
 
     rsx! {
         if let Some(href) = TAILWIND_CSS {
@@ -31,6 +33,8 @@ pub fn App() -> Element {
         Router::<Route> {}
         ActivityPanel {}
         ConflictDialog {}
-        TaskConflictDialog {}
+        if !upload_waiting() {
+            TaskConflictDialog {}
+        }
     }
 }
