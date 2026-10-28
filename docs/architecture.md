@@ -162,8 +162,8 @@ How an upload is stored:
    write. A body that sends nothing for 60 seconds is treated as a disconnect; what arrived
    is kept and flushed to disk.
 4. When the staged file reaches `Upload-Length`, the server creates the missing parent
-   folders, applies `modified` as the file's modification time, syncs it and renames it
-   into place. `fail` and `keep_both` use a no-replace rename, so a file that appears
+   folders, syncs the file and renames it into place, then applies `modified` as its
+   modification time (only once placed, so a staged file never looks old to the sweep). `fail` and `keep_both` use a no-replace rename, so a file that appears
    during the upload is never overwritten (with `fail` the upload then takes a "keep both"
    name and the log says so); `replace` renames over the destination but never over a
    folder. "Keep both" names `Film.mkv` as `Film (1).mkv`, then `(2)` and so on: the suffix
