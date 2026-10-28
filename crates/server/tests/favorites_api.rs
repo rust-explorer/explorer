@@ -10,11 +10,11 @@ use axum::http::{Request, StatusCode, header};
 use axum::response::Response;
 use common::client::{Client, json};
 use common::fake_oidc::{FakeOidc, SUBJECT};
-use explorer_server::favorites::{Added, Favorites, MAX_FAVORITES};
+use explorer_server::favorites::{Added, Favorites};
 use explorer_server::http::router;
 use serde_json::json;
 use shared::api::error::ErrorBody;
-use shared::api::favorites::Favorite;
+use shared::api::favorites::{Favorite, MAX_FAVORITES};
 use tempfile::TempDir;
 
 const ORIGIN: &str = "https://files.example.com";

@@ -5,8 +5,8 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 use shared::api::error::ErrorBody;
+use shared::api::favorites::MAX_FAVORITES;
 
-use crate::favorites::MAX_FAVORITES;
 use crate::http::request_id::request_id;
 use crate::storage::{InvalidPath, StorageError};
 use crate::tasks::MAX_ACTIVE_PER_USER;

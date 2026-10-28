@@ -6,8 +6,9 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::http::header::{self, HeaderMap, HeaderValue};
 use axum::response::Response;
+use shared::api::thumbnails::has_thumbnail;
 
-use super::{MAX_SOURCE_BYTES, Thumbnail, Thumbnails, cache_key, render, supported};
+use super::{MAX_SOURCE_BYTES, Thumbnail, Thumbnails, cache_key, render};
 use crate::auth::{Action, CurrentUser};
 use crate::http::AppState;
 use crate::http::access::{VolumeQuery, authorize, blocking_volume, invalid_query};
@@ -27,7 +28,7 @@ pub async fn thumbnail(
         return Err(invalid_query());
     };
     let path = authorize(&state, &user, &volume, &path, Action::Read)?;
-    if !path.file_name().is_some_and(supported) {
+    if !path.file_name().is_some_and(has_thumbnail) {
         return Err(ApiError::thumbnail_unavailable());
     }
 

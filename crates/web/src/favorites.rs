@@ -6,9 +6,6 @@ use shared::api::tasks::Location;
 use crate::api::{self, ApiFailure};
 use crate::revision::Revision;
 
-/// The server's limit on favorites per user.
-pub const MAX_FAVORITES: usize = 100;
-
 /// The user's favorite folders. The list is reloaded after every change and whenever something
 /// changed on disk, so a renamed or deleted folder shows as missing.
 #[derive(Clone, Copy)]

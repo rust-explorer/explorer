@@ -1,9 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use shared::api::favorites::MAX_FAVORITES;
 use sqlx::{Row as _, SqlitePool};
-
-/// Favorites one user can have.
-pub const MAX_FAVORITES: usize = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Added {

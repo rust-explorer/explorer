@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
 use dioxus_i18n::{t, te};
 use shared::api::error::ErrorBody;
+use shared::api::favorites::MAX_FAVORITES;
 
 use crate::api::ApiFailure;
-use crate::favorites::MAX_FAVORITES;
 use crate::routes::{Route, Segments};
 
 const BUTTON_CLASS: &str =

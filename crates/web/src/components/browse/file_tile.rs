@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use dioxus_i18n::prelude::i18n;
 use dioxus_i18n::t;
 use shared::api::browse::{Entry, EntryKind};
+use shared::api::thumbnails::has_thumbnail;
 use unic_langid::LanguageIdentifier;
 
 use super::file_row::{EntryIcon, MUTED};
@@ -15,7 +16,6 @@ use crate::components::common::icons::MoreIcon;
 use crate::components::usage::FolderSizeLabel;
 use crate::format::format_size;
 use crate::i18n::attr;
-use crate::listing::has_thumbnail;
 use crate::routes::{Route, Segment, Segments};
 
 const TILE: &str = "flex h-full flex-col overflow-hidden rounded-lg border p-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600";

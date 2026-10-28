@@ -48,18 +48,6 @@ pub enum FileType {
     Other,
 }
 
-/// Whether the server makes thumbnails for `name`, by its extension; other images keep their
-/// icon rather than asking for a preview that can't come.
-pub fn has_thumbnail(name: &str) -> bool {
-    let Some((stem, extension)) = name.rsplit_once('.') else {
-        return false;
-    };
-    !stem.is_empty()
-        && ["jpg", "jpeg", "png", "gif", "webp"]
-            .iter()
-            .any(|known| extension.eq_ignore_ascii_case(known))
-}
-
 pub fn file_type(name: &str) -> FileType {
     let Some((stem, extension)) = name.rsplit_once('.') else {
         return FileType::Other;
@@ -386,16 +374,6 @@ mod tests {
         assert_eq!(reveal_offset(9, 44.0, 430.0, 440.0), Some(396.0));
         // Before the first resize event nothing is known about the viewport.
         assert_eq!(reveal_offset(50, 44.0, 0.0, 0.0), Some(2200.0));
-    }
-
-    #[test]
-    fn thumbnails_only_for_formats_the_server_renders() {
-        for name in ["a.jpg", "b.JPEG", "c.png", "d.gif", "e.webp"] {
-            assert!(has_thumbnail(name), "{name}");
-        }
-        for name in ["a.heic", "b.svg", "c.avif", "d.tiff", ".png", "png"] {
-            assert!(!has_thumbnail(name), "{name}");
-        }
     }
 
     #[test]

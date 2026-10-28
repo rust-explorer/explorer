@@ -27,18 +27,6 @@ pub const THUMB_VERSION: u32 = 1;
 pub const CACHE_DIR: &str = "cache/thumbnails";
 pub const SWEEP_INTERVAL: Duration = Duration::from_secs(24 * 3600);
 
-/// Whether `name` is an image format thumbnails are made for.
-#[must_use]
-pub fn supported(name: &str) -> bool {
-    let Some((stem, extension)) = name.rsplit_once('.') else {
-        return false;
-    };
-    !stem.is_empty()
-        && ["jpg", "jpeg", "png", "gif", "webp"]
-            .iter()
-            .any(|known| extension.eq_ignore_ascii_case(known))
-}
-
 pub fn routes() -> Router<AppState> {
     Router::new().route("/thumbnail", get(routes::thumbnail))
 }
@@ -58,29 +46,4 @@ pub fn spawn_sweeper(thumbnails: Arc<Thumbnails>) -> JoinHandle<()> {
             }
         }
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn supported_names() {
-        for (name, expected) in [
-            ("a.jpg", true),
-            ("a.JPEG", true),
-            ("b.Png", true),
-            ("c.gif", true),
-            ("d.webp", true),
-            ("photo.tar.jpg", true),
-            ("e.heic", false),
-            ("f.svg", false),
-            ("g.txt", false),
-            ("jpg", false),
-            (".jpg", false),
-            ("", false),
-        ] {
-            assert_eq!(supported(name), expected, "{name}");
-        }
-    }
 }

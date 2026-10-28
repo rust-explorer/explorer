@@ -6,7 +6,7 @@ use axum::routing::get;
 
 use crate::http::AppState;
 
-pub use store::{Added, Favorites, MAX_FAVORITES};
+pub use store::{Added, Favorites};
 
 pub fn routes() -> Router<AppState> {
     Router::new().route(
