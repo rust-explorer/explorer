@@ -16,13 +16,15 @@ pub fn FolderSizeLabel(
 ) -> Element {
     let list = use_tasks().list();
     let locale = i18n().language();
-    let (size, finished_at) = {
+    // A memo, so that a poll re-renders the label only when its folder's size changed.
+    let measured = use_memo(use_reactive!(|volume, path| {
         let list = list.read();
         let finished_at = list
             .newest_usage(&volume, &path)
             .and_then(Task::finished_at_ms);
         (list.folder_size(&volume, &path), finished_at)
-    };
+    }));
+    let (size, finished_at) = measured();
     let tail = if separator { " · " } else { "" };
 
     match size {

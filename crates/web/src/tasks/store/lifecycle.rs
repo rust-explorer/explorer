@@ -1,4 +1,5 @@
 use shared::api::browse::EntryKind;
+use shared::api::error::ErrorBody;
 use shared::api::tasks::{TaskInfo, TaskSpec, TaskState};
 
 use super::{Effect, TASK_NOT_FOUND, Task, TaskKey, TaskList};
@@ -42,6 +43,7 @@ impl TaskList {
                     conflict: None,
                     open_at: None,
                     finished_at_ms: None,
+                    finished_before: false,
                     dismissed: false,
                     cancel_failure: None,
                 });
@@ -78,10 +80,12 @@ impl TaskList {
                 conflict: None,
                 open_at: None,
                 finished_at_ms: None,
+                finished_before: finished_scan,
                 dismissed: finished_scan,
                 cancel_failure: None,
             });
         }
+        self.adopted = true;
         let mut effects = Vec::new();
         self.keep_polling(&mut effects);
         effects
@@ -121,13 +125,31 @@ impl TaskList {
             }
             false
         });
+        self.drop_stale_scans();
         effects
+    }
+
+    /// The server no longer has the result of the finished scan `id`, such as when scans from
+    /// another tab pushed it out: the next analysis of its folder starts a new one.
+    pub fn result_gone(&mut self, id: &str) {
+        if let Some(task) = self.tasks.iter_mut().find(|task| {
+            task.server_id() == Some(id)
+                && matches!(task.spec, TaskSpec::Usage { .. })
+                && task.state() == TaskState::Done
+        }) {
+            task.lost = Some(ApiFailure::Server(ErrorBody {
+                code: TASK_NOT_FOUND.to_owned(),
+                message: String::new(),
+                details: None,
+                request_id: None,
+            }));
+        }
     }
 
     /// Notes `now_ms` as the finish time of the tasks that just finished.
     pub fn stamp_finished(&mut self, now_ms: i64) {
         for task in &mut self.tasks {
-            if !task.is_active() && task.finished_at_ms.is_none() {
+            if !task.is_active() && task.finished_at_ms.is_none() && !task.finished_before {
                 task.finished_at_ms = Some(now_ms);
             }
         }

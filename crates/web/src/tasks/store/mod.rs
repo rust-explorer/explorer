@@ -37,6 +37,8 @@ pub struct Task {
     pub(super) open_at: Option<String>,
     /// When this tab saw it finish.
     finished_at_ms: Option<i64>,
+    /// It had finished before this tab took it over: when is unknown.
+    finished_before: bool,
     /// Cleared from the activity panel, but still known for its result.
     dismissed: bool,
     /// Why the last cancel request failed.
@@ -74,6 +76,10 @@ impl Task {
             let error = self.info.as_ref()?.error.clone()?;
             Some(ApiFailure::Server(error))
         })
+    }
+
+    pub(in crate::tasks) fn dismissed(&self) -> bool {
+        self.dismissed
     }
 
     pub fn cancel_failure(&self) -> Option<&ApiFailure> {
@@ -140,6 +146,8 @@ pub struct TaskList {
     decisions: HashMap<u64, Decision>,
     /// A poll found the session gone: polling stops until the user signs in again.
     signed_out: bool,
+    /// The server's tasks were taken over, or could not be listed.
+    adopted: bool,
 }
 
 impl TaskList {
@@ -150,6 +158,11 @@ impl TaskList {
     /// The tasks the activity panel lists.
     pub fn shown(&self) -> impl Iterator<Item = &Task> {
         self.tasks.iter().filter(|task| !task.dismissed)
+    }
+
+    /// Whether the tasks from before a reload are known by now.
+    pub fn adopted(&self) -> bool {
+        self.adopted
     }
 
     pub fn signed_out(&self) -> bool {
