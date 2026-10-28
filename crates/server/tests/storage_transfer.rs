@@ -997,3 +997,20 @@ fn cross_volume_move_failing_to_delete_keeps_both_copies() {
     assert_eq!(fs::read(documents.join("F/b.txt")).unwrap(), b"b");
     assert!(fixture.staged("documents").is_empty());
 }
+
+#[test]
+fn planning_stops_once_cancelled() {
+    let fixture = Fixture::new(|media, _| {
+        write(&media.join("F/a.txt"), b"a");
+        write(&media.join("F/Sub/b.txt"), b"b");
+    });
+    let progress = Recorder::default();
+    progress.cancelled.store(true, Ordering::Relaxed);
+    let planned = storage::plan_transfer_with(fixture.media(), &rel("F"), &progress);
+    assert!(
+        matches!(planned, Err(StorageError::Cancelled)),
+        "{planned:?}"
+    );
+    let plan = storage::plan_transfer_with(fixture.media(), &rel("F"), &Recorder::default());
+    assert_eq!(plan.unwrap().files, 2);
+}

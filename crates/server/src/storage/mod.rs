@@ -18,7 +18,7 @@ pub use search::{SEARCH_LIMIT, SearchHit, SearchOutcome};
 pub use staging::{StagedId, Staging};
 pub use transfer::{
     COPY_CHUNK, MoveOutcome, TransferPlan, TransferProgress, check_move, check_transfer, copy,
-    move_entry, plan_transfer,
+    move_entry, plan_transfer, plan_transfer_with,
 };
 pub use tree::{SkipReason, TreeItem, TreeWalk};
 pub use usage::{

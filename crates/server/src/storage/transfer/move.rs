@@ -4,7 +4,7 @@ use rustix::io::Errno;
 
 use shared::api::conflict::ConflictPolicy;
 
-use super::{TransferPlan, TransferProgress, check_transfer, copy, plan_transfer};
+use super::{TransferPlan, TransferProgress, check_transfer, copy, plan_transfer_with};
 use crate::storage::read::{Identity, fs_path};
 use crate::storage::{InvalidPath, RelPath, StorageError, Volume, WalkItem};
 
@@ -73,7 +73,7 @@ pub fn move_entry(
     let plan = if let Some(plan) = plan {
         plan
     } else {
-        planned = plan_transfer(source, path)?;
+        planned = plan_transfer_with(source, path, progress)?;
         progress.planned(&planned);
         &planned
     };

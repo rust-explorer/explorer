@@ -32,10 +32,24 @@ pub struct TransferPlan {
 }
 
 pub fn plan_transfer(source: &Volume, path: &RelPath) -> Result<TransferPlan, StorageError> {
-    plan(source, path).map_err(StorageError::on_source)
+    plan(source, path, &|| true).map_err(StorageError::on_source)
 }
 
-fn plan(source: &Volume, path: &RelPath) -> Result<TransferPlan, StorageError> {
+/// Like [`plan_transfer`], failing with `Cancelled` as soon as `progress` is cancelled, even
+/// in the middle of a large walk.
+pub fn plan_transfer_with(
+    source: &Volume,
+    path: &RelPath,
+    progress: &dyn TransferProgress,
+) -> Result<TransferPlan, StorageError> {
+    plan(source, path, &|| !progress.is_cancelled()).map_err(StorageError::on_source)
+}
+
+fn plan(
+    source: &Volume,
+    path: &RelPath,
+    go_on: &dyn Fn() -> bool,
+) -> Result<TransferPlan, StorageError> {
     let meta = source.stat(path)?;
     let (items, skipped) = match meta.kind {
         EntryKind::File => (
@@ -46,7 +60,7 @@ fn plan(source: &Volume, path: &RelPath) -> Result<TransferPlan, StorageError> {
             }],
             0,
         ),
-        EntryKind::Dir => source.walk_counting(path)?,
+        EntryKind::Dir => source.walk_counting_while(path, go_on)?,
         EntryKind::Other => return Err(StorageError::NotFound(path.clone())),
     };
     let (mut files, mut bytes) = (0, 0);
