@@ -173,7 +173,8 @@ Names that are not valid UTF-8 are skipped with a warning.
 - **Limits.** A user has at most 1000 unfinished uploads; more are refused with 429
   `too_many_uploads` until some finish, are cancelled or are swept. The declared
   `Upload-Length` is checked at creation against the volume's free space less the bytes
-  that the volume's unfinished uploads (all users) still have to receive, so many large
+  that the unfinished uploads (all users) to every volume on the same filesystem (same
+  device at startup, e.g. two folders of one disk) still have to receive, so many large
   uploads cannot together promise more than the disk holds. A body longer than the declared
   length is cut off (413 `upload_too_large`).
   Disk-full during a write is 507 `insufficient_storage`. A body that stalls for 60 seconds

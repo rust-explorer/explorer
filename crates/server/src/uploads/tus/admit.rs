@@ -2,7 +2,7 @@ use shared::api::uploads::MAX_PENDING_UPLOADS;
 
 use crate::http::AppState;
 use crate::http::error::ApiError;
-use crate::storage::{RelPath, StagedId, Volume};
+use crate::storage::{RelPath, StagedId, Volume, Volumes};
 
 /// Refuses a new upload to a user who already has [`MAX_PENDING_UPLOADS`] unfinished ones.
 pub(super) async fn check_pending_count(state: &AppState, user_sub: &str) -> Result<(), ApiError> {
@@ -18,13 +18,17 @@ pub(super) async fn check_pending_count(state: &AppState, user_sub: &str) -> Res
     Ok(())
 }
 
-/// Refuses `length` bytes when the free space, less what the unfinished uploads to the volume
-/// still have to write, cannot hold them. Runs on a blocking thread.
+/// Unfinished uploads as `(volume, id, length)`.
+pub(super) type Pending = [(String, StagedId, u64)];
+
+/// Refuses `length` bytes when the free space, less what the unfinished uploads to the volumes
+/// on the same filesystem still have to write, cannot hold them. Runs on a blocking thread.
 pub(super) fn check_space(
+    volumes: &Volumes,
     vol: &Volume,
     path: &RelPath,
     length: u64,
-    pending: &[(StagedId, u64)],
+    pending: &Pending,
 ) -> Result<(), ApiError> {
     let space = match vol.space() {
         Ok(space) => space,
@@ -33,7 +37,21 @@ pub(super) fn check_space(
             return Ok(());
         }
     };
-    let owed = owed(vol, pending);
+    let owed = volumes
+        .iter()
+        .map(|other| {
+            let theirs: Vec<_> = pending
+                .iter()
+                .filter(|(volume, ..)| volume == other.name())
+                .map(|(_, id, length)| (id, *length))
+                .collect();
+            if theirs.is_empty() {
+                0
+            } else {
+                owed(other, &theirs)
+            }
+        })
+        .fold(0, u64::saturating_add);
     let free = space.available.saturating_sub(owed);
     if length > free {
         tracing::warn!(
@@ -50,7 +68,7 @@ pub(super) fn check_space(
 }
 
 /// Bytes the pending uploads still have to write; one whose staged file is gone owes nothing.
-fn owed(vol: &Volume, pending: &[(StagedId, u64)]) -> u64 {
+fn owed(vol: &Volume, pending: &[(&StagedId, u64)]) -> u64 {
     let staging = match vol.existing_staging() {
         Ok(Some(staging)) => staging,
         Ok(None) => return 0,

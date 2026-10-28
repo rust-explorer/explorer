@@ -203,10 +203,25 @@ impl Uploads {
         Ok(u64::try_from(count).unwrap_or_default())
     }
 
-    /// The id and length of every unfinished upload to `volume`, whoever started it.
-    pub async fn pending_on(&self, volume: &str) -> sqlx::Result<Vec<(StagedId, u64)>> {
-        sqlx::query("SELECT id, length FROM uploads WHERE volume = ? AND final_path IS NULL")
-            .bind(volume)
+    /// The volume, id and length of every unfinished upload to one of `volumes`, whoever started
+    /// it.
+    pub async fn pending_on(
+        &self,
+        volumes: &[String],
+    ) -> sqlx::Result<Vec<(String, StagedId, u64)>> {
+        if volumes.is_empty() {
+            return Ok(Vec::new());
+        }
+        let marks = vec!["?"; volumes.len()].join(", ");
+        let sql = format!(
+            "SELECT volume, id, length FROM uploads WHERE volume IN ({marks}) \
+             AND final_path IS NULL"
+        );
+        let mut query = sqlx::query(&sql);
+        for volume in volumes {
+            query = query.bind(volume);
+        }
+        query
             .fetch_all(&self.pool)
             .await?
             .iter()
@@ -214,6 +229,7 @@ impl Uploads {
                 let id: String = row.try_get("id")?;
                 let length: i64 = row.try_get("length")?;
                 Ok((
+                    row.try_get("volume")?,
                     StagedId::parse(&id).ok_or_else(|| corrupt("id"))?,
                     u64::try_from(length).map_err(|_| corrupt("length"))?,
                 ))

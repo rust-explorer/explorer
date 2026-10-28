@@ -1193,6 +1193,27 @@ async fn free_space_counts_what_pending_uploads_still_need() {
 }
 
 #[tokio::test]
+async fn free_space_counts_pending_uploads_to_volumes_on_the_same_filesystem() {
+    let mut s = setup_with(&["media", "photos"], |_| {}).await;
+    let stat = rustix::fs::statvfs(s.media()).unwrap();
+    let available = stat.f_bavail * stat.f_frsize;
+    let length = available / 10 * 6;
+
+    let res = s
+        .client
+        .send(create_request("photos", "first.bin", length, &[]))
+        .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let res = create(&mut s.client, "second.bin", length, &[]).await;
+    error(
+        res,
+        StatusCode::INSUFFICIENT_STORAGE,
+        "insufficient_storage",
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn patches_in_flight_are_capped_per_user() {
     let mut s = setup().await;
     let mut held = Vec::new();

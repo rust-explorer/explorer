@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::body::Body;
 use axum::extract::rejection::PathRejection;
 use axum::extract::{Path, State};
@@ -69,14 +71,14 @@ pub(super) async fn create(
     check_pending_count(&state, &user.sub).await?;
     let pending = state
         .uploads
-        .pending_on(&volume)
+        .pending_on(&state.volumes.same_filesystem(&volume))
         .await
         .map_err(ApiError::internal)?;
     let id = StagedId::random();
     blocking_volume(&state.volumes, &volume, {
-        let (id, path) = (id.clone(), path.clone());
+        let (id, path, volumes) = (id.clone(), path.clone(), Arc::clone(&state.volumes));
         move |vol| {
-            check_space(vol, &path, length, &pending)?;
+            check_space(&volumes, vol, &path, length, &pending)?;
             vol.check_upload_target(&path, conflict)
                 .and_then(|()| vol.staging())
                 .and_then(|staging| staging.create(&id))
