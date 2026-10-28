@@ -223,7 +223,7 @@ the details (look for `sign-in failed` with the same `reason`).
 | Reason | Meaning | Fix |
 |---|---|---|
 | `provider_error` | The provider returned an error instead of a code. | Read the log line's `error`. Typical causes: the user cancelled, or the provider refused this user or client (`access_denied`). |
-| `state_mismatch` | The sign-in was expired, replayed, forged, or belongs to another browser tab. | Retry from the start. Check cookies are not blocked and `EXPLORER_PUBLIC_URL` is the URL in the address bar (the session cookie is `Secure`, so HTTPS is required). |
+| `state_mismatch` | The sign-in was expired (started more than 10 minutes ago), replayed or forged, or more than 5 sign-ins were started at once in this browser. | Retry from the start. Check cookies are not blocked and `EXPLORER_PUBLIC_URL` is the URL in the address bar (the session cookie is `Secure`, so HTTPS is required). |
 | `exchange_failed` | The token endpoint rejected the code, or could not be reached. | Check the client ID and secret, that the client is confidential, and that the container can reach the issuer. |
 | `invalid_token` | The ID token failed verification (signature, issuer, audience, expiry or nonce). | Check `EXPLORER_OIDC_ISSUER` matches the provider's issuer exactly, the client ID, and the clocks of both hosts. After a rotation of the provider's signing keys, Explorer fetches them again by itself, at most once a minute. |
 | Signing out stops on PocketID's own sign-out page | The logout callback URL does not match exactly. | Register `https://files.example.com` with no trailing slash (step 1). |

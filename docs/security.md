@@ -44,6 +44,11 @@ again, at most once a minute, and verifies the token once more; no restart is ne
   TTL, if shorter), so an idle session may end up to that much earlier.
 - However active, a session ends 30 days after sign-in, or after `EXPLORER_SESSION_TTL` if
   that is longer. The user then signs in again, and their groups are read again.
+- A sign-in in progress (its `state`, `nonce`, PKCE verifier and return path) is kept in a
+  session that lasts 10 minutes, since anyone can start one; expired sessions are deleted
+  every 10 minutes. Up to 5 sign-ins can be in progress at once in one browser, so tabs that
+  all found their session ended can sign in together; a sixth drops the oldest. A callback
+  whose `state` matches none of them cancels them all.
 - The session id is rotated on successful login (against session fixation).
 - Logout and access denial flush the session. After a denial only the ID token is kept,
   solely so that signing out can end the provider session.
@@ -77,8 +82,8 @@ listings running with the user's cookie, even though it cannot read the answers.
 
 ## Open redirects
 
-`/auth/login?return_to=` must be a path (leading `/`, no control characters, at most 2048
-bytes). It is resolved against `EXPLORER_PUBLIC_URL` with a WHATWG URL parser, the same rules
+`/auth/login?return_to=` must be a path (leading `/`, no control characters, at most 512
+bytes; a longer one becomes `/`). It is resolved against `EXPLORER_PUBLIC_URL` with a WHATWG URL parser, the same rules
 browsers apply, and kept only if the result has the same origin and its path does not start
 with `//`. So `//host`, `/\host` or `/..//host` cannot send the user to another site; they
 become `/`. The post-login redirect target is stored in the session, never taken from the

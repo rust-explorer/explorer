@@ -16,9 +16,11 @@ use crate::http::error::ApiError;
 use crate::http::request_id::request_id;
 use crate::telemetry::truncate_for_log;
 
-const PENDING_KEY: &str = "oidc_pending";
+const PENDING_KEY: &str = "oidc_pending_logins";
 const ID_TOKEN_KEY: &str = "id_token";
-const MAX_RETURN_TO_LEN: usize = 2048;
+const MAX_RETURN_TO_LEN: usize = 512;
+/// Sign-ins started in parallel by one browser (tabs that all found their session ended).
+const MAX_PENDING_LOGINS: usize = 5;
 const ACCESS_DENIED_PATH: &str = "/access-denied";
 
 pub async fn me(user: CurrentUser) -> Json<Me> {
@@ -58,11 +60,42 @@ pub(super) async fn login(
     let return_to = params.ok().and_then(|Query(p)| p.return_to);
     let (url, mut pending) = state.oidc.authorize_url();
     pending.return_to = sanitize_return_to(&state.config.public_url, return_to.as_deref());
+    let mut pendings = session
+        .get::<Vec<PendingLogin>>(PENDING_KEY)
+        .await
+        .map_err(ApiError::internal)?
+        .unwrap_or_default();
+    if pendings.len() >= MAX_PENDING_LOGINS {
+        pendings.drain(..=pendings.len() - MAX_PENDING_LOGINS);
+    }
+    pendings.push(pending);
     session
-        .insert(PENDING_KEY, pending)
+        .insert(PENDING_KEY, pendings)
         .await
         .map_err(ApiError::internal)?;
     Ok(see_other(url.as_str()))
+}
+
+/// Removes and returns the pending login that issued `state`. A state this session did not
+/// issue, or none, removes them all: a failed callback never leaves a sign-in to retry.
+async fn take_pending(
+    session: &Session,
+    state: Option<&str>,
+) -> Result<Option<PendingLogin>, tower_sessions::session::Error> {
+    let Some(mut pendings) = session.remove::<Vec<PendingLogin>>(PENDING_KEY).await? else {
+        return Ok(None);
+    };
+    let Some(index) = pendings
+        .iter()
+        .position(|p| Some(p.csrf_state.as_str()) == state)
+    else {
+        return Ok(None);
+    };
+    let pending = pendings.remove(index);
+    if !pendings.is_empty() {
+        session.insert(PENDING_KEY, pendings).await?;
+    }
+    Ok(Some(pending))
 }
 
 #[derive(Deserialize)]
@@ -79,12 +112,11 @@ pub(super) async fn callback(
     params: Result<Query<CallbackParams>, QueryRejection>,
 ) -> Result<Response, ApiError> {
     let request_id = request_id(&headers);
+    let params = params.map(|Query(p)| p).ok();
     // Taken before anything else so a state can be used at most once, whatever the outcome.
-    let pending = session
-        .remove::<PendingLogin>(PENDING_KEY)
+    let pending = take_pending(&session, params.as_ref().and_then(|p| p.state.as_deref()))
         .await
         .map_err(ApiError::internal)?;
-    let params = params.map(|Query(p)| p).ok();
 
     if let Some(error) = params.as_ref().and_then(|p| p.error.as_deref()) {
         tracing::warn!(

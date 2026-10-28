@@ -13,7 +13,11 @@ use tower_sessions_sqlx_store::SqliteStore;
 use crate::http::error::ApiError;
 
 pub const COOKIE_NAME: &str = "explorer_session";
-const CLEANUP_INTERVAL: Duration = Duration::from_secs(3600);
+/// Short, because anonymous sessions only hold sign-ins in progress.
+const CLEANUP_INTERVAL: Duration = Duration::from_secs(600);
+/// How long an anonymous session, which holds only sign-ins in progress, lives: anyone can
+/// create one, so it must not stay in the database for the full TTL.
+const PENDING_TTL: Duration = Duration::from_secs(600);
 /// Browsers cap cookie lifetimes at 400 days, so a longer TTL buys nothing.
 const MAX_TTL: Duration = Duration::from_secs(400 * 24 * 3600);
 /// However active, a session ends this long after sign-in (or after the TTL, if longer), so that
@@ -23,11 +27,9 @@ const MAX_LIFETIME: Duration = Duration::from_secs(30 * 24 * 3600);
 const MAX_TOUCH_INTERVAL: Duration = Duration::from_secs(3600);
 const STAMPS_KEY: &str = "lifetime";
 
-/// Builds the session layer over the `SQLite` store, creating its table if needed.
-pub async fn layer(
-    db: SqlitePool,
-    ttl: Duration,
-) -> Result<SessionManagerLayer<SqliteStore>, sqlx::Error> {
+/// Builds the session layer over the `SQLite` store, creating its table if needed. Sessions get
+/// the short anonymous expiry unless [`keep_alive`] finds an identity in them.
+pub async fn layer(db: SqlitePool) -> Result<SessionManagerLayer<SqliteStore>, sqlx::Error> {
     let store = SqliteStore::new(db);
     store.migrate().await?;
     Ok(SessionManagerLayer::new(store)
@@ -36,7 +38,7 @@ pub async fn layer(
         .with_secure(true)
         .with_same_site(SameSite::Lax)
         .with_path("/")
-        .with_expiry(Expiry::OnInactivity(inactivity(ttl))))
+        .with_expiry(Expiry::OnInactivity(inactivity(PENDING_TTL))))
 }
 
 fn inactivity(ttl: Duration) -> time::Duration {

@@ -273,6 +273,87 @@ async fn state_mismatch_is_rejected() {
     assert_eq!(h.me_status(&mut jar).await, StatusCode::UNAUTHORIZED);
 }
 
+fn max_age(res: &Response) -> Option<u64> {
+    let cookie = res.headers().get(header::SET_COOKIE)?.to_str().unwrap();
+    cookie
+        .split("; ")
+        .find_map(|a| a.strip_prefix("Max-Age="))
+        .map(|v| v.parse().unwrap())
+}
+
+#[tokio::test]
+async fn pending_login_is_short_lived_until_signed_in() {
+    let h = Harness::new().await;
+    let mut jar = Jar::default();
+
+    let res = h.get(&mut jar, "/auth/login").await;
+    assert_eq!(max_age(&res), Some(600));
+    let url = Url::parse(location(&res)).unwrap();
+    let code = h.fake.approve(&url).unwrap();
+    let res = h
+        .callback(&mut jar, &[("code", &code), ("state", &state_of(&url))])
+        .await;
+
+    assert_eq!(location(&res), "/");
+    assert_eq!(max_age(&res), Some(7 * 24 * 3600));
+}
+
+#[tokio::test]
+async fn two_tabs_signing_in_at_once_both_succeed() {
+    let h = Harness::new().await;
+    let mut jar = Jar::default();
+    let tab1 = h.login(&mut jar, Some("/one")).await;
+    let tab2 = h.login(&mut jar, Some("/two")).await;
+
+    for (url, target) in [(tab1, "/one"), (tab2, "/two")] {
+        let code = h.fake.approve(&url).unwrap();
+        let res = h
+            .callback(&mut jar, &[("code", &code), ("state", &state_of(&url))])
+            .await;
+        assert_eq!(location(&res), target);
+        assert_eq!(h.me_status(&mut jar).await, StatusCode::OK);
+    }
+}
+
+#[tokio::test]
+async fn only_the_latest_pending_logins_are_kept() {
+    let h = Harness::new().await;
+    let mut jar = Jar::default();
+    let mut urls = Vec::new();
+    for _ in 0..6 {
+        urls.push(h.login(&mut jar, None).await);
+    }
+
+    for (i, expected) in [(5, Some("/")), (1, Some("/")), (0, None)] {
+        let code = h.fake.approve(&urls[i]).unwrap();
+        let state = state_of(&urls[i]);
+        let res = h
+            .callback(&mut jar, &[("code", &code), ("state", &state)])
+            .await;
+        match expected {
+            Some(target) => assert_eq!(location(&res), target, "login {i}"),
+            None => assert_signin_error(&res, "state_mismatch"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_unknown_state_burns_every_pending_login() {
+    let h = Harness::new().await;
+    let mut jar = Jar::default();
+    let url = h.login(&mut jar, None).await;
+    h.login(&mut jar, None).await;
+
+    let res = h.callback(&mut jar, &[("code", "c"), ("state", "forged")]).await;
+    assert_signin_error(&res, "state_mismatch");
+
+    let code = h.fake.approve(&url).unwrap();
+    let res = h
+        .callback(&mut jar, &[("code", &code), ("state", &state_of(&url))])
+        .await;
+    assert_signin_error(&res, "state_mismatch");
+}
+
 #[tokio::test]
 async fn callback_without_pending_login_is_rejected() {
     let h = Harness::new().await;
