@@ -292,6 +292,7 @@ pub fn EntryActionsLayer(
         }
         if let Some(Renaming { entry, trigger }) = renaming() {
             RenameDialog {
+                key: "{entry.name}",
                 volume: dialog_volume.clone(),
                 parent: dialog_parent.clone(),
                 entry,
