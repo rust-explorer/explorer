@@ -1,5 +1,5 @@
 const MAX_PATH_LEN: usize = 4096;
-const MAX_COMPONENT_LEN: usize = 255;
+pub(super) const MAX_COMPONENT_LEN: usize = 255;
 
 /// Where uploads are staged, at each volume root; no `RelPath` can start with it.
 pub const STAGING_DIR: &str = ".explorer-uploads";

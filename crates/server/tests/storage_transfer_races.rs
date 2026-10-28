@@ -297,3 +297,29 @@ fn copy_and_cross_volume_move_keep_permissions() {
         set_mode(&fixture.data.path().join(dir), 0o700);
     }
 }
+
+#[test]
+fn keep_both_shortens_a_name_near_the_limit() {
+    let name = format!("{}.txt", "n".repeat(248));
+    let fixture = Fixture::new(|media, documents| {
+        write(&media.join(&name), b"mine");
+        write(&documents.join(&name), b"theirs");
+    });
+
+    let placed = storage::copy(
+        fixture.media(),
+        &rel(&name),
+        fixture.documents(),
+        &RelPath::root(),
+        ConflictPolicy::KeepBoth,
+        &storage::plan_transfer(fixture.media(), &rel(&name)).unwrap(),
+        &Hook::new(|_| false),
+    )
+    .unwrap();
+
+    let expected = format!("{} (1).txt", "n".repeat(247));
+    assert_eq!(placed, rel(&expected));
+    let documents = fixture.path("documents");
+    assert_eq!(read(&documents.join(&expected)), "mine");
+    assert_eq!(read(&documents.join(&name)), "theirs");
+}

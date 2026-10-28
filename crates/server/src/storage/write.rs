@@ -6,7 +6,7 @@ use rustix::fs::{Mode, OFlags};
 use rustix::io::Errno;
 use shared::api::conflict::ConflictPolicy;
 
-use super::path::STAGING_DIR;
+use super::path::{MAX_COMPONENT_LEN, STAGING_DIR};
 use super::read::fs_path;
 use super::rename::rename_noreplace;
 use super::{RelPath, StagedId, Staging, StorageError, Volume};
@@ -15,15 +15,32 @@ pub(super) const KEEP_BOTH_MAX: u32 = 999;
 /// A Replace whose target keeps appearing and vanishing gives up after this many tries.
 const REPLACE_ATTEMPTS: usize = 3;
 
-/// `Film.mkv` → `Film (n).mkv`. A leading or trailing dot does not start an extension.
+/// `Film.mkv` → `Film (n).mkv`. A leading or trailing dot does not start an extension. A name
+/// that would get too long loses the end of its stem, or of the whole name when the extension
+/// leaves no room.
 #[must_use]
 pub fn keep_both_name(name: &str, n: u32) -> String {
-    match name.rfind('.') {
-        Some(dot) if dot > 0 && dot + 1 < name.len() => {
-            format!("{} ({n}){}", &name[..dot], &name[dot..])
-        }
-        _ => format!("{name} ({n})"),
+    let suffix = format!(" ({n})");
+    let (stem, extension) = match name.rfind('.') {
+        Some(dot) if dot > 0 && dot + 1 < name.len() => name.split_at(dot),
+        _ => (name, ""),
+    };
+    let (stem, extension) = if suffix.len() + extension.len() < MAX_COMPONENT_LEN {
+        (stem, extension)
+    } else {
+        (name, "")
+    };
+    let room = MAX_COMPONENT_LEN - suffix.len() - extension.len();
+    format!("{}{suffix}{extension}", truncate(stem, room))
+}
+
+/// At most `len` bytes of `s`, cut on a character boundary.
+fn truncate(s: &str, len: usize) -> &str {
+    let mut end = len.min(s.len());
+    while !s.is_char_boundary(end) {
+        end -= 1;
     }
+    &s[..end]
 }
 
 /// `a/b/c` → `a`, `a/b`, `a/b/c`.
@@ -376,6 +393,27 @@ mod tests {
         ] {
             assert_eq!(keep_both_name(name, n), expected, "{name:?} {n}");
         }
+    }
+
+    #[test]
+    fn keep_both_names_fit_in_a_component() {
+        let long_stem = format!("{}.txt", "n".repeat(250));
+        let accented = format!("{}.mkv", "é".repeat(125));
+        let long_extension = format!("a.{}", "x".repeat(252));
+        for (name, n) in [
+            (&long_stem, 1),
+            (&long_stem, 999),
+            (&accented, 12),
+            (&long_extension, 3),
+        ] {
+            let kept = keep_both_name(name, n);
+            assert!(kept.len() <= MAX_COMPONENT_LEN, "{kept:?}");
+            assert!(RelPath::parse(&kept).is_ok(), "{kept:?}");
+            assert!(kept.contains(&format!(" ({n})")), "{kept:?}");
+        }
+        assert!(keep_both_name(&long_stem, 1).ends_with("n (1).txt"));
+        assert!(keep_both_name(&accented, 12).ends_with("é (12).mkv"));
+        assert_ne!(keep_both_name(&long_stem, 1), keep_both_name(&long_stem, 2));
     }
 
     #[test]

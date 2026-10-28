@@ -168,7 +168,8 @@ How an upload is stored:
    name and the log says so); `replace` renames over the destination but never over a
    folder. "Keep both" names `Film.mkv` as `Film (1).mkv`, then `(2)` and so on: the suffix
    goes before the last extension, and a name whose only dot is the first character has none
-   (`.bashrc (1)`). The record then gets its `final_path`; a retried empty `PATCH` at the end
+   (`.bashrc (1)`). A name that would then pass 255 bytes is shortened at the end of its
+   stem (of the whole name if the extension leaves no room). The record then gets its `final_path`; a retried empty `PATCH` at the end
    is answered 204, which makes the last chunk safe to resend. If the commit fails, the
    staged file stays complete and `HEAD` reports the full length; an empty `PATCH` at the end
    retries the commit, and the client sends one before it shows the upload as done. A
