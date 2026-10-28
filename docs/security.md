@@ -191,6 +191,7 @@ action reach outside its volume.
   until it is renamed into place.
 - **Tasks.** A task belongs to the OIDC `sub` that created it; listing, cancelling or
   dismissing another user's task is a 404 `task_not_found`, and the ids are 128 random bits.
+  A user has at most 1000 tasks queued or running; more answer 429 `too_many_tasks`.
   Tasks are kept in memory only: a restart loses them, running ones included, and a
   delete or move interrupted that way may be half done, and a copy may leave a partial
   folder or a staged file in `.explorer-uploads` (the hourly sweep removes the staged file

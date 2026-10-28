@@ -126,8 +126,7 @@ impl TransferTask {
         progress: &Progress,
     ) -> Result<Transferred, StorageError> {
         let plan = storage::plan_transfer(from, &self.path)?;
-        progress.set_files_total(plan.files);
-        progress.set_bytes_total(plan.bytes);
+        progress.set_plan(&plan);
         let placed = storage::copy(
             from,
             &self.path,
@@ -158,8 +157,7 @@ impl TransferTask {
             None
         } else {
             let plan = storage::plan_transfer(from, &self.path)?;
-            progress.set_files_total(plan.files);
-            progress.set_bytes_total(plan.bytes);
+            progress.set_plan(&plan);
             Some(plan)
         };
         let outcome = storage::move_entry(

@@ -29,14 +29,16 @@ impl Tasks {
         spec: TaskSpec,
         request_id: Option<String>,
         op: impl FnOnce(&Progress) -> Result<(), TaskError> + Send + 'static,
-    ) -> TaskInfo {
-        let (id, info) = self.insert(user, spec);
+    ) -> Result<TaskInfo, ApiError> {
+        let (id, info) = self
+            .insert(user, spec)
+            .ok_or_else(ApiError::too_many_tasks)?;
         let tasks = Arc::clone(self);
         tokio::spawn(
             async move { tasks.run(&id, request_id, op).await }
                 .instrument(tracing::Span::current()),
         );
-        info
+        Ok(info)
     }
 
     async fn run(
@@ -105,18 +107,22 @@ mod tests {
     async fn runs_at_most_the_limit_and_cancels_while_queued() {
         let tasks = Arc::new(Tasks::with_limit(1));
         let (release, wait) = mpsc::channel::<()>();
-        let first = tasks.submit("ada", spec(), None, move |_| {
-            wait.recv().unwrap();
-            Ok(())
-        });
-        let ran = Arc::new(AtomicBool::new(false));
-        let second = tasks.submit("ada", spec(), None, {
-            let ran = Arc::clone(&ran);
-            move |_| {
-                ran.store(true, Ordering::Relaxed);
+        let first = tasks
+            .submit("ada", spec(), None, move |_| {
+                wait.recv().unwrap();
                 Ok(())
-            }
-        });
+            })
+            .unwrap();
+        let ran = Arc::new(AtomicBool::new(false));
+        let second = tasks
+            .submit("ada", spec(), None, {
+                let ran = Arc::clone(&ran);
+                move |_| {
+                    ran.store(true, Ordering::Relaxed);
+                    Ok(())
+                }
+            })
+            .unwrap();
 
         until(&tasks, |list| list[0].state == TaskState::Running).await;
         assert_eq!(tasks.list("ada")[1].state, TaskState::Queued);
@@ -136,9 +142,11 @@ mod tests {
     #[tokio::test]
     async fn failure_and_cancellation_outcomes() {
         let tasks = Arc::new(Tasks::new());
-        tasks.submit("ada", spec(), Some("req-1".to_owned()), |_| {
-            Err(ApiError::forbidden().into())
-        });
+        tasks
+            .submit("ada", spec(), Some("req-1".to_owned()), |_| {
+                Err(ApiError::forbidden().into())
+            })
+            .unwrap();
         let list = until(&tasks, |list| list[0].state == TaskState::Failed).await;
         let error = list[0].error.clone().unwrap();
         assert_eq!(error.code, "forbidden");
@@ -146,14 +154,16 @@ mod tests {
 
         let (started, wait_start) = mpsc::channel::<()>();
         let (release, wait) = mpsc::channel::<()>();
-        let stopped = tasks.submit("ada", spec(), None, move |progress| {
-            started.send(()).unwrap();
-            wait.recv().unwrap();
-            if progress.is_cancelled() {
-                return Err(TaskError::Cancelled);
-            }
-            Ok(())
-        });
+        let stopped = tasks
+            .submit("ada", spec(), None, move |progress| {
+                started.send(()).unwrap();
+                wait.recv().unwrap();
+                if progress.is_cancelled() {
+                    return Err(TaskError::Cancelled);
+                }
+                Ok(())
+            })
+            .unwrap();
         tokio::task::spawn_blocking(move || wait_start.recv().unwrap())
             .await
             .unwrap();
@@ -171,11 +181,13 @@ mod tests {
         let tasks = Arc::new(Tasks::new());
         let (started, wait_start) = mpsc::channel::<()>();
         let (release, wait) = mpsc::channel::<()>();
-        let task = tasks.submit("ada", spec(), None, move |_| {
-            started.send(()).unwrap();
-            wait.recv().unwrap();
-            Err(ApiError::forbidden().into())
-        });
+        let task = tasks
+            .submit("ada", spec(), None, move |_| {
+                started.send(()).unwrap();
+                wait.recv().unwrap();
+                Err(ApiError::forbidden().into())
+            })
+            .unwrap();
         tokio::task::spawn_blocking(move || wait_start.recv().unwrap())
             .await
             .unwrap();

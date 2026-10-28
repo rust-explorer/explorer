@@ -8,8 +8,8 @@ use shared::api::error::ErrorBody;
 use shared::api::tasks::{TaskInfo, TaskSpec, TaskState};
 use tokio::sync::Semaphore;
 
-use super::{FINISHED_TTL, MAX_RUNNING, MAX_USAGE_TREES};
-use crate::storage::UsageTree;
+use super::{FINISHED_TTL, MAX_ACTIVE_PER_USER, MAX_RUNNING, MAX_USAGE_TREES};
+use crate::storage::{TransferPlan, UsageTree};
 
 const ID_LEN: usize = 32;
 
@@ -52,6 +52,12 @@ impl Progress {
         let _ = self.bytes_total.set(n);
     }
 
+    /// The totals of a copy or move, from its plan.
+    pub fn set_plan(&self, plan: &TransferPlan) {
+        self.set_files_total(plan.files);
+        self.set_bytes_total(plan.bytes);
+    }
+
     pub fn set_final_path(&self, path: String) {
         let _ = self.final_path.set(path);
     }
@@ -92,9 +98,8 @@ impl crate::storage::TransferProgress for Progress {
         Progress::skip(self);
     }
 
-    fn planned(&self, plan: &crate::storage::TransferPlan) {
-        self.set_files_total(plan.files);
-        self.set_bytes_total(plan.bytes);
+    fn planned(&self, plan: &TransferPlan) {
+        self.set_plan(plan);
     }
 }
 
@@ -274,9 +279,18 @@ impl Tasks {
         Some(Stopped::Cancelled)
     }
 
-    /// Registers a queued task for `user`.
-    pub(super) fn insert(&self, user: &str, spec: TaskSpec) -> (String, TaskInfo) {
+    /// Registers a queued task for `user`; `None` when they already have
+    /// [`MAX_ACTIVE_PER_USER`] tasks queued or running.
+    pub(super) fn insert(&self, user: &str, spec: TaskSpec) -> Option<(String, TaskInfo)> {
         let mut entries = self.lock();
+        let active = entries
+            .by_id
+            .values()
+            .filter(|entry| entry.user == user && entry.state.is_active())
+            .count();
+        if active >= MAX_ACTIVE_PER_USER {
+            return None;
+        }
         let id = random_id();
         let seq = entries.next_seq;
         entries.next_seq += 1;
@@ -292,7 +306,7 @@ impl Tasks {
         };
         let info = entry.info(&id);
         entries.by_id.insert(id.clone(), entry);
-        (id, info)
+        Some((id, info))
     }
 
     /// Marks a queued task running; `None` when it was cancelled meanwhile.
@@ -373,9 +387,9 @@ mod tests {
         let tasks = Tasks::new();
         let ids: Vec<String> = ["a", "b", "c"]
             .iter()
-            .map(|path| tasks.insert("ada", spec(path)).0)
+            .map(|path| tasks.insert("ada", spec(path)).unwrap().0)
             .collect();
-        tasks.insert("bob", spec("d"));
+        tasks.insert("bob", spec("d")).unwrap();
 
         let listed: Vec<String> = tasks.list("ada").into_iter().map(|task| task.id).collect();
         assert_eq!(listed, ids);
@@ -388,10 +402,25 @@ mod tests {
     }
 
     #[test]
+    fn caps_the_active_tasks_of_a_user() {
+        let tasks = Tasks::new();
+        let ids: Vec<String> = (0..MAX_ACTIVE_PER_USER)
+            .map(|_| tasks.insert("ada", spec("a")).unwrap().0)
+            .collect();
+        assert!(tasks.insert("ada", spec("a")).is_none());
+        assert!(tasks.insert("bob", spec("a")).is_some());
+
+        tasks.start(&ids[0]).unwrap();
+        tasks.finish(&ids[0], Outcome::Done);
+        assert!(tasks.insert("ada", spec("a")).is_some());
+        assert!(tasks.insert("ada", spec("a")).is_none());
+    }
+
+    #[test]
     fn prunes_finished_tasks_after_the_ttl() {
         let tasks = Tasks::new();
-        let (done, _) = tasks.insert("ada", spec("a"));
-        let (queued, _) = tasks.insert("ada", spec("b"));
+        let (done, _) = tasks.insert("ada", spec("a")).unwrap();
+        let (queued, _) = tasks.insert("ada", spec("b")).unwrap();
         tasks.start(&done).unwrap();
         tasks.finish(&done, Outcome::Done);
 
@@ -410,8 +439,8 @@ mod tests {
     #[test]
     fn cancel_or_dismiss_by_state() {
         let tasks = Tasks::new();
-        let (queued, _) = tasks.insert("ada", spec("a"));
-        let (running, _) = tasks.insert("ada", spec("b"));
+        let (queued, _) = tasks.insert("ada", spec("a")).unwrap();
+        let (running, _) = tasks.insert("ada", spec("b")).unwrap();
         let progress = tasks.start(&running).unwrap();
 
         assert_eq!(tasks.cancel_or_dismiss("bob", &queued), None);
@@ -438,7 +467,7 @@ mod tests {
     #[test]
     fn progress_shows_in_the_info() {
         let tasks = Tasks::new();
-        let (id, info) = tasks.insert("ada", spec("a"));
+        let (id, info) = tasks.insert("ada", spec("a")).unwrap();
         assert_eq!((info.files_total, info.bytes_total), (None, None));
         let progress = tasks.start(&id).unwrap();
         progress.set_files_total(3);
@@ -478,7 +507,7 @@ mod tests {
             &Progress::default(),
         )
         .unwrap();
-        let (id, _) = tasks.insert(user, spec);
+        let (id, _) = tasks.insert(user, spec).unwrap();
         let progress = tasks.start(&id).unwrap();
         progress.set_usage(tree);
         assert!(tasks.usage(user, &id).is_none());
@@ -532,7 +561,7 @@ mod tests {
     #[test]
     fn failure_keeps_its_error() {
         let tasks = Tasks::new();
-        let (id, _) = tasks.insert("ada", spec("a"));
+        let (id, _) = tasks.insert("ada", spec("a")).unwrap();
         tasks.start(&id).unwrap();
         let error = ErrorBody {
             code: "permission_denied".to_owned(),

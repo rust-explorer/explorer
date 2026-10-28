@@ -73,6 +73,7 @@ error-invalid_destination = { $path } can't be moved or copied there.
 error-task_not_found = This task no longer exists on the server.
 error-favorites_full = You can't have more than 100 favorites. Remove one first.
 error-thumbnail_unavailable = No preview is available for this file.
+error-too_many_tasks = Too many tasks are waiting. Try again once some have finished.
 upload = Upload
 upload-open = Upload files or a folder
 upload-files = Files…

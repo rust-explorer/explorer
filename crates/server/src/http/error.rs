@@ -9,6 +9,7 @@ use shared::api::error::ErrorBody;
 use crate::favorites::MAX_FAVORITES;
 use crate::http::request_id::request_id;
 use crate::storage::{InvalidPath, StorageError};
+use crate::tasks::MAX_ACTIVE_PER_USER;
 
 #[derive(Debug)]
 pub struct ApiError {
@@ -123,6 +124,15 @@ impl ApiError {
     #[must_use]
     pub fn task_not_found() -> Self {
         Self::new(StatusCode::NOT_FOUND, "task_not_found", "Task not found")
+    }
+
+    #[must_use]
+    pub fn too_many_tasks() -> Self {
+        Self::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too_many_tasks",
+            format!("At most {MAX_ACTIVE_PER_USER} tasks can wait or run at once"),
+        )
     }
 
     /// `offset` is where the upload actually stands.

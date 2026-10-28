@@ -73,6 +73,7 @@ error-invalid_destination = { $path } ne peut pas être déplacé ou copié à c
 error-task_not_found = Cette tâche n'existe plus sur le serveur.
 error-favorites_full = Vous ne pouvez pas avoir plus de 100 favoris. Retirez-en un d'abord.
 error-thumbnail_unavailable = Aucun aperçu n'est disponible pour ce fichier.
+error-too_many_tasks = Trop de tâches sont en attente. Réessayez quand certaines seront terminées.
 upload = Uploader
 upload-open = Uploader des fichiers ou un dossier
 upload-files = Fichiers…
