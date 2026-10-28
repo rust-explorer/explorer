@@ -290,8 +290,9 @@ fn copy_and_cross_volume_move_keep_permissions() {
     assert_eq!(mode(&documents.join("secret.txt")), 0o600);
     assert_eq!(mode(&documents.join("D")), 0o700);
     assert_eq!(mode(&documents.join("D/run.sh")), 0o750);
-    assert_eq!(mode(&documents.join("D/Locked")), 0o500);
-    assert_eq!(mode(&documents.join("D/Locked/read-only.txt")), 0o400);
+    // The owner, the container user, keeps read and write (and search on folders).
+    assert_eq!(mode(&documents.join("D/Locked")), 0o700);
+    assert_eq!(mode(&documents.join("D/Locked/read-only.txt")), 0o600);
     assert_eq!(read(&documents.join("D/Locked/read-only.txt")), "r");
     for dir in ["media/D/Locked", "documents/D/Locked"] {
         set_mode(&fixture.data.path().join(dir), 0o700);

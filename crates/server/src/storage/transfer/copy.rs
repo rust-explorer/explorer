@@ -5,7 +5,7 @@ use std::time::SystemTime;
 use cap_std::fs::MetadataExt as _;
 use shared::api::conflict::ConflictPolicy;
 
-use super::mode::{kept_mode, set_dir_mode, set_file_mode};
+use super::mode::{kept_dir_mode, kept_file_mode, set_dir_mode, set_file_mode};
 use super::remove::{Expect, Removed, Stamp, remove_if};
 use super::{COPY_CHUNK, TransferPlan, TransferProgress};
 use crate::storage::read::Identity;
@@ -111,7 +111,7 @@ pub(super) fn copy_taking(
             for (dir, id, mode) in made.dir_modes.iter().rev() {
                 set_dir_mode(dest, dir, *id, *mode);
             }
-            set_dir_mode(dest, &top, made_top, kept_mode(top_meta.mode()));
+            set_dir_mode(dest, &top, made_top, kept_dir_mode(top_meta.mode()));
             Ok((top, taken))
         }
         Err(err) => {
@@ -246,7 +246,8 @@ impl Files<'_> {
                     made.entries.push((index, None, Expect::Dir(created)));
                     if let Some(source) = source {
                         taken.dirs.push((index, Identity::of(&source)));
-                        made.dir_modes.push((to, created, kept_mode(source.mode())));
+                        made.dir_modes
+                            .push((to, created, kept_dir_mode(source.mode())));
                     }
                 }
                 WalkItem::File {
@@ -281,11 +282,10 @@ impl Files<'_> {
                 if self.progress.is_cancelled() {
                     return Err(StorageError::Cancelled);
                 }
-                set_file_mode(&output, mode, false, self.dest);
+                set_file_mode(&output, mode, self.dest);
                 let placed = self
                     .dest
                     .commit_staged(self.staging, &id, to, conflict, modified)?;
-                set_file_mode(&output, mode, true, self.dest);
                 let made = output
                     .metadata()
                     .map_err(|err| StorageError::from_io(&placed, err))?;
@@ -331,7 +331,7 @@ impl Files<'_> {
         let meta = input.metadata().map_err(read_err)?;
         let (source, mode) = (
             Stamp::source(&meta, entry.as_ref()),
-            kept_mode(meta.permissions().mode()),
+            kept_file_mode(meta.permissions().mode()),
         );
         let mut output = self.staging.create(id)?;
         let mut chunk = vec![0; COPY_CHUNK];

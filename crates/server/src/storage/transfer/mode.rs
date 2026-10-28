@@ -6,28 +6,28 @@ use rustix::fs::{Mode, OFlags};
 use crate::storage::read::{Identity, fs_path};
 use crate::storage::{RelPath, Volume};
 
-/// The permission bits a copy keeps: read, write and execute for each class. Set-id and sticky
-/// bits are dropped, as the container user could not keep them on a file it creates anyway.
-pub(super) fn kept_mode(mode: u32) -> u32 {
-    mode & 0o777
+/// The permission bits a copied file keeps: read, write and execute for each class, plus owner
+/// read and write, since the copy belongs to the container user, who must still be able to
+/// read, replace and delete it. Set-id and sticky bits are dropped, as the container user could
+/// not keep them on a file it creates anyway.
+pub(super) fn kept_file_mode(mode: u32) -> u32 {
+    mode & 0o777 | 0o600
 }
 
-/// Gives a copied file its source's permissions. A file the owner can't write gets them only
-/// once placed (`placed`), since placing it opens it for writing; until then it has them plus
-/// owner write, never more than its source otherwise.
-pub(super) fn set_file_mode(file: &File, mode: u32, placed: bool, volume: &Volume) {
-    let mode = if placed { mode } else { mode | 0o200 };
-    if placed && mode & 0o200 != 0 {
-        return;
-    }
+/// Like [`kept_file_mode`], for a folder, which keeps owner read, write and search.
+pub(super) fn kept_dir_mode(mode: u32) -> u32 {
+    mode & 0o777 | 0o700
+}
+
+/// Gives a copied file its source's permissions, as [`kept_file_mode`] made them.
+pub(super) fn set_file_mode(file: &File, mode: u32, volume: &Volume) {
     if let Err(err) = file.set_permissions(Permissions::from_mode(mode)) {
         tracing::debug!(volume = volume.name(), error = %err, "cannot set a copied file's permissions");
     }
 }
 
 /// Gives the copied folder at `path` the permissions `mode`, if it is still the folder
-/// `created`.
-/// Done once its content is in, since a folder may not let its owner write in it.
+/// `created`, once its content is in.
 pub(super) fn set_dir_mode(volume: &Volume, path: &RelPath, created: Identity, mode: u32) {
     let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
         return;

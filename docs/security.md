@@ -259,7 +259,10 @@ action reach outside its volume.
 - **Permissions.** A copy, and a move to another volume, give each file and folder the
   permission bits of its source (read, write and execute for owner, group and others), so a
   private `0600` file stays private; set-user-ID, set-group-ID and sticky bits are dropped.
-  The owner and group are the container user's, as for any file it creates. A move within a
+  The owner and group are the container user's, as for any file it creates, and the owner
+  always keeps read and write on files and read, write and search on folders (a `0555`
+  folder is copied as `0755`, a `0444` file as `0644`), so Explorer can still read, change
+  and delete its copy. A move within a
   volume is a rename and keeps everything. On a filesystem without Unix permissions (exFAT,
   some SMB mounts) the copy gets whatever that filesystem gives.
 - **Tasks.** A task belongs to the OIDC `sub` that created it; listing, cancelling or
