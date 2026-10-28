@@ -265,7 +265,7 @@ All of these only read, so they work on read-only volumes.
 | `GET /api/favorites` | The user's favorite folders, oldest first: `volume`, `path` and `exists` (false once the volume or the folder is gone or no longer a folder). |
 | `PUT /api/favorites` | Body `{"volume", "path"}`. Adds a folder (it must exist and be readable); adding one that is already there is a no-op. Answers 204. |
 | `DELETE /api/favorites?volume=&path=` | Removes one, whether or not it still exists. Answers 204. |
-| `GET /api/volumes/{volume}/search?q=` | Case-insensitive substring match on names under the whole volume: `{volume, query, hits, truncated}`, each hit with `path`, `kind` (`dir` or `file`), `size` and `modified_ms`. |
+| `GET /api/volumes/{volume}/search?q=` | Case- and accent-insensitive substring match on names under the whole volume, whatever their Unicode normalisation (a name stored decomposed, as macOS clients write it, matches a query typed composed): `{volume, query, hits, truncated}`, each hit with `path`, `kind` (`dir` or `file`), `size` and `modified_ms`. |
 | `GET /files/thumbnail?volume=&path=&v=` | A preview of an image, at most 320 px on its longest side. `v` only busts the browser cache. |
 
 Favorites are stored per user (the OIDC `sub`) in the `favorites` table of `explorer.db`, at
