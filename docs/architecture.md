@@ -132,6 +132,7 @@ New error codes (JSON error shape as above):
 | `read_only_volume` | 403 | The volume is read-only. |
 | `insufficient_storage` | 507 | `Upload-Length` is larger than the volume's free space less what its unfinished uploads still have to receive, or the disk filled up while writing. |
 | `too_many_uploads` | 429 | The user already has 1000 unfinished uploads (`MAX_PENDING_UPLOADS`). |
+| `too_many_patches` | 429 | The user already has 8 `PATCH` requests in flight (`MAX_PATCHES_PER_USER`); retry later. |
 | `upload_not_found` | 404 | Unknown id, another user's upload, or an upload whose staged file is gone. |
 | `offset_mismatch` | 409 | `Upload-Offset` is not the server's offset; `details.offset` carries the right one. |
 | `upload_busy` | 423 | Another request is writing or finishing this upload. |
@@ -402,7 +403,7 @@ browser. The engine lives in `crates/web/src/uploads`:
   whose volume, path, size and modification time all match, so reloading and picking the
   same file again continues from the server's offset.
 - After a transient failure (network error, a 5xx answer that is not an API error, such as a
-  proxy's 502, `internal`, `upload_busy`, `offset_mismatch`) the item asks the server for its offset and retries after
+  proxy's 502, `internal`, `upload_busy`, `offset_mismatch`, `too_many_patches`) the item asks the server for its offset and retries after
   `min(1 s x 2^(attempt-1), 30 s)`, until the user cancels. A `PATCH` that reports no
   progress for 120 seconds is aborted and counts as a network error. An upload the server no
   longer knows (`upload_not_found`) is recreated from the start, once. When that offset is

@@ -77,6 +77,7 @@ error-favorites_full = You can't have more than { $max } favorites. Remove one f
 error-thumbnail_unavailable = No preview is available for this file.
 error-too_many_tasks = Too many tasks are waiting. Try again once some have finished.
 error-too_many_uploads = You have too many unfinished uploads. Cancel some, or wait a day for the abandoned ones to be cleared.
+error-too_many_patches = Too many uploads are being sent at once from your tabs or devices.
 upload = Upload
 upload-open = Upload files or a folder
 upload-files = Files…

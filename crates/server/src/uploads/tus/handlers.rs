@@ -4,6 +4,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::http::header::{self, HeaderMap};
 use axum::response::{IntoResponse, Response};
+use shared::api::uploads::MAX_PATCHES_PER_USER;
 use shared::tus::TUS_VERSION;
 
 use super::admit::{check_pending_count, check_space};
@@ -199,6 +200,13 @@ pub(super) async fn append(
         return committed(&record, offset);
     }
 
+    let Some(slot) = state
+        .uploads
+        .try_start_patch(&user.sub, MAX_PATCHES_PER_USER)
+    else {
+        tracing::warn!(user = user.sub, "too many upload requests in flight");
+        return Err(ApiError::too_many_patches());
+    };
     let Some(lock) = state.uploads.try_lock(&record.id) else {
         return Err(ApiError::upload_busy());
     };
@@ -219,9 +227,10 @@ pub(super) async fn append(
 
     // A task of its own, holding the lock: if the client goes away and this handler is dropped,
     // the writes still complete and the commit still gets recorded before the lock is released.
-    tokio::spawn(write_and_commit(
-        state, user.sub, record, staged, body, lock,
-    ))
+    tokio::spawn(async move {
+        let _slot = slot;
+        write_and_commit(state, user.sub, record, staged, body, lock).await
+    })
     .await
     .map_err(ApiError::internal)?
 }

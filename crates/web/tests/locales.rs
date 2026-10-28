@@ -105,6 +105,7 @@ fn every_api_error_code_has_a_message() {
         "favorites_full",
         "thumbnail_unavailable",
         "too_many_uploads",
+        "too_many_patches",
     ]
     .iter()
     .map(|code| format!("error-{code}"))

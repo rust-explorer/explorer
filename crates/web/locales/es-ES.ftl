@@ -77,6 +77,7 @@ error-favorites_full = No puedes tener más de { $max } favoritos. Quita uno pri
 error-thumbnail_unavailable = No hay vista previa disponible para este archivo.
 error-too_many_tasks = Hay demasiadas tareas en espera. Inténtalo de nuevo cuando terminen algunas.
 error-too_many_uploads = Tienes demasiadas subidas sin terminar. Cancela algunas o espera un día a que se borren las abandonadas.
+error-too_many_patches = Se están enviando demasiadas subidas a la vez desde tus pestañas o dispositivos.
 upload = Subir
 upload-open = Subir archivos o una carpeta
 upload-files = Archivos…

@@ -836,6 +836,17 @@ mod tests {
     }
 
     #[test]
+    fn too_many_patches_is_retried() {
+        let mut queue = Queue::default();
+        queue.add(files(1, 10), &[], 0);
+        created(&mut queue, 0, 0);
+        assert_eq!(
+            fail(&mut queue, 0, server("too_many_patches"), 0),
+            [Effect::WakeAt { at_ms: 1000 }]
+        );
+    }
+
+    #[test]
     fn unauthenticated_fails() {
         let mut queue = Queue::default();
         queue.add(files(1, 10), &[], 0);

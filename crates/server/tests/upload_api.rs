@@ -22,7 +22,7 @@ use http_body_util::BodyExt;
 use serde_json::json;
 use shared::api::conflict::ConflictPolicy;
 use shared::api::error::ErrorBody;
-use shared::api::uploads::{MAX_PENDING_UPLOADS, PendingUpload};
+use shared::api::uploads::{MAX_PATCHES_PER_USER, MAX_PENDING_UPLOADS, PendingUpload};
 use shared::tus::encode_metadata;
 use sqlx::SqlitePool;
 use tempfile::TempDir;
@@ -1168,4 +1168,46 @@ async fn free_space_counts_what_pending_uploads_still_need() {
         StatusCode::NO_CONTENT
     );
     created(&mut s.client, "second.bin", length, &[]).await;
+}
+
+#[tokio::test]
+async fn patches_in_flight_are_capped_per_user() {
+    let mut s = setup().await;
+    let mut held = Vec::new();
+    for i in 0..MAX_PATCHES_PER_USER {
+        let location = created(&mut s.client, &format!("held{i}.bin"), 8, &[]).await;
+        let (tx, body) = channel_body();
+        let mut client = clone_client(&s.client);
+        let req = patch_request(&location, 0, body);
+        let task = tokio::spawn(async move { client.send(req).await });
+        tx.send(Ok(Bytes::from_static(b"abcd"))).await.unwrap();
+        let mut written = 0;
+        for _ in 0..200 {
+            written = offset_of(&head(&mut s.client, &location).await);
+            if written == 4 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(written, 4);
+        held.push((tx, task));
+    }
+    let location = created(&mut s.client, "next.bin", 3, &[]).await;
+
+    let res = patch(&mut s.client, &location, 0, b"abc").await;
+    error(res, StatusCode::TOO_MANY_REQUESTS, "too_many_patches").await;
+
+    s.fake.claims(json!({ "sub": "other-user" }));
+    let mut other = Client::signed_in(s.app.clone(), &s.fake).await;
+    let theirs = created(&mut other, "theirs.bin", 3, &[]).await;
+    assert_eq!(
+        patch(&mut other, &theirs, 0, b"abc").await.status(),
+        StatusCode::NO_CONTENT
+    );
+
+    let (tx, task) = held.pop().unwrap();
+    drop(tx);
+    assert_eq!(task.await.unwrap().status(), StatusCode::NO_CONTENT);
+    let res = patch(&mut s.client, &location, 0, b"abc").await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
 }

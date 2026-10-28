@@ -147,7 +147,9 @@ Names that are not valid UTF-8 are skipped with a warning.
   uploads cannot together promise more than the disk holds. A body longer than the declared
   length is cut off (413 `upload_too_large`).
   Disk-full during a write is 507 `insufficient_storage`. A body that stalls for 60 seconds
-  is dropped. Each upload is written by one request at a time (423 `upload_busy`).
+  is dropped. Each upload is written by one request at a time (423 `upload_busy`), and a
+  user has at most 8 `PATCH` requests in flight (429 `too_many_patches`, which the web app
+  retries), so a client that trickles bytes ties up a bounded number of open files.
 - **Cleanup.** An upload untouched for 24 hours is removed with its staged file, as is a
   stale staged file with no record. The sweep runs at startup and every hour.
 - **Logs.** Uploads are logged at `info` with the user's `sub`, the volume and the path (and

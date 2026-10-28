@@ -31,11 +31,14 @@ const COLUMNS: &str = "id, user_sub, volume, path, length, modified_ms, conflict
 
 /// Locked uploads, each with whether a cancel arrived while it was held.
 type Locks = Arc<Mutex<HashMap<StagedId, bool>>>;
+/// `PATCH` requests in flight per user.
+type Patches = Arc<Mutex<HashMap<String, usize>>>;
 
 pub struct Uploads {
     pool: SqlitePool,
     locks: Locks,
     admission: tokio::sync::Mutex<()>,
+    patches: Patches,
 }
 
 /// Held while a request works on an upload; released on drop.
@@ -63,6 +66,24 @@ impl Drop for UploadLock {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&self.id);
+    }
+}
+
+/// One of a user's `PATCH` requests in flight; released on drop.
+pub struct PatchSlot {
+    user_sub: String,
+    patches: Patches,
+}
+
+impl Drop for PatchSlot {
+    fn drop(&mut self) {
+        let mut patches = self.patches.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(count) = patches.get_mut(&self.user_sub) {
+            *count -= 1;
+            if *count == 0 {
+                patches.remove(&self.user_sub);
+            }
+        }
     }
 }
 
@@ -102,6 +123,7 @@ impl Uploads {
             pool,
             locks: Arc::default(),
             admission: tokio::sync::Mutex::new(()),
+            patches: Arc::default(),
         }
     }
 
@@ -217,6 +239,21 @@ impl Uploads {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    /// `None` while the user already has `max` requests in flight.
+    #[must_use]
+    pub fn try_start_patch(&self, user_sub: &str, max: usize) -> Option<PatchSlot> {
+        let mut patches = self.patches.lock().unwrap_or_else(PoisonError::into_inner);
+        let count = patches.entry(user_sub.to_owned()).or_default();
+        if *count >= max {
+            return None;
+        }
+        *count += 1;
+        Some(PatchSlot {
+            user_sub: user_sub.to_owned(),
+            patches: Arc::clone(&self.patches),
+        })
     }
 
     /// `None` while another request holds the upload.

@@ -77,6 +77,7 @@ error-favorites_full = Vous ne pouvez pas avoir plus de { $max } favoris. Retire
 error-thumbnail_unavailable = Aucun aperçu n'est disponible pour ce fichier.
 error-too_many_tasks = Trop de tâches sont en attente. Réessayez quand certaines seront terminées.
 error-too_many_uploads = Vous avez trop d'uploads inachevés. Annulez-en, ou attendez un jour que les uploads abandonnés soient effacés.
+error-too_many_patches = Trop d'uploads sont envoyés en même temps depuis vos onglets ou appareils.
 upload = Uploader
 upload-open = Uploader des fichiers ou un dossier
 upload-files = Fichiers…
