@@ -238,7 +238,7 @@ pub(super) async fn cancel(
     id: Result<Path<String>, PathRejection>,
 ) -> Result<StatusCode, ApiError> {
     let record = find(&state, &user, id).await?;
-    let Some(_lock) = state.uploads.try_lock(&record.id) else {
+    let Some(_lock) = state.uploads.lock_or_request_cancel(&record.id) else {
         return Err(ApiError::upload_busy());
     };
     let Some(record) = reload(&state, &record).await? else {

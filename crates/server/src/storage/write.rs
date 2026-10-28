@@ -48,22 +48,57 @@ impl Volume {
     }
 
     pub fn create_dir_all(&self, dir: &RelPath) -> Result<(), StorageError> {
+        self.create_missing_dirs(dir).map(drop)
+    }
+
+    /// Like [`Volume::create_dir_all`], returning the folders it created, outermost first. A
+    /// dangling symlink on the way is not a folder.
+    fn create_missing_dirs(&self, dir: &RelPath) -> Result<Vec<RelPath>, StorageError> {
         self.refuse_reserved(dir)?;
+        let mut created = Vec::new();
+        let not_a_dir = |prefix: RelPath| {
+            if prefix == *dir {
+                StorageError::AlreadyExists(prefix)
+            } else {
+                StorageError::NotADirectory(prefix)
+            }
+        };
         for prefix in prefixes(dir) {
-            match self.is_dir_at(&prefix)? {
-                Some(true) => {}
-                Some(false) if prefix == *dir => return Err(StorageError::AlreadyExists(prefix)),
-                Some(false) => return Err(StorageError::NotADirectory(prefix)),
-                None => match self.root.create_dir(prefix.as_str()) {
-                    Ok(()) => {}
-                    Err(err)
-                        if err.kind() == io::ErrorKind::AlreadyExists
-                            && self.is_dir_at(&prefix)? == Some(true) => {}
-                    Err(err) => return Err(StorageError::from_io(&prefix, err)),
+            let result = match self.is_dir_at(&prefix) {
+                Ok(Some(true)) => Ok(()),
+                Ok(Some(false)) => Err(not_a_dir(prefix.clone())),
+                Ok(None) => match self.root.create_dir(prefix.as_str()) {
+                    Ok(()) => {
+                        created.push(prefix.clone());
+                        Ok(())
+                    }
+                    Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+                        match self.is_dir_at(&prefix) {
+                            Ok(Some(true)) => Ok(()),
+                            Ok(_) => Err(not_a_dir(prefix.clone())),
+                            Err(err) => Err(err),
+                        }
+                    }
+                    Err(err) => Err(StorageError::from_io(&prefix, err)),
                 },
+                Err(err) => Err(err),
+            };
+            if let Err(err) = result {
+                self.remove_created_dirs(&created);
+                return Err(err);
             }
         }
-        Ok(())
+        Ok(created)
+    }
+
+    /// Removes folders a failed operation created, deepest first, as long as they are empty.
+    fn remove_created_dirs(&self, created: &[RelPath]) {
+        for dir in created.iter().rev() {
+            if let Err(err) = self.root.remove_dir(dir.as_str()) {
+                tracing::debug!(volume = self.name(), path = dir.as_str(), error = %err, "created folder left in place");
+                return;
+            }
+        }
     }
 
     /// Whether an upload to `path` would be accepted now; missing parent folders are fine.
@@ -80,7 +115,13 @@ impl Volume {
             match self.is_dir_at(&prefix)? {
                 Some(true) => {}
                 Some(false) => return Err(StorageError::NotADirectory(prefix)),
-                None => return Ok(()),
+                None => {
+                    return match self.root.symlink_metadata(prefix.as_str()) {
+                        Ok(_) => Err(StorageError::NotADirectory(prefix)),
+                        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+                        Err(err) => Err(StorageError::from_io(&prefix, err)),
+                    };
+                }
             }
         }
         match conflict {
@@ -135,28 +176,49 @@ impl Volume {
             return Err(StorageError::IsADirectory(dest.clone()));
         };
         self.refuse_reserved(dest)?;
-        self.create_dir_all(&parent)?;
+        let created = self.create_missing_dirs(&parent)?;
+        let placed = self.place_staged(staging, id, &parent, name, conflict, modified);
+        if placed.is_err() {
+            self.remove_created_dirs(&created);
+        }
+        placed
+    }
+
+    fn place_staged(
+        &self,
+        staging: &Staging,
+        id: &StagedId,
+        parent: &RelPath,
+        name: &str,
+        conflict: ConflictPolicy,
+        modified: Option<SystemTime>,
+    ) -> Result<RelPath, StorageError> {
         let parent_dir = self
             .root
-            .open_dir(fs_path(&parent))
-            .map_err(|err| StorageError::from_io(&parent, err))?;
+            .open_dir(fs_path(parent))
+            .map_err(|err| StorageError::from_io(parent, err))?;
 
-        let file = staging.open_write(id)?;
-        let staged_err = |err| StorageError::from_io(&RelPath::root(), err);
+        let dest = parent.join(name)?;
+        let staged_err = |err| StorageError::from_io(&dest, err);
+        let file = staging.open_staged(id).map_err(staged_err)?;
         if let Some(modified) = modified {
             file.set_modified(modified).map_err(staged_err)?;
         }
         file.sync_all().map_err(staged_err)?;
         drop(file);
 
-        self.place(
+        let placed = self.place(
             &staging.dir,
             id.as_str(),
             &parent_dir,
-            &parent,
+            parent,
             name,
             conflict,
-        )
+        )?;
+        if let Err(err) = sync_dir(&parent_dir) {
+            tracing::warn!(volume = self.name(), path = parent.as_str(), error = %err, "cannot sync the folder of a committed file");
+        }
+        Ok(placed)
     }
 
     /// Renames `from_name` to `to_name`, or under `Fail` and `KeepBoth` to the first free
@@ -224,6 +286,14 @@ impl Volume {
             Err(err) => Err(StorageError::from_io(path, err)),
         }
     }
+}
+
+/// cap-std may hold folders as `O_PATH` descriptors, which cannot be synced: reopen it first.
+fn sync_dir(dir: &Dir) -> io::Result<()> {
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
+    let fd = rustix::fs::openat(dir, c".", flags, Mode::empty())?;
+    rustix::fs::fsync(fd)?;
+    Ok(())
 }
 
 /// Follows a symlink, like the read operations; a dangling one is not a folder.

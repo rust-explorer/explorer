@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -29,15 +29,31 @@ pub struct UploadRecord {
 const COLUMNS: &str = "id, user_sub, volume, path, length, modified_ms, conflict, final_path, \
                        created_at, updated_at";
 
+/// Locked uploads, each with whether a cancel arrived while it was held.
+type Locks = Arc<Mutex<HashMap<StagedId, bool>>>;
+
 pub struct Uploads {
     pool: SqlitePool,
-    locks: Arc<Mutex<HashSet<StagedId>>>,
+    locks: Locks,
 }
 
 /// Held while a request works on an upload; released on drop.
 pub struct UploadLock {
     id: StagedId,
-    locks: Arc<Mutex<HashSet<StagedId>>>,
+    locks: Locks,
+}
+
+impl UploadLock {
+    /// Whether a cancel arrived since the lock was taken; checked right before committing.
+    #[must_use]
+    pub fn cancel_requested(&self) -> bool {
+        self.locks
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&self.id)
+            .copied()
+            .unwrap_or_default()
+    }
 }
 
 impl Drop for UploadLock {
@@ -170,12 +186,28 @@ impl Uploads {
     /// `None` while another request holds the upload.
     #[must_use]
     pub fn try_lock(&self, id: &StagedId) -> Option<UploadLock> {
-        let inserted = self
-            .locks
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(id.clone());
-        inserted.then(|| UploadLock {
+        let mut locks = self.locks.lock().unwrap_or_else(PoisonError::into_inner);
+        if locks.contains_key(id) {
+            return None;
+        }
+        locks.insert(id.clone(), false);
+        Some(UploadLock {
+            id: id.clone(),
+            locks: Arc::clone(&self.locks),
+        })
+    }
+
+    /// Like [`Uploads::try_lock`]; while another request holds the upload, also asks it not to
+    /// commit.
+    #[must_use]
+    pub fn lock_or_request_cancel(&self, id: &StagedId) -> Option<UploadLock> {
+        let mut locks = self.locks.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(cancelled) = locks.get_mut(id) {
+            *cancelled = true;
+            return None;
+        }
+        locks.insert(id.clone(), false);
+        Some(UploadLock {
             id: id.clone(),
             locks: Arc::clone(&self.locks),
         })

@@ -1,5 +1,6 @@
 use std::fmt::Write;
 use std::io::{self, Seek, SeekFrom};
+use std::os::unix::fs::MetadataExt;
 use std::time::SystemTime;
 
 use cap_std::fs::{Dir, OpenOptions, OpenOptionsExt};
@@ -61,7 +62,7 @@ impl Staging {
     }
 
     pub fn open_append(&self, id: &StagedId) -> Result<(std::fs::File, u64), StorageError> {
-        let mut file = self.open_write(id)?;
+        let mut file = self.open_staged(id).map_err(map_err)?;
         let len = file.seek(SeekFrom::End(0)).map_err(map_err)?;
         Ok((file, len))
     }
@@ -100,13 +101,21 @@ impl Staging {
         Ok(files)
     }
 
-    pub(super) fn open_write(&self, id: &StagedId) -> Result<std::fs::File, StorageError> {
+    /// Opens a staged file for writing; anything but a regular file with a single link is
+    /// refused, so data never lands in a file reachable from elsewhere.
+    pub(super) fn open_staged(&self, id: &StagedId) -> io::Result<std::fs::File> {
         let mut options = OpenOptions::new();
         options
             .write(true)
             .custom_flags(OFlags::NOFOLLOW.bits().cast_signed());
-        let file = self.dir.open_with(id.as_str(), &options).map_err(map_err)?;
-        Ok(file.into_std())
+        let file = self.dir.open_with(id.as_str(), &options)?.into_std();
+        let meta = file.metadata()?;
+        if !meta.is_file() || meta.nlink() != 1 {
+            return Err(io::Error::other(
+                "staged upload is not a regular file with a single link",
+            ));
+        }
+        Ok(file)
     }
 }
 
