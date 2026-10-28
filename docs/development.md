@@ -114,3 +114,10 @@ docker run --rm -p 8080:8080 --env-file .env.example explorer:dev
 
 The image is built for `linux/amd64` only. On another architecture the build runs under
 emulation and is slow.
+
+The build downloads nothing unverified. Base images are pinned by digest (Dependabot
+proposes updates monthly). `dx`, and the tools it would otherwise fetch at build time
+(`wasm-bindgen`, `wasm-opt`, `tailwindcss`, `esbuild`), are downloaded in the `web` stage
+and checked against SHA-256 sums written in the `Dockerfile`; `dx` runs with
+`NO_DOWNLOADS=1`. When Cargo.lock moves `wasm-bindgen` or dx is upgraded, update the
+versions and sums there (GitHub shows each release asset's SHA-256).
