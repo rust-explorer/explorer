@@ -1,7 +1,6 @@
 use dioxus::prelude::*;
+use shared::api::search::MIN_QUERY_CHARS;
 
-/// The server refuses shorter queries.
-pub const MIN_QUERY_CHARS: usize = 2;
 pub const DEBOUNCE_MS: u32 = 300;
 
 /// What the header's search field asks for; the browse page clears it on navigation.

@@ -261,12 +261,25 @@ impl Volume {
     }
 
     pub(super) fn entries(&self, dir: &RelPath) -> Result<Vec<Entry>, StorageError> {
+        self.entries_while(dir, &|| true)
+    }
+
+    /// Like [`Volume::entries`], failing with `Cancelled` as soon as `go_on` answers `false`; it
+    /// is asked before each entry.
+    pub(super) fn entries_while(
+        &self,
+        dir: &RelPath,
+        go_on: &dyn Fn() -> bool,
+    ) -> Result<Vec<Entry>, StorageError> {
         let map_err = |err| StorageError::from_io(dir, err);
         let handle = self.root.open_dir(fs_path(dir)).map_err(map_err)?;
         let reserved = self.reserved()?;
         let listed = Identity::of(&handle.dir_metadata().map_err(map_err)?);
         let mut entries = Vec::new();
         for entry in handle.entries().map_err(map_err)? {
+            if !go_on() {
+                return Err(StorageError::Cancelled);
+            }
             let file_name = entry.map_err(map_err)?.file_name();
             let name = file_name.to_string_lossy().into_owned();
             if reserved.hides(listed, &name, None) {
