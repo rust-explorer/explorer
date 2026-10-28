@@ -16,6 +16,7 @@ workspace = true
 
 [dependencies]
 axum = { workspace = true, features = ["query"] }
+cap-std = { workspace = true }
 explorer-shared = { workspace = true }
 rustix = { workspace = true }
 serde_json = { workspace = true }

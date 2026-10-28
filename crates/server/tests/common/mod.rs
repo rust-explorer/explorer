@@ -11,12 +11,15 @@ use explorer_server::app::{AppState, router};
 use explorer_server::config::Config;
 use explorer_server::db;
 use explorer_server::oidc::Oidc;
+use explorer_server::storage::Volumes;
 use fake_oidc::FakeOidc;
 
 pub const PUBLIC_URL: &str = "https://files.example.com";
 pub const ALLOWED_GROUP: &str = "explorer-users";
 
-pub fn config(web_dir: &str, issuer: &str) -> Config {
+/// `dir` serves as config and web dir; `<dir>/data` is the data dir.
+pub fn config(dir: &str, issuer: &str) -> Config {
+    let data_dir = format!("{dir}/data");
     Config::from_lookup(|key| {
         let value = match key {
             "EXPLORER_PUBLIC_URL" => PUBLIC_URL,
@@ -24,7 +27,8 @@ pub fn config(web_dir: &str, issuer: &str) -> Config {
             "EXPLORER_OIDC_CLIENT_ID" => fake_oidc::CLIENT_ID,
             "EXPLORER_OIDC_CLIENT_SECRET" => fake_oidc::CLIENT_SECRET,
             "EXPLORER_ALLOWED_GROUP" => ALLOWED_GROUP,
-            "EXPLORER_DATA_DIR" | "EXPLORER_CONFIG_DIR" | "EXPLORER_WEB_DIR" => web_dir,
+            "EXPLORER_DATA_DIR" => &data_dir,
+            "EXPLORER_CONFIG_DIR" | "EXPLORER_WEB_DIR" => dir,
             _ => return None,
         };
         Some(value.to_owned())
@@ -33,9 +37,12 @@ pub fn config(web_dir: &str, issuer: &str) -> Config {
 }
 
 /// State wired to a running fake provider, which must outlive any sign-in exercised against it.
+/// Creates the `media` volume under `<web_dir>/data`.
 pub async fn state_with_oidc(web_dir: &Path) -> (AppState, FakeOidc) {
     let fake = FakeOidc::start().await;
     let config = config(web_dir.to_str().unwrap(), &fake.issuer());
+    std::fs::create_dir_all(config.data_dir.join("media")).unwrap();
+    let volumes = Volumes::discover(&config.data_dir).unwrap();
     let oidc = Oidc::discover(&config.oidc, &config.public_url)
         .await
         .unwrap();
@@ -43,6 +50,7 @@ pub async fn state_with_oidc(web_dir: &Path) -> (AppState, FakeOidc) {
         db: db::open(web_dir).await.unwrap(),
         config: Arc::new(config),
         oidc: Arc::new(oidc),
+        volumes: Arc::new(volumes),
     };
     (state, fake)
 }

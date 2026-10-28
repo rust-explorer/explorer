@@ -8,5 +8,6 @@ pub mod error;
 pub mod healthcheck;
 pub mod oidc;
 pub mod session;
+pub mod storage;
 pub mod telemetry;
 pub mod web;

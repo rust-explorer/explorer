@@ -10,6 +10,7 @@ use explorer_server::db;
 use explorer_server::healthcheck;
 use explorer_server::oidc::Oidc;
 use explorer_server::session;
+use explorer_server::storage::Volumes;
 use explorer_server::telemetry;
 use explorer_server::web::check_bundle;
 use tokio::net::TcpListener;
@@ -59,6 +60,18 @@ async fn main() -> ExitCode {
         }
     };
 
+    let volumes = match Volumes::discover(&config.data_dir) {
+        Ok(volumes) => volumes,
+        Err(err) => {
+            tracing::error!(
+                error = %err,
+                dir = %config.data_dir.display(),
+                "data directory unreadable"
+            );
+            return ExitCode::from(2);
+        }
+    };
+
     let oidc = match Oidc::discover_with_retry(
         &config.oidc,
         &config.public_url,
@@ -78,6 +91,7 @@ async fn main() -> ExitCode {
         config: Arc::new(config),
         db: pool.clone(),
         oidc: Arc::new(oidc),
+        volumes: Arc::new(volumes),
     };
     let app = match router(state).await {
         Ok(app) => app,
