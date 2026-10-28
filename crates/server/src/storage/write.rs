@@ -2,15 +2,18 @@ use std::io;
 use std::time::SystemTime;
 
 use cap_std::fs::Dir;
-use rustix::fs::{Mode, OFlags, RenameFlags};
+use rustix::fs::{Mode, OFlags};
 use rustix::io::Errno;
 use shared::api::conflict::ConflictPolicy;
 
 use super::path::STAGING_DIR;
 use super::read::fs_path;
+use super::rename::rename_noreplace;
 use super::{RelPath, StagedId, Staging, StorageError, Volume};
 
 pub(super) const KEEP_BOTH_MAX: u32 = 999;
+/// A Replace whose target keeps appearing and vanishing gives up after this many tries.
+const REPLACE_ATTEMPTS: usize = 3;
 
 /// `Film.mkv` → `Film (n).mkv`. A leading or trailing dot does not start an extension.
 #[must_use]
@@ -234,14 +237,7 @@ impl Volume {
     ) -> Result<RelPath, StorageError> {
         let dest = to_parent.join(to_name)?;
         if conflict == ConflictPolicy::Replace {
-            if to_dir.symlink_metadata(to_name).is_ok()
-                && (is_dir_in(to_dir, to_name) || is_dir_in(from_dir, from_name))
-            {
-                return Err(StorageError::IsADirectory(dest));
-            }
-            rustix::fs::renameat(from_dir, from_name, to_dir, to_name)
-                .map_err(|err| rename_error(&dest, err))?;
-            return Ok(dest);
+            return replace(from_dir, from_name, to_dir, to_name, dest);
         }
 
         for n in 0..=KEEP_BOTH_MAX {
@@ -253,13 +249,7 @@ impl Volume {
             let Ok(target) = to_parent.join(&candidate) else {
                 break;
             };
-            match rustix::fs::renameat_with(
-                from_dir,
-                from_name,
-                to_dir,
-                candidate.as_str(),
-                RenameFlags::NOREPLACE,
-            ) {
+            match rename_noreplace(from_dir, from_name, to_dir, &candidate) {
                 Ok(()) => {
                     if n > 0 && conflict == ConflictPolicy::Fail {
                         tracing::info!(
@@ -286,6 +276,38 @@ impl Volume {
             Err(err) => Err(StorageError::from_io(path, err)),
         }
     }
+}
+
+/// Replaces a file in one rename. With nothing there, the rename never replaces, so that a
+/// folder created meanwhile stays.
+fn replace(
+    from_dir: &Dir,
+    from_name: &str,
+    to_dir: &Dir,
+    to_name: &str,
+    dest: RelPath,
+) -> Result<RelPath, StorageError> {
+    for _ in 0..REPLACE_ATTEMPTS {
+        match to_dir.symlink_metadata(to_name) {
+            Ok(_) => {
+                if is_dir_in(to_dir, to_name) || is_dir_in(from_dir, from_name) {
+                    return Err(StorageError::IsADirectory(dest));
+                }
+                rustix::fs::renameat(from_dir, from_name, to_dir, to_name)
+                    .map_err(|err| rename_error(&dest, err))?;
+                return Ok(dest);
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                match rename_noreplace(from_dir, from_name, to_dir, to_name) {
+                    Ok(()) => return Ok(dest),
+                    Err(Errno::EXIST) => {}
+                    Err(err) => return Err(rename_error(&dest, err)),
+                }
+            }
+            Err(err) => return Err(StorageError::from_io(&dest, err)),
+        }
+    }
+    Err(StorageError::AlreadyExists(dest))
 }
 
 /// cap-std may hold folders as `O_PATH` descriptors, which cannot be synced: reopen it first.

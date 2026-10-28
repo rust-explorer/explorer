@@ -50,8 +50,17 @@ impl StorageError {
         }
     }
 
+    /// Only `Io` keeps `err`; for the others, its OS error is logged here at debug level.
     pub(super) fn from_io(path: &RelPath, err: io::Error) -> Self {
-        let path = path.clone();
+        let errno = err.raw_os_error();
+        let mapped = Self::classify(path.clone(), err);
+        if !matches!(mapped, Self::Io { .. }) {
+            tracing::debug!(path = path.as_str(), errno = ?errno, error = %mapped, "storage error");
+        }
+        mapped
+    }
+
+    fn classify(path: RelPath, err: io::Error) -> Self {
         if is_escape(&err) {
             return Self::OutsideVolume(path);
         }

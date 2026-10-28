@@ -271,7 +271,12 @@ impl ApiError {
             StorageError::Cancelled => {
                 return Self::internal("a cancellation reported as an error");
             }
-            StorageError::InvalidPath(err) => return err.into(),
+            StorageError::InvalidPath(err) => {
+                if log {
+                    tracing::warn!(volume, reason = err.reason, "invalid path");
+                }
+                return err.into();
+            }
             StorageError::Io { path, source } => {
                 if !log {
                     return Self::internal_error();
