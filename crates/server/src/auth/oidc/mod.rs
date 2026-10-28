@@ -3,20 +3,28 @@
 
 mod discovery;
 mod flow;
+mod keys;
 mod types;
 
 use std::error::Error as StdError;
 use std::fmt;
 use std::fmt::Write as _;
+use std::sync::{Arc, RwLock};
+use std::time::Instant;
 
-use openidconnect::reqwest;
+use openidconnect::{ClientSecret, ProviderMetadataWithLogout, RedirectUrl, reqwest};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
 use types::Client;
 
 pub struct Oidc {
-    client: Client,
+    /// Replaced when the provider's signing keys are fetched again.
+    client: RwLock<Arc<Client>>,
+    metadata: ProviderMetadataWithLogout,
+    client_secret: ClientSecret,
+    redirect: RedirectUrl,
+    keys_fetched_at: tokio::sync::Mutex<Option<Instant>>,
     http: reqwest::Client,
     end_session_endpoint: Option<Url>,
     client_id: String,

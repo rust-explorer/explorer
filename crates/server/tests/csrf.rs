@@ -188,3 +188,22 @@ async fn favorite_writes_need_same_origin() {
         }
     }
 }
+
+#[tokio::test]
+async fn api_reads_from_another_site_are_rejected() {
+    for uri in ["/api/volumes", "/api/volumes/media/search?q=ab", "/api/me"] {
+        for site in ["same-site", "cross-site"] {
+            let req = Request::get(uri)
+                .header("sec-fetch-site", site)
+                .header("sec-fetch-mode", "no-cors")
+                .body(Body::empty())
+                .unwrap();
+            assert_rejected(req).await;
+        }
+        let req = Request::get(uri)
+            .header("sec-fetch-site", "same-origin")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(send(req).await.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+}

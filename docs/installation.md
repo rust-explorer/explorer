@@ -71,13 +71,16 @@ step 4).
 
 ```sh
 mkdir explorer && cd explorer
-mkdir config
+mkdir -m 700 config
 sudo chown 1000:1000 config   # use your UID:GID
 ```
 
 `config/` holds Explorer's state (database, thumbnail cache). Create it yourself before
 the first start: if Docker creates a missing bind-mount source, it is owned by root and
-Explorer cannot write to it.
+Explorer cannot write to it. Keep it `700`: the database holds live session ids, and
+anyone who can read it can sign in as those users. Explorer creates `explorer.db` (and its
+`-wal` and `-shm` files) readable by its own user only, and tightens them at startup if an
+older version left them readable by others.
 
 Download [`docker-compose.example.yml`](../docker-compose.example.yml) as
 `docker-compose.yml` and [`.env.example`](../.env.example) as `.env`.
@@ -223,9 +226,9 @@ the details (look for `sign-in failed` with the same `reason`).
 | Reason | Meaning | Fix |
 |---|---|---|
 | `provider_error` | The provider returned an error instead of a code. | Read the log line's `error`. Typical causes: the user cancelled, or the provider refused this user or client (`access_denied`). |
-| `state_mismatch` | The sign-in was expired, replayed, forged, or belongs to another browser tab. | Retry from the start. Check cookies are not blocked and `EXPLORER_PUBLIC_URL` is the URL in the address bar (the session cookie is `Secure`, so HTTPS is required). |
+| `state_mismatch` | The sign-in was expired (started more than 10 minutes ago), replayed or forged, or more than 5 sign-ins were started at once in this browser. | Retry from the start. Check cookies are not blocked and `EXPLORER_PUBLIC_URL` is the URL in the address bar (the session cookie is `Secure`, so HTTPS is required). |
 | `exchange_failed` | The token endpoint rejected the code, or could not be reached. | Check the client ID and secret, that the client is confidential, and that the container can reach the issuer. |
-| `invalid_token` | The ID token failed verification (signature, issuer, audience, expiry or nonce). | Check `EXPLORER_OIDC_ISSUER` matches the provider's issuer exactly, the client ID, and the clocks of both hosts. If you rotated the provider's signing keys, restart Explorer. |
+| `invalid_token` | The ID token failed verification (signature, issuer, audience, expiry or nonce). | Check `EXPLORER_OIDC_ISSUER` matches the provider's issuer exactly, the client ID, and the clocks of both hosts. After a rotation of the provider's signing keys, Explorer fetches them again by itself, at most once a minute. |
 | Signing out stops on PocketID's own sign-out page | The logout callback URL does not match exactly. | Register `https://files.example.com` with no trailing slash (step 1). |
 | `missing_groups_claim` | The groups claim is absent or not an array of strings. | Make sure the `groups` scope is released to the client and, for another provider, set `EXPLORER_OIDC_GROUPS_CLAIM`. |
 

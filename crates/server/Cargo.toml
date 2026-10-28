@@ -30,7 +30,7 @@ tracing-subscriber = { workspace = true }
 humantime = { workspace = true }
 secrecy = { workspace = true }
 thiserror = { workspace = true }
-time = { workspace = true }
+time = { workspace = true, features = ["serde"] }
 tower-sessions = { workspace = true }
 tower-sessions-sqlx-store = { workspace = true }
 url = { workspace = true }

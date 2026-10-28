@@ -20,15 +20,35 @@ per-volume or per-folder permissions do not exist yet.
 
 Explorer is a backend-for-frontend. The server performs the OIDC authorization code flow
 with PKCE (S256), `state` and `nonce`, and verifies the ID token (signature, issuer,
-audience, expiry, nonce, access token hash). Access, ID and refresh tokens are never sent
-to the browser and never logged. The browser only holds a session cookie.
+audience, expiry, nonce, access token hash). Access and refresh tokens are never sent to
+the browser, and no token is logged. The browser only holds a session cookie.
+
+The one exception is signing out: the ID token is kept in the session and sent once, as
+`id_token_hint` in the provider's end-session URL, so that the provider can end its own
+session and redirect back without asking. That URL passes through the browser, so the ID
+token (subject, name, email, groups; already expired or about to) can appear in the
+browser history and in the access logs of the reverse proxy and the provider.
+
+The provider's signing keys (JWKS) are fetched at startup. When an ID token names a key
+Explorer does not know, as after a key rotation at the provider, Explorer fetches the keys
+again, at most once a minute, and verifies the token once more; no restart is needed.
 
 ## Session cookie
 
 - Name `explorer_session`; `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`.
 - Session data lives server-side in SQLite (`/config/explorer.db`); the cookie is an
-  opaque identifier.
-- Expiry is sliding: `EXPLORER_SESSION_TTL` of inactivity (default 7 days, capped at 400).
+  opaque identifier. The database stores session ids in clear, so it is created readable
+  by Explorer's user only (mode `600`, `-wal` and `-shm` included); keep `/config` at `700`.
+- Expiry is sliding: a session ends after `EXPLORER_SESSION_TTL` of inactivity (default
+  7 days, capped at 400). Activity pushes the expiry back at most once an hour (or every half
+  TTL, if shorter), so an idle session may end up to that much earlier.
+- However active, a session ends 30 days after sign-in, or after `EXPLORER_SESSION_TTL` if
+  that is longer. The user then signs in again, and their groups are read again.
+- A sign-in in progress (its `state`, `nonce`, PKCE verifier and return path) is kept in a
+  session that lasts 10 minutes, since anyone can start one; expired sessions are deleted
+  every 10 minutes. Up to 5 sign-ins can be in progress at once in one browser, so tabs that
+  all found their session ended can sign in together; a sixth drops the oldest. A callback
+  whose `state` matches none of them cancels them all.
 - The session id is rotated on successful login (against session fixation).
 - Logout and access denial flush the session. After a denial only the ID token is kept,
   solely so that signing out can end the provider session.
@@ -56,10 +76,14 @@ domain), cannot start a download or a zip with the user's cookie. A `GET` the us
 clicking a link (`Sec-Fetch-Mode: navigate` with `Sec-Fetch-User: ?1`), such as a download link
 in a webmail, still passes. A request without these headers passes too.
 
+The JSON API under `/api` applies the same rule, reads included: the web app calls it from its
+own origin only, and a page on a sibling subdomain must not be able to keep searches or large
+listings running with the user's cookie, even though it cannot read the answers.
+
 ## Open redirects
 
-`/auth/login?return_to=` must be a path (leading `/`, no control characters, at most 2048
-bytes). It is resolved against `EXPLORER_PUBLIC_URL` with a WHATWG URL parser, the same rules
+`/auth/login?return_to=` must be a path (leading `/`, no control characters, at most 512
+bytes; a longer one becomes `/`). It is resolved against `EXPLORER_PUBLIC_URL` with a WHATWG URL parser, the same rules
 browsers apply, and kept only if the result has the same origin and its path does not start
 with `//`. So `//host`, `/\host` or `/..//host` cannot send the user to another site; they
 become `/`. The post-login redirect target is stored in the session, never taken from the
@@ -70,8 +94,9 @@ callback.
 A user can sign in only if `EXPLORER_ALLOWED_GROUP` is in the groups claim
 (`EXPLORER_OIDC_GROUPS_CLAIM`, ID token first, userinfo as fallback). A missing or
 malformed claim fails the sign-in; it never grants access. Groups are read at sign-in
-only; removing someone from the group takes effect when their session ends (log out, or
-expiry), not immediately.
+only; removing someone from the group takes effect when their session ends (log out,
+inactivity, or at most 30 days after sign-in, or `EXPLORER_SESSION_TTL` if longer), not
+immediately.
 
 ## Path confinement
 

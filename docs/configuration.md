@@ -29,15 +29,18 @@ endpoint; the claim must be an array of strings. Access requires `EXPLORER_ALLOW
 to be in it. Issuer discovery is retried 10 times, 3 seconds apart, at startup; only
 configuration errors fail immediately.
 
-`EXPLORER_SESSION_TTL` is a sliding window: each request renews the session, so it
-expires after this much inactivity. Values above 400 days are capped at 400 days.
+`EXPLORER_SESSION_TTL` is a sliding window: activity renews the session, so it expires
+after this much inactivity. To spare a database write per request, the renewal happens at
+most once an hour (or every half TTL, if shorter). Values above 400 days are capped at 400
+days. However active, a session ends 30 days after sign-in, or after `EXPLORER_SESSION_TTL`
+if that is longer.
 
 ## Paths and port
 
 | Path | Purpose |
 |---|---|
 | `/data` | Each real directory mounted under `/data` is a volume, named after its mount point. Read at startup. |
-| `/config` | Explorer's state: sessions, upload records and favorites in `explorer.db` (SQLite), and the thumbnail cache. Must be writable by the container user; startup checks this and exits with a clear message otherwise. |
+| `/config` | Explorer's state: sessions, upload records and favorites in `explorer.db` (SQLite), and the thumbnail cache. Must be writable by the container user; startup checks this and exits with a clear message otherwise. Explorer creates the database files with mode `600` and the cache folders with `700`; keep `/config` itself `700`. |
 | `/usr/share/explorer/web` | Web bundle, shipped in the image. |
 
 The server listens on `0.0.0.0:8080`. These are fixed in the image.

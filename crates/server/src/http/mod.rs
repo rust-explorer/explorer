@@ -67,7 +67,8 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
                 .latency_unit(LatencyUnit::Millis),
         );
 
-    let session = session::layer(state.db.clone(), state.config.session_ttl).await?;
+    let session = session::layer(state.db.clone()).await?;
+    let lifetime = session::Lifetime::new(state.config.session_ttl);
     let origin: Arc<str> = csrf::public_origin(&state.config.public_url).into();
 
     let router = extra
@@ -81,7 +82,8 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
                 .merge(tasks::routes())
                 .merge(favorites::routes())
                 .merge(search::routes())
-                .fallback(not_found),
+                .fallback(not_found)
+                .layer(middleware::from_fn(csrf::refuse_cross_site)),
         )
         .nest("/auth", auth::routes().fallback(not_found))
         .nest(
@@ -110,7 +112,11 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
                     origin,
                     csrf::require_same_origin,
                 ))
-                .layer(session),
+                .layer(session)
+                .layer(middleware::from_fn_with_state(
+                    lifetime,
+                    session::keep_alive,
+                )),
         );
     Ok(security_headers::security_headers(router))
 }
