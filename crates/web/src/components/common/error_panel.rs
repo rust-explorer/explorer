@@ -34,6 +34,17 @@ pub fn error_message(failure: &ApiFailure) -> String {
     }
 }
 
+/// Like [`error_message`], worded for an upload.
+pub fn upload_error_message(failure: &ApiFailure) -> String {
+    match failure {
+        ApiFailure::Http(413) => t!("uploads-error-too-large"),
+        ApiFailure::Server(body) if body.code == "permission_denied" => {
+            t!("uploads-error-permission_denied", path: detail_path(body))
+        }
+        _ => error_message(failure),
+    }
+}
+
 #[component]
 pub fn ErrorPanel(failure: ApiFailure, on_retry: EventHandler<()>) -> Element {
     let body = match &failure {
@@ -81,14 +92,19 @@ pub fn ErrorPanel(failure: ApiFailure, on_retry: EventHandler<()>) -> Element {
 
 /// A failure in a list row: its message and the request id to report it with.
 #[component]
-pub fn FailureNote(failure: ApiFailure) -> Element {
+pub fn FailureNote(failure: ApiFailure, #[props(default)] upload: bool) -> Element {
     let reference = match &failure {
         ApiFailure::Server(body) => body.request_id.clone(),
         _ => None,
     };
+    let message = if upload {
+        upload_error_message(&failure)
+    } else {
+        error_message(&failure)
+    };
 
     rsx! {
-        p { class: "mt-0.5 text-xs text-red-700 dark:text-red-400", {error_message(&failure)} }
+        p { class: "mt-0.5 text-xs text-red-700 dark:text-red-400", {message} }
         if let Some(id) = reference {
             p { class: "font-mono text-xs text-slate-500 dark:text-slate-400",
                 {t!("error-reference", id: id)}

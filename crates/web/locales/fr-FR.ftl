@@ -94,6 +94,14 @@ uploads-unreadable =
         [one] 1 élément n'a pas pu être lu et a été ignoré.
        *[other] { $count } éléments n'ont pas pu être lus et ont été ignorés.
     }
+uploads-retrying-server = Le serveur n'a pas pu le prendre, nouvel essai dans { $seconds } s
+uploads-invalid-names =
+    { $count ->
+        [one] 1 élément a un nom inutilisable ici et a été ignoré.
+       *[other] { $count } éléments ont un nom inutilisable ici et ont été ignorés.
+    }
+uploads-error-permission_denied = Vous n'avez pas l'autorisation d'enregistrer { $path }.
+uploads-error-too-large = Le serveur ou un proxy devant lui a refusé cet upload, jugé trop volumineux.
 conflict-title = { $name } existe déjà dans { $folder }
 conflict-replace = Remplacer
 conflict-keep-both = Garder les deux

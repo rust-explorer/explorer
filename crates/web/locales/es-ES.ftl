@@ -94,6 +94,14 @@ uploads-unreadable =
         [one] 1 elemento no se pudo leer y se omitió.
        *[other] { $count } elementos no se pudieron leer y se omitieron.
     }
+uploads-retrying-server = El servidor no pudo aceptarla, nuevo intento en { $seconds } s
+uploads-invalid-names =
+    { $count ->
+        [one] 1 elemento tiene un nombre que no se puede usar aquí y se omitió.
+       *[other] { $count } elementos tienen nombres que no se pueden usar aquí y se omitieron.
+    }
+uploads-error-permission_denied = No tienes permiso para guardar { $path }.
+uploads-error-too-large = El servidor o un proxy delante de él rechazó esta subida por ser demasiado grande.
 conflict-title = { $name } ya existe en { $folder }
 conflict-replace = Reemplazar
 conflict-keep-both = Conservar ambos

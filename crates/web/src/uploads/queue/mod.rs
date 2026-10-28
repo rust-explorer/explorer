@@ -31,7 +31,8 @@ pub struct Queue {
     decisions: HashMap<u64, Decision>,
     last_refresh: HashMap<String, i64>,
     unrefreshed: HashSet<String>,
-    skipped: usize,
+    invalid_names: usize,
+    unreadable: usize,
 }
 
 fn is_transient(failure: &ApiFailure) -> bool {
@@ -48,7 +49,8 @@ impl Queue {
     pub fn add(&mut self, plan: BatchPlan, pending: &[PendingUpload], _now_ms: i64) -> Vec<Effect> {
         let batch = self.next_batch;
         self.next_batch += 1;
-        self.skipped += plan.skipped;
+        self.invalid_names += plan.skipped;
+        self.unreadable += plan.unreadable;
         let folders = plan.folders.into_iter().map(|path| {
             let kind = Kind::Folder {
                 volume: plan.volume.clone(),
@@ -156,9 +158,14 @@ impl Queue {
         effects
     }
 
-    /// Picked or dropped items that could not be read or named, since the last clear.
-    pub fn skipped(&self) -> usize {
-        self.skipped
+    /// Picked or dropped items left out for their name, since the last clear.
+    pub fn invalid_names(&self) -> usize {
+        self.invalid_names
+    }
+
+    /// Picked or dropped items the browser could not read, since the last clear.
+    pub fn unreadable(&self) -> usize {
+        self.unreadable
     }
 
     pub fn items(&self) -> &[Item] {
@@ -181,7 +188,8 @@ impl Queue {
 
     pub fn clear_finished(&mut self) {
         self.items.retain(|item| item.status.is_active());
-        self.skipped = 0;
+        self.invalid_names = 0;
+        self.unreadable = 0;
     }
 
     fn index(&self, key: ItemKey) -> Option<usize> {
@@ -298,6 +306,7 @@ impl Queue {
             item.status = Status::Retrying {
                 attempt: item.attempts,
                 at_ms,
+                connection_lost: failure == ApiFailure::Network,
             };
             item.phase = Phase::Idle;
             effects.push(Effect::WakeAt { at_ms });
@@ -449,6 +458,7 @@ mod tests {
             files,
             folders: Vec::new(),
             skipped: 0,
+            unreadable: 0,
         }
     }
 
@@ -610,7 +620,8 @@ mod tests {
             queue.items()[0].status,
             Status::Retrying {
                 attempt: 1,
-                at_ms: 1100
+                at_ms: 1100,
+                connection_lost: true,
             }
         );
         assert!(queue.tick(1099).is_empty());
@@ -635,6 +646,13 @@ mod tests {
             fail(&mut queue, 0, server("upload_busy"), 2000),
             [Effect::WakeAt { at_ms: 4000 }]
         );
+        assert!(matches!(
+            queue.items()[0].status,
+            Status::Retrying {
+                connection_lost: false,
+                ..
+            }
+        ));
         queue.tick(4000);
         assert_eq!(
             fail(&mut queue, 0, ApiFailure::Http(502), 4000),
@@ -1142,13 +1160,16 @@ mod tests {
         let mut queue = Queue::default();
         let mut batch = files(1, 1);
         batch.skipped = 2;
+        batch.unreadable = 4;
         queue.add(batch, &[], 0);
         let mut batch = files(0, 0);
         batch.skipped = 1;
         queue.add(batch, &[], 0);
-        assert_eq!(queue.skipped(), 3);
+        assert_eq!(queue.invalid_names(), 3);
+        assert_eq!(queue.unreadable(), 4);
         queue.clear_finished();
-        assert_eq!(queue.skipped(), 0);
+        assert_eq!(queue.invalid_names(), 0);
+        assert_eq!(queue.unreadable(), 0);
         assert_eq!(queue.items().len(), 1);
     }
 }

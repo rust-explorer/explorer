@@ -94,6 +94,14 @@ uploads-unreadable =
         [one] 1 item couldn't be read and was skipped.
        *[other] { $count } items couldn't be read and were skipped.
     }
+uploads-retrying-server = The server couldn't take it, retrying in { $seconds } s
+uploads-invalid-names =
+    { $count ->
+        [one] 1 item has a name that can't be used here and was skipped.
+       *[other] { $count } items have names that can't be used here and were skipped.
+    }
+uploads-error-permission_denied = You don't have permission to save { $path }.
+uploads-error-too-large = The server or a proxy in front of it refused this upload as too large.
 conflict-title = { $name } already exists in { $folder }
 conflict-replace = Replace
 conflict-keep-both = Keep both

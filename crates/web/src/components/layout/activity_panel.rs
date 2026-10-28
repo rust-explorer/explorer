@@ -18,14 +18,16 @@ pub fn ActivityPanel() -> Element {
     let mut collapsed = use_signal(|| false);
     let queue = uploads.queue();
     let list = tasks.list();
-    let (upload_count, skipped, active_upload_count) = {
+    let (upload_count, invalid_names, unreadable, active_upload_count) = {
         let queue = queue.read();
         (
             queue.items().len(),
-            queue.skipped(),
+            queue.invalid_names(),
+            queue.unreadable(),
             active_uploads(queue.items()),
         )
     };
+    let skipped = invalid_names + unreadable;
     let (task_count, active_task_count) = {
         let list = list.read();
         (list.shown().count(), list.active_count())
@@ -76,16 +78,23 @@ pub fn ActivityPanel() -> Element {
                     }
                 }
             }
-            if skipped > 0 {
+            if unreadable > 0 {
                 p { class: "mt-1 text-xs text-amber-700 dark:text-amber-400",
-                    {t!("uploads-unreadable", count: skipped)}
+                    {t!("uploads-unreadable", count: unreadable)}
                 }
             }
-            if !collapsed() {
-                ul { id: LIST_ID, class: "mt-1 max-h-80 overflow-y-auto",
-                    TaskRows {}
-                    UploadRows {}
+            if invalid_names > 0 {
+                p { class: "mt-1 text-xs text-amber-700 dark:text-amber-400",
+                    {t!("uploads-invalid-names", count: invalid_names)}
                 }
+            }
+            // Kept mounted while collapsed so that `aria-controls` points at it.
+            ul {
+                id: LIST_ID,
+                class: "mt-1 max-h-80 overflow-y-auto",
+                hidden: collapsed(),
+                TaskRows {}
+                UploadRows {}
             }
         }
     }

@@ -14,7 +14,10 @@ pub struct BatchPlan {
     pub files: Vec<FileSpec>,
     /// Empty folders to create; ancestors of other folders are left out.
     pub folders: Vec<String>,
+    /// Items left out because their name can't be used.
     pub skipped: usize,
+    /// Items left out because the browser couldn't read them.
+    pub unreadable: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -70,6 +73,7 @@ pub fn plan_batch(
         files: specs,
         folders: leaves,
         skipped,
+        unreadable: 0,
     }
 }
 
