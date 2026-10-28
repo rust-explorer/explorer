@@ -68,6 +68,7 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
         );
 
     let session = session::layer(state.db.clone(), state.config.session_ttl).await?;
+    let lifetime = session::Lifetime::new(state.config.session_ttl);
     let origin: Arc<str> = csrf::public_origin(&state.config.public_url).into();
 
     let router = extra
@@ -111,7 +112,11 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
                     origin,
                     csrf::require_same_origin,
                 ))
-                .layer(session),
+                .layer(session)
+                .layer(middleware::from_fn_with_state(
+                    lifetime,
+                    session::keep_alive,
+                )),
         );
     Ok(security_headers::security_headers(router))
 }

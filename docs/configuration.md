@@ -29,8 +29,11 @@ endpoint; the claim must be an array of strings. Access requires `EXPLORER_ALLOW
 to be in it. Issuer discovery is retried 10 times, 3 seconds apart, at startup; only
 configuration errors fail immediately.
 
-`EXPLORER_SESSION_TTL` is a sliding window: each request renews the session, so it
-expires after this much inactivity. Values above 400 days are capped at 400 days.
+`EXPLORER_SESSION_TTL` is a sliding window: activity renews the session, so it expires
+after this much inactivity. To spare a database write per request, the renewal happens at
+most once an hour (or every half TTL, if shorter). Values above 400 days are capped at 400
+days. However active, a session ends 30 days after sign-in, or after `EXPLORER_SESSION_TTL`
+if that is longer.
 
 ## Paths and port
 

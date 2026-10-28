@@ -39,7 +39,11 @@ browser history and in the access logs of the reverse proxy and the provider.
 - Session data lives server-side in SQLite (`/config/explorer.db`); the cookie is an
   opaque identifier. The database stores session ids in clear, so it is created readable
   by Explorer's user only (mode `600`, `-wal` and `-shm` included); keep `/config` at `700`.
-- Expiry is sliding: `EXPLORER_SESSION_TTL` of inactivity (default 7 days, capped at 400).
+- Expiry is sliding: a session ends after `EXPLORER_SESSION_TTL` of inactivity (default
+  7 days, capped at 400). Activity pushes the expiry back at most once an hour (or every half
+  TTL, if shorter), so an idle session may end up to that much earlier.
+- However active, a session ends 30 days after sign-in, or after `EXPLORER_SESSION_TTL` if
+  that is longer. The user then signs in again, and their groups are read again.
 - The session id is rotated on successful login (against session fixation).
 - Logout and access denial flush the session. After a denial only the ID token is kept,
   solely so that signing out can end the provider session.
@@ -85,8 +89,9 @@ callback.
 A user can sign in only if `EXPLORER_ALLOWED_GROUP` is in the groups claim
 (`EXPLORER_OIDC_GROUPS_CLAIM`, ID token first, userinfo as fallback). A missing or
 malformed claim fails the sign-in; it never grants access. Groups are read at sign-in
-only; removing someone from the group takes effect when their session ends (log out, or
-expiry), not immediately.
+only; removing someone from the group takes effect when their session ends (log out,
+inactivity, or at most 30 days after sign-in, or `EXPLORER_SESSION_TTL` if longer), not
+immediately.
 
 ## Path confinement
 

@@ -1,13 +1,18 @@
 mod common;
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use axum::routing::get;
-use explorer_server::http::{AppState, router_with};
+use explorer_server::http::{AppState, router, router_with};
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 use tower_sessions::Session;
+
+use common::client::Client;
 
 const KEY: &str = "value";
 
@@ -111,4 +116,30 @@ async fn untouched_session_sets_no_cookie() {
         .await
         .unwrap();
     assert!(res.headers().get(header::SET_COOKIE).is_none());
+}
+
+#[tokio::test]
+async fn activity_keeps_a_session_alive_past_its_ttl() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut state, fake) = common::state_with_oidc(dir.path()).await;
+    let mut config = common::config(dir.path().to_str().unwrap(), &fake.issuer());
+    config.session_ttl = Duration::from_secs(3);
+    state.config = Arc::new(config);
+    let mut client = Client::signed_in(router(state).await.unwrap(), &fake).await;
+
+    let mut refreshed = 0;
+    for _ in 0..10 {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let res = client.get("/api/me").await;
+        assert_eq!(res.status(), StatusCode::OK);
+        refreshed += usize::from(res.headers().contains_key(header::SET_COOKIE));
+    }
+    // Refreshed now and then, not on every request.
+    assert!((1..10).contains(&refreshed), "{refreshed}");
+
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    assert_eq!(
+        client.get("/api/me").await.status(),
+        StatusCode::UNAUTHORIZED
+    );
 }
