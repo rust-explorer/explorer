@@ -39,7 +39,7 @@ type Patches = Arc<Mutex<HashMap<String, usize>>>;
 pub struct Uploads {
     pool: SqlitePool,
     locks: Locks,
-    admission: tokio::sync::Mutex<()>,
+    admission: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     patches: Patches,
 }
 
@@ -125,7 +125,7 @@ impl Uploads {
         Self {
             pool,
             locks: Arc::default(),
-            admission: tokio::sync::Mutex::new(()),
+            admission: Mutex::default(),
             patches: Arc::default(),
         }
     }
@@ -179,10 +179,18 @@ impl Uploads {
         .collect()
     }
 
-    /// Held from the checks of a new upload until its record is inserted, so that concurrent
-    /// creations see each other.
-    pub async fn admission(&self) -> tokio::sync::MutexGuard<'_, ()> {
-        self.admission.lock().await
+    /// Held from the checks of a new upload to `volume` until its record is inserted, so that
+    /// concurrent creations on the volume see each other. One lock per volume: a hung volume only
+    /// holds up uploads to itself.
+    pub async fn admission(&self, volume: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        let lock = Arc::clone(
+            self.admission
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .entry(volume.to_owned())
+                .or_default(),
+        );
+        lock.lock_owned().await
     }
 
     pub async fn count_pending(&self, user_sub: &str) -> sqlx::Result<u64> {

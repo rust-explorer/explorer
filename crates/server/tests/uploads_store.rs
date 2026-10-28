@@ -245,3 +245,22 @@ async fn lock_is_exclusive_until_dropped() {
     drop(lock);
     assert!(fx.uploads.try_lock(&id).is_some());
 }
+
+#[tokio::test]
+async fn admission_is_per_volume() {
+    let fx = fixture(&["media"]).await;
+    let held = fx.uploads.admission("nas").await;
+    let wait = Duration::from_millis(100);
+
+    let other = tokio::time::timeout(wait, fx.uploads.admission("media")).await;
+    assert!(other.is_ok(), "another volume must not wait");
+    let same = tokio::time::timeout(wait, fx.uploads.admission("nas")).await;
+    assert!(same.is_err(), "the same volume must wait");
+
+    drop(held);
+    assert!(
+        tokio::time::timeout(wait, fx.uploads.admission("nas"))
+            .await
+            .is_ok()
+    );
+}

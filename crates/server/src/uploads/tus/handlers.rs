@@ -65,7 +65,7 @@ pub(super) async fn create(
         ..
     } = creation;
 
-    let admission = state.uploads.admission().await;
+    let admission = state.uploads.admission(&volume).await;
     check_pending_count(&state, &user.sub).await?;
     let pending = state
         .uploads
