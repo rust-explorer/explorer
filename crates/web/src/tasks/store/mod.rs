@@ -378,9 +378,8 @@ mod tests {
         assert_eq!(list.cancel(TaskKey(3)), []);
         assert_eq!(list.tasks().len(), 3);
 
-        let others = |count: usize| {
-            (0..count).map(|i| info(&format!("o{i}"), "o", TaskState::Queued))
-        };
+        let others =
+            |count: usize| (0..count).map(|i| info(&format!("o{i}"), "o", TaskState::Queued));
         let full: Vec<TaskInfo> = std::iter::once(info("a", "a", TaskState::Running))
             .chain(others(MAX_ACTIVE_TASKS - 1))
             .collect();

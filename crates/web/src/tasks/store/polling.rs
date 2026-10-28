@@ -92,7 +92,12 @@ impl TaskList {
             .filter(|task| task.conflict.is_none() && !task.deferred)
             .count();
         let room = MAX_ACTIVE_TASKS.saturating_sub(active + posting);
-        for task in self.tasks.iter_mut().filter(|task| task.deferred).take(room) {
+        for task in self
+            .tasks
+            .iter_mut()
+            .filter(|task| task.deferred)
+            .take(room)
+        {
             task.deferred = false;
             effects.push(Effect::Post {
                 key: task.key,
