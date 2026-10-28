@@ -2,7 +2,8 @@ use std::io::{self, Read, Write};
 use std::mem;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ::zip::write::{SimpleFileOptions, StreamWriter};
 use ::zip::{CompressionMethod, DateTime, ZipWriter};
@@ -11,29 +12,23 @@ use axum::extract::rejection::QueryRejection;
 use axum::extract::{Query, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::Response;
-use serde::Deserialize;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::attachment_headers;
-use crate::api::blocking_volume;
+use crate::access::{VolumeQuery, authorize, blocking_volume, invalid_query};
 use crate::app::AppState;
 use crate::auth::CurrentUser;
-use crate::authz::{Action, Policy};
+use crate::authz::Action;
 use crate::error::ApiError;
 use crate::storage::{RelPath, Volume, WalkItem};
 
 const CHUNK: usize = 64 * 1024;
 const CHANNEL_CAPACITY: usize = 8;
+const ZIP_SEND_TIMEOUT: Duration = Duration::from_secs(60);
+const SEND_POLL: Duration = Duration::from_millis(2);
 
 type Chunk = io::Result<Bytes>;
-
-#[derive(Deserialize)]
-pub struct ZipQuery {
-    volume: String,
-    #[serde(default)]
-    path: String,
-}
 
 /// Answers `HEAD` without walking the tree, which `get` would otherwise do implicitly.
 pub async fn head() -> Response {
@@ -47,20 +42,12 @@ pub async fn head() -> Response {
 pub async fn zip(
     State(state): State<AppState>,
     user: CurrentUser,
-    query: Result<Query<ZipQuery>, QueryRejection>,
+    query: Result<Query<VolumeQuery>, QueryRejection>,
 ) -> Result<Response, ApiError> {
-    let Ok(Query(ZipQuery { volume, path })) = query else {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_path",
-            "The volume parameter is required",
-        ));
+    let Ok(Query(VolumeQuery { volume, path })) = query else {
+        return Err(invalid_query());
     };
-    if state.volumes.get(&volume).is_none() {
-        return Err(ApiError::volume_not_found(&volume));
-    }
-    Policy.check(&user, &volume, Action::Read)?;
-    let path = RelPath::parse(&path)?;
+    let path = authorize(&state, &user, &volume, &path, Action::Read)?;
 
     let items = blocking_volume(&state.volumes, &volume, {
         let path = path.clone();
@@ -144,7 +131,11 @@ fn stream_archive(
         error = %failure.error,
         "zip aborted"
     );
-    let _ = errors.blocking_send(Err(io::Error::other("zip archive aborted")));
+    let _ = send_timeout(
+        &errors,
+        Err(io::Error::other("zip archive aborted")),
+        ZIP_SEND_TIMEOUT,
+    );
 }
 
 fn write_archive(
@@ -244,11 +235,31 @@ fn zip_time(time: SystemTime) -> Option<DateTime> {
     .ok()
 }
 
+/// Fails with `TimedOut` when the channel stays full for `timeout`, so a stalled client cannot
+/// hold the blocking thread forever.
+fn send_timeout(tx: &mpsc::Sender<Chunk>, mut chunk: Chunk, timeout: Duration) -> io::Result<()> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        match tx.try_send(chunk) {
+            Ok(()) => return Ok(()),
+            Err(mpsc::error::TrySendError::Closed(_)) => {
+                return Err(io::ErrorKind::BrokenPipe.into());
+            }
+            Err(mpsc::error::TrySendError::Full(back)) => chunk = back,
+        }
+        if Instant::now() >= deadline {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        thread::sleep(SEND_POLL);
+    }
+}
+
 /// Buffers the archive into chunks for the response body. Once aborted, it swallows writes.
 struct ChannelWriter {
     tx: mpsc::Sender<Chunk>,
     buf: Vec<u8>,
     aborted: Arc<AtomicBool>,
+    send_timeout: Duration,
 }
 
 impl ChannelWriter {
@@ -257,7 +268,14 @@ impl ChannelWriter {
             tx,
             buf: Vec::with_capacity(CHUNK),
             aborted: Arc::new(AtomicBool::new(false)),
+            send_timeout: ZIP_SEND_TIMEOUT,
         }
+    }
+
+    #[cfg(test)]
+    fn with_send_timeout(mut self, timeout: Duration) -> Self {
+        self.send_timeout = timeout;
+        self
     }
 
     fn send(&mut self) -> io::Result<()> {
@@ -265,9 +283,8 @@ impl ChannelWriter {
             return Ok(());
         }
         let chunk = Bytes::from(mem::replace(&mut self.buf, Vec::with_capacity(CHUNK)));
-        self.tx.blocking_send(Ok(chunk)).map_err(|_| {
+        send_timeout(&self.tx, Ok(chunk), self.send_timeout).inspect_err(|_| {
             self.aborted.store(true, Ordering::Relaxed);
-            io::Error::from(io::ErrorKind::BrokenPipe)
         })
     }
 }
@@ -295,6 +312,8 @@ impl Write for ChannelWriter {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
     use super::*;
 
     fn writer(capacity: usize) -> (ChannelWriter, mpsc::Receiver<Chunk>) {
@@ -378,6 +397,17 @@ mod tests {
         drop(rx);
         let err = writer.write_all(&vec![0; CHUNK]).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
+    }
+
+    #[test]
+    fn stalled_client_times_out() {
+        let (tx, _rx) = mpsc::channel(1);
+        let mut writer = ChannelWriter::new(tx).with_send_timeout(Duration::from_millis(50));
+        writer.write_all(&vec![0; CHUNK]).unwrap();
+        let started = Instant::now();
+        let err = writer.write_all(&vec![0; CHUNK]).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[test]

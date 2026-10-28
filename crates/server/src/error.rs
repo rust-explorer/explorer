@@ -71,6 +71,16 @@ impl ApiError {
         .with_details(json!({ "volume": name }))
     }
 
+    #[must_use]
+    pub fn read_only_volume(name: &str) -> Self {
+        Self::new(
+            StatusCode::FORBIDDEN,
+            "read_only_volume",
+            format!("Volume {name} is read-only"),
+        )
+        .with_details(json!({ "volume": name }))
+    }
+
     /// Maps a storage failure on `volume`, logging it; an I/O error stays out of the response.
     #[must_use]
     pub fn from_storage(volume: &str, err: StorageError) -> Self {

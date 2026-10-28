@@ -10,14 +10,13 @@ use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use http_range_header::{EndPosition, RangeUnsatisfiableError, StartPosition};
 use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
-use serde::Deserialize;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_util::io::ReaderStream;
 
-use crate::api::blocking_volume;
+use crate::access::{VolumeQuery, authorize, blocking_volume, invalid_query};
 use crate::app::AppState;
 use crate::auth::CurrentUser;
-use crate::authz::{Action, Policy};
+use crate::authz::Action;
 use crate::error::ApiError;
 use crate::storage::RelPath;
 
@@ -37,12 +36,6 @@ const FILENAME_ENCODE: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'~');
 
 const READ_BUFFER: usize = 256 * 1024;
-
-#[derive(Deserialize)]
-pub struct DownloadQuery {
-    volume: String,
-    path: String,
-}
 
 #[must_use]
 pub fn content_disposition(file_name: &str) -> HeaderValue {
@@ -84,22 +77,13 @@ pub async fn download(
     State(state): State<AppState>,
     user: CurrentUser,
     method: Method,
-    query: Result<Query<DownloadQuery>, QueryRejection>,
+    query: Result<Query<VolumeQuery>, QueryRejection>,
     request_headers: HeaderMap,
 ) -> Result<Response, ApiError> {
-    let Ok(Query(query)) = query else {
-        return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_path",
-            "The volume and path parameters are required",
-        ));
+    let Ok(Query(VolumeQuery { volume, path })) = query else {
+        return Err(invalid_query());
     };
-    let DownloadQuery { volume, path } = query;
-    if state.volumes.get(&volume).is_none() {
-        return Err(ApiError::volume_not_found(&volume));
-    }
-    Policy.check(&user, &volume, Action::Read)?;
-    let path = RelPath::parse(&path)?;
+    let path = authorize(&state, &user, &volume, &path, Action::Read)?;
 
     let (file, meta) = blocking_volume(&state.volumes, &volume, {
         let path = path.clone();
