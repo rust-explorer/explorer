@@ -16,12 +16,13 @@ use axum::response::Response;
 use common::client::{Client, json};
 use common::fake_oidc::FakeOidc;
 use explorer_server::http::router;
-use explorer_server::storage::StagedId;
-use explorer_server::uploads::Uploads;
+use explorer_server::storage::{RelPath, StagedId};
+use explorer_server::uploads::{UploadRecord, Uploads};
 use http_body_util::BodyExt;
 use serde_json::json;
+use shared::api::conflict::ConflictPolicy;
 use shared::api::error::ErrorBody;
-use shared::api::uploads::PendingUpload;
+use shared::api::uploads::{MAX_PATCHES_PER_USER, MAX_PENDING_UPLOADS, PendingUpload};
 use shared::tus::encode_metadata;
 use sqlx::SqlitePool;
 use tempfile::TempDir;
@@ -308,6 +309,11 @@ async fn creation_requires_length_and_metadata() {
             ("volume", "media"),
             ("path", "a.txt"),
             ("conflict", "merge"),
+        ]),
+        encode_metadata(&[
+            ("volume", "media"),
+            ("path", "a.txt"),
+            ("fingerprint", "not hex"),
         ]),
     ] {
         let req = tus(Method::POST, "/files/uploads")
@@ -723,8 +729,10 @@ async fn delete_cancels_and_removes_staged_file() {
         patch(&mut s.client, &location, 0, b"b").await.status(),
         StatusCode::NO_CONTENT
     );
+    // Too late to cancel: the client must not report it as cancelled.
     let res = delete(&mut s.client, &location).await;
-    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let body = error(res, StatusCode::CONFLICT, "upload_committed").await;
+    assert_eq!(body.details.unwrap()["final_path"], "b.txt");
     assert_eq!(fs::read(s.media().join("b.txt")).unwrap(), b"b");
     assert_eq!(
         head(&mut s.client, &location).await.status(),
@@ -739,7 +747,11 @@ async fn pending_list_shows_unfinished_uploads_only() {
         &mut s.client,
         "Album/partial.jpg",
         10,
-        &[("modified", "1700000000000")],
+        &[
+            ("modified", "1700000000000"),
+            ("conflict", "replace"),
+            ("fingerprint", "0123456789abcdef"),
+        ],
     )
     .await;
     assert_eq!(
@@ -765,6 +777,8 @@ async fn pending_list_shows_unfinished_uploads_only() {
             length: 10,
             offset: 3,
             modified_ms: Some(1_700_000_000_000),
+            conflict: ConflictPolicy::Replace,
+            fingerprint: Some("0123456789abcdef".to_owned()),
         }]
     );
 
@@ -1108,4 +1122,106 @@ async fn staging_is_unreachable_through_a_symlink_to_the_root() {
 
     assert_eq!(staged_count(&s), 1);
     assert_eq!(fs::read(s.staging().join(id.as_str())).unwrap(), b"ab");
+}
+
+#[tokio::test]
+async fn unfinished_uploads_are_capped_per_user() {
+    let mut s = setup().await;
+    let sub = me(&mut s.client).await;
+    for i in 1..MAX_PENDING_UPLOADS {
+        let record = UploadRecord {
+            id: StagedId::random(),
+            user_sub: sub.clone(),
+            volume: "media".to_owned(),
+            path: RelPath::parse(&format!("f{i}")).unwrap(),
+            length: 10,
+            modified_ms: None,
+            conflict: ConflictPolicy::Fail,
+            fingerprint: None,
+            final_path: None,
+            created_at: 1,
+            updated_at: 1,
+        };
+        s.uploads.insert(&record).await.unwrap();
+    }
+
+    let last = created(&mut s.client, "last.txt", 3, &[]).await;
+    let res = create(&mut s.client, "over.txt", 3, &[]).await;
+    error(res, StatusCode::TOO_MANY_REQUESTS, "too_many_uploads").await;
+
+    // A finished upload no longer counts, nor does another user's.
+    assert_eq!(
+        patch(&mut s.client, &last, 0, b"abc").await.status(),
+        StatusCode::NO_CONTENT
+    );
+    created(&mut s.client, "after.txt", 3, &[]).await;
+    s.fake.claims(json!({ "sub": "other-user" }));
+    let mut other = Client::signed_in(s.app.clone(), &s.fake).await;
+    created(&mut other, "other.txt", 3, &[]).await;
+}
+
+#[tokio::test]
+async fn free_space_counts_what_pending_uploads_still_need() {
+    let mut s = setup().await;
+    let stat = rustix::fs::statvfs(s.media()).unwrap();
+    let available = stat.f_bavail * stat.f_frsize;
+    let length = available / 10 * 6;
+
+    let first = created(&mut s.client, "first.bin", length, &[]).await;
+    let res = create(&mut s.client, "second.bin", length, &[]).await;
+    error(
+        res,
+        StatusCode::INSUFFICIENT_STORAGE,
+        "insufficient_storage",
+    )
+    .await;
+    assert_eq!(staged_count(&s), 1);
+
+    assert_eq!(
+        delete(&mut s.client, &first).await.status(),
+        StatusCode::NO_CONTENT
+    );
+    created(&mut s.client, "second.bin", length, &[]).await;
+}
+
+#[tokio::test]
+async fn patches_in_flight_are_capped_per_user() {
+    let mut s = setup().await;
+    let mut held = Vec::new();
+    for i in 0..MAX_PATCHES_PER_USER {
+        let location = created(&mut s.client, &format!("held{i}.bin"), 8, &[]).await;
+        let (tx, body) = channel_body();
+        let mut client = clone_client(&s.client);
+        let req = patch_request(&location, 0, body);
+        let task = tokio::spawn(async move { client.send(req).await });
+        tx.send(Ok(Bytes::from_static(b"abcd"))).await.unwrap();
+        let mut written = 0;
+        for _ in 0..200 {
+            written = offset_of(&head(&mut s.client, &location).await);
+            if written == 4 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(written, 4);
+        held.push((tx, task));
+    }
+    let location = created(&mut s.client, "next.bin", 3, &[]).await;
+
+    let res = patch(&mut s.client, &location, 0, b"abc").await;
+    error(res, StatusCode::TOO_MANY_REQUESTS, "too_many_patches").await;
+
+    s.fake.claims(json!({ "sub": "other-user" }));
+    let mut other = Client::signed_in(s.app.clone(), &s.fake).await;
+    let theirs = created(&mut other, "theirs.bin", 3, &[]).await;
+    assert_eq!(
+        patch(&mut other, &theirs, 0, b"abc").await.status(),
+        StatusCode::NO_CONTENT
+    );
+
+    let (tx, task) = held.pop().unwrap();
+    drop(tx);
+    assert_eq!(task.await.unwrap().status(), StatusCode::NO_CONTENT);
+    let res = patch(&mut s.client, &location, 0, b"abc").await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
 }

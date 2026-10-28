@@ -49,6 +49,7 @@ fn record(user: &str, volume: &str, updated_at: i64) -> UploadRecord {
         length: 10,
         modified_ms: Some(1_700_000_000_000),
         conflict: ConflictPolicy::KeepBoth,
+        fingerprint: None,
         final_path: None,
         created_at: updated_at,
         updated_at,

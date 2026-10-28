@@ -29,6 +29,8 @@ pub async fn pending(
             length: record.length,
             offset,
             modified_ms: record.modified_ms,
+            conflict: record.conflict,
+            fingerprint: record.fingerprint,
         });
     }
     Ok(Json(pending))

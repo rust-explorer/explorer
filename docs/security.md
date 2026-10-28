@@ -164,11 +164,18 @@ Names that are not valid UTF-8 are skipped with a warning.
   no-replace semantics for `fail` and `keep_both`, so a file created while the upload was
   running is never replaced; only an explicit `replace` overwrites, and never a folder.
   The client's `modified` time is applied to the final file; nothing else from the client's
-  metadata is trusted.
-- **Limits.** The declared `Upload-Length` is checked against the volume's free space at
-  creation and a body longer than the declared length is cut off (413 `upload_too_large`).
+  metadata is trusted. The `fingerprint` is only stored and returned to its owner, who uses it
+  to avoid resuming an upload with another file's data.
+- **Limits.** A user has at most 1000 unfinished uploads; more are refused with 429
+  `too_many_uploads` until some finish, are cancelled or are swept. The declared
+  `Upload-Length` is checked at creation against the volume's free space less the bytes
+  that the volume's unfinished uploads (all users) still have to receive, so many large
+  uploads cannot together promise more than the disk holds. A body longer than the declared
+  length is cut off (413 `upload_too_large`).
   Disk-full during a write is 507 `insufficient_storage`. A body that stalls for 60 seconds
-  is dropped. Each upload is written by one request at a time (423 `upload_busy`).
+  is dropped. Each upload is written by one request at a time (423 `upload_busy`), and a
+  user has at most 8 `PATCH` requests in flight (429 `too_many_patches`, which the web app
+  retries), so a client that trickles bytes ties up a bounded number of open files.
 - **Cleanup.** An upload untouched for 24 hours is removed with its staged file, as is a
   stale staged file with no record. The sweep runs at startup and every hour.
 - **Logs.** Uploads are logged at `info` with the user's `sub`, the volume and the path (and

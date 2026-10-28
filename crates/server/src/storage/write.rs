@@ -217,11 +217,7 @@ impl Volume {
         let dest = parent.join(name)?;
         let staged_err = |err| StorageError::from_io(&dest, err);
         let file = staging.open_staged(id, &dest)?;
-        if let Some(modified) = modified {
-            file.set_modified(modified).map_err(staged_err)?;
-        }
         file.sync_all().map_err(staged_err)?;
-        drop(file);
 
         let placed = self.place(
             &staging.dir,
@@ -231,6 +227,13 @@ impl Volume {
             name,
             conflict,
         )?;
+        // Only now: an old mtime in staging would make the sweep take it for an orphan.
+        if let Some(modified) = modified
+            && let Err(err) = file.set_modified(modified)
+        {
+            tracing::warn!(volume = self.name(), path = placed.as_str(), error = %err, "cannot set the modification time of a committed file");
+        }
+        drop(file);
         if let Err(err) = sync_dir(&parent_dir) {
             tracing::warn!(volume = self.name(), path = parent.as_str(), error = %err, "cannot sync the folder of a committed file");
         }

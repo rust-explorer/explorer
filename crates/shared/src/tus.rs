@@ -28,9 +28,50 @@ pub fn decode_metadata(header: &str) -> Option<Vec<(String, String)>> {
         .collect()
 }
 
+/// Bytes read from each end of a file for its [`fingerprint`].
+pub const FINGERPRINT_SAMPLE: u64 = 64 * 1024;
+
+/// Tells apart two files with the same name, size and date before an upload is resumed:
+/// a 64-bit FNV-1a hash of the first and last [`FINGERPRINT_SAMPLE`] bytes (`head`, `tail`),
+/// as 16 hex digits. Not a cryptographic hash; it only guards against mistakes.
+#[must_use]
+pub fn fingerprint(head: &[u8], tail: &[u8]) -> String {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in head.iter().chain(tail) {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// Whether `value` has the shape [`fingerprint`] gives.
+#[must_use]
+pub fn is_fingerprint(value: &str) -> bool {
+    value.len() == 16
+        && value
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fingerprints() {
+        assert_eq!(fingerprint(b"", b""), "cbf29ce484222325");
+        assert_eq!(fingerprint(b"a", b""), "af63dc4c8601ec8c");
+        assert_ne!(fingerprint(b"ab", b"c"), fingerprint(b"ab", b"d"));
+        assert!(is_fingerprint(&fingerprint(b"x", b"y")));
+        for bad in [
+            "",
+            "CBF29CE484222325",
+            "cbf29ce48422232",
+            "cbf29ce4842223250",
+        ] {
+            assert!(!is_fingerprint(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn metadata_round_trips() {

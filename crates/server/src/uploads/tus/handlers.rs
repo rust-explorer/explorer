@@ -4,8 +4,10 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::http::header::{self, HeaderMap};
 use axum::response::{IntoResponse, Response};
+use shared::api::uploads::MAX_PATCHES_PER_USER;
 use shared::tus::TUS_VERSION;
 
+use super::admit::{check_pending_count, check_space};
 use super::commit::{commit, now_ms, write_and_commit};
 use super::protocol::{
     Creation, EXTENSIONS, OFFSET_STREAM, TUS_EXTENSION, TUS_VERSION_HEADER, UPLOAD_LENGTH,
@@ -59,29 +61,22 @@ pub(super) async fn create(
         length,
         modified_ms,
         conflict,
+        fingerprint,
         ..
     } = creation;
 
+    let admission = state.uploads.admission().await;
+    check_pending_count(&state, &user.sub).await?;
+    let pending = state
+        .uploads
+        .pending_on(&volume)
+        .await
+        .map_err(ApiError::internal)?;
     let id = StagedId::random();
     blocking_volume(&state.volumes, &volume, {
         let (id, path) = (id.clone(), path.clone());
         move |vol| {
-            match vol.space() {
-                Ok(space) if length > space.available => {
-                    tracing::warn!(
-                        volume = vol.name(),
-                        path = path.as_str(),
-                        length,
-                        available = space.available,
-                        "upload larger than the free space"
-                    );
-                    return Err(ApiError::insufficient_storage(vol.name(), path.as_str()));
-                }
-                Ok(_) => {}
-                Err(err) => {
-                    tracing::warn!(volume = vol.name(), error = %err, "cannot read free space");
-                }
-            }
+            check_space(vol, &path, length, &pending)?;
             vol.check_upload_target(&path, conflict)
                 .and_then(|()| vol.staging())
                 .and_then(|staging| staging.create(&id))
@@ -100,6 +95,7 @@ pub(super) async fn create(
         length,
         modified_ms,
         conflict,
+        fingerprint,
         final_path: None,
         created_at: now,
         updated_at: now,
@@ -110,6 +106,7 @@ pub(super) async fn create(
         }
         return Err(ApiError::internal(err));
     }
+    drop(admission);
     tracing::info!(
         user = user.sub,
         action = "upload",
@@ -205,6 +202,13 @@ pub(super) async fn append(
         return committed(&record, offset);
     }
 
+    let Some(slot) = state
+        .uploads
+        .try_start_patch(&user.sub, MAX_PATCHES_PER_USER)
+    else {
+        tracing::warn!(user = user.sub, "too many upload requests in flight");
+        return Err(ApiError::too_many_patches());
+    };
     let Some(lock) = state.uploads.try_lock(&record.id) else {
         return Err(ApiError::upload_busy());
     };
@@ -225,9 +229,10 @@ pub(super) async fn append(
 
     // A task of its own, holding the lock: if the client goes away and this handler is dropped,
     // the writes still complete and the commit still gets recorded before the lock is released.
-    tokio::spawn(write_and_commit(
-        state, user.sub, record, staged, body, lock,
-    ))
+    tokio::spawn(async move {
+        let _slot = slot;
+        write_and_commit(state, user.sub, record, staged, body, lock).await
+    })
     .await
     .map_err(ApiError::internal)?
 }
@@ -252,15 +257,17 @@ pub(super) async fn cancel(
         .delete(&record.id)
         .await
         .map_err(ApiError::internal)?;
-    if record.final_path.is_none() {
-        tracing::info!(
-            user = user.sub,
-            action = "upload",
-            volume = record.volume,
-            path = record.path.as_str(),
-            "upload cancelled"
-        );
+    // The cancel lost the race with the last chunk: the client must not report it cancelled.
+    if let Some(final_path) = &record.final_path {
+        return Err(ApiError::upload_committed(final_path.as_str()));
     }
+    tracing::info!(
+        user = user.sub,
+        action = "upload",
+        volume = record.volume,
+        path = record.path.as_str(),
+        "upload cancelled"
+    );
     Ok(StatusCode::NO_CONTENT)
 }
 

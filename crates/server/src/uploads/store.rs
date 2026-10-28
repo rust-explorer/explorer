@@ -20,21 +20,27 @@ pub struct UploadRecord {
     pub length: u64,
     pub modified_ms: Option<i64>,
     pub conflict: ConflictPolicy,
+    /// The client's [`shared::tus::fingerprint`] of the file.
+    pub fingerprint: Option<String>,
     /// Set once the upload is committed.
     pub final_path: Option<RelPath>,
     pub created_at: i64,
     pub updated_at: i64,
 }
 
-const COLUMNS: &str = "id, user_sub, volume, path, length, modified_ms, conflict, final_path, \
-                       created_at, updated_at";
+const COLUMNS: &str = "id, user_sub, volume, path, length, modified_ms, conflict, fingerprint, \
+                       final_path, created_at, updated_at";
 
 /// Locked uploads, each with whether a cancel arrived while it was held.
 type Locks = Arc<Mutex<HashMap<StagedId, bool>>>;
+/// `PATCH` requests in flight per user.
+type Patches = Arc<Mutex<HashMap<String, usize>>>;
 
 pub struct Uploads {
     pool: SqlitePool,
     locks: Locks,
+    admission: tokio::sync::Mutex<()>,
+    patches: Patches,
 }
 
 /// Held while a request works on an upload; released on drop.
@@ -65,6 +71,24 @@ impl Drop for UploadLock {
     }
 }
 
+/// One of a user's `PATCH` requests in flight; released on drop.
+pub struct PatchSlot {
+    user_sub: String,
+    patches: Patches,
+}
+
+impl Drop for PatchSlot {
+    fn drop(&mut self) {
+        let mut patches = self.patches.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(count) = patches.get_mut(&self.user_sub) {
+            *count -= 1;
+            if *count == 0 {
+                patches.remove(&self.user_sub);
+            }
+        }
+    }
+}
+
 fn corrupt(column: &str) -> sqlx::Error {
     sqlx::Error::ColumnDecode {
         index: column.to_owned(),
@@ -86,6 +110,7 @@ fn record(row: &SqliteRow) -> sqlx::Result<UploadRecord> {
         length: u64::try_from(length).map_err(|_| corrupt("length"))?,
         modified_ms: row.try_get("modified_ms")?,
         conflict: ConflictPolicy::parse(&conflict).ok_or_else(|| corrupt("conflict"))?,
+        fingerprint: row.try_get("fingerprint")?,
         final_path: final_path
             .map(|p| RelPath::parse(&p).map_err(|_| corrupt("final_path")))
             .transpose()?,
@@ -100,13 +125,15 @@ impl Uploads {
         Self {
             pool,
             locks: Arc::default(),
+            admission: tokio::sync::Mutex::new(()),
+            patches: Arc::default(),
         }
     }
 
     pub async fn insert(&self, record: &UploadRecord) -> sqlx::Result<()> {
         let length = i64::try_from(record.length).map_err(|_| corrupt("length"))?;
         sqlx::query(&format!(
-            "INSERT INTO uploads ({COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO uploads ({COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ))
         .bind(record.id.as_str())
         .bind(&record.user_sub)
@@ -115,6 +142,7 @@ impl Uploads {
         .bind(length)
         .bind(record.modified_ms)
         .bind(record.conflict.as_str())
+        .bind(record.fingerprint.as_deref())
         .bind(record.final_path.as_ref().map(RelPath::as_str))
         .bind(record.created_at)
         .bind(record.updated_at)
@@ -151,6 +179,40 @@ impl Uploads {
         .collect()
     }
 
+    /// Held from the checks of a new upload until its record is inserted, so that concurrent
+    /// creations see each other.
+    pub async fn admission(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.admission.lock().await
+    }
+
+    pub async fn count_pending(&self, user_sub: &str) -> sqlx::Result<u64> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM uploads WHERE user_sub = ? AND final_path IS NULL",
+        )
+        .bind(user_sub)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(u64::try_from(count).unwrap_or_default())
+    }
+
+    /// The id and length of every unfinished upload to `volume`, whoever started it.
+    pub async fn pending_on(&self, volume: &str) -> sqlx::Result<Vec<(StagedId, u64)>> {
+        sqlx::query("SELECT id, length FROM uploads WHERE volume = ? AND final_path IS NULL")
+            .bind(volume)
+            .fetch_all(&self.pool)
+            .await?
+            .iter()
+            .map(|row| {
+                let id: String = row.try_get("id")?;
+                let length: i64 = row.try_get("length")?;
+                Ok((
+                    StagedId::parse(&id).ok_or_else(|| corrupt("id"))?,
+                    u64::try_from(length).map_err(|_| corrupt("length"))?,
+                ))
+            })
+            .collect()
+    }
+
     pub async fn touch(&self, id: &StagedId, now_ms: i64) -> sqlx::Result<()> {
         sqlx::query("UPDATE uploads SET updated_at = ? WHERE id = ?")
             .bind(now_ms)
@@ -181,6 +243,21 @@ impl Uploads {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    /// `None` while the user already has `max` requests in flight.
+    #[must_use]
+    pub fn try_start_patch(&self, user_sub: &str, max: usize) -> Option<PatchSlot> {
+        let mut patches = self.patches.lock().unwrap_or_else(PoisonError::into_inner);
+        let count = patches.entry(user_sub.to_owned()).or_default();
+        if *count >= max {
+            return None;
+        }
+        *count += 1;
+        Some(PatchSlot {
+            user_sub: user_sub.to_owned(),
+            patches: Arc::clone(&self.patches),
+        })
     }
 
     /// `None` while another request holds the upload.
@@ -223,6 +300,18 @@ impl Uploads {
         .iter()
         .map(record)
         .collect()
+    }
+
+    /// Whether the upload still exists and was last touched before `before_ms`.
+    pub(super) async fn idle_since(&self, id: &StagedId, before_ms: i64) -> sqlx::Result<bool> {
+        Ok(
+            sqlx::query("SELECT 1 FROM uploads WHERE id = ? AND updated_at < ?")
+                .bind(id.as_str())
+                .bind(before_ms)
+                .fetch_optional(&self.pool)
+                .await?
+                .is_some(),
+        )
     }
 
     pub(super) async fn exists(&self, id: &StagedId) -> sqlx::Result<bool> {

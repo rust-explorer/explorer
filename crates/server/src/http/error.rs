@@ -7,6 +7,7 @@ use serde_json::json;
 use shared::api::error::ErrorBody;
 use shared::api::favorites::MAX_FAVORITES;
 use shared::api::tasks::MAX_ACTIVE_TASKS;
+use shared::api::uploads::{MAX_PATCHES_PER_USER, MAX_PENDING_UPLOADS};
 
 use crate::http::request_id::request_id;
 use crate::storage::{InvalidPath, StorageError};
@@ -137,6 +138,24 @@ impl ApiError {
         )
     }
 
+    #[must_use]
+    pub fn too_many_uploads() -> Self {
+        Self::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too_many_uploads",
+            format!("At most {MAX_PENDING_UPLOADS} uploads can be unfinished at once"),
+        )
+    }
+
+    #[must_use]
+    pub fn too_many_patches() -> Self {
+        Self::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too_many_patches",
+            format!("At most {MAX_PATCHES_PER_USER} upload requests can run at once"),
+        )
+    }
+
     /// `offset` is where the upload actually stands.
     #[must_use]
     pub fn offset_mismatch(offset: u64) -> Self {
@@ -146,6 +165,17 @@ impl ApiError {
             format!("The upload is at offset {offset}"),
         )
         .with_details(json!({ "offset": offset }))
+    }
+
+    /// A cancel that came after the upload was committed to `final_path`.
+    #[must_use]
+    pub fn upload_committed(final_path: &str) -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            "upload_committed",
+            "The upload was already complete",
+        )
+        .with_details(json!({ "final_path": final_path }))
     }
 
     #[must_use]

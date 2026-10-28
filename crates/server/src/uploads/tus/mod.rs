@@ -1,3 +1,4 @@
+mod admit;
 mod commit;
 mod handlers;
 mod protocol;

@@ -109,11 +109,11 @@ reload or a laptop going to sleep. The server never holds a whole file in memory
 | Route | Purpose |
 |---|---|
 | `OPTIONS /files/uploads` | Discovery: `Tus-Version` and `Tus-Extension: creation,termination`. |
-| `POST /files/uploads` | Creates an upload. `Upload-Length` is required (no deferred length, no body). `Upload-Metadata` carries `volume` and `path` (the destination file path, including the file name), and optionally `modified` (the file's `lastModified`, integer milliseconds) and `conflict` (`fail`, the default, `replace` or `keep_both`); values are base64, unknown keys are ignored. Answers 201 with `Location: /files/uploads/{id}` and `Upload-Offset: 0`. |
+| `POST /files/uploads` | Creates an upload. `Upload-Length` is required (no deferred length, no body). `Upload-Metadata` carries `volume` and `path` (the destination file path, including the file name), and optionally `modified` (the file's `lastModified`, integer milliseconds) `conflict` (`fail`, the default, `replace` or `keep_both`) and `fingerprint` (16 lowercase hex digits, see below); values are base64, unknown keys are ignored. Answers 201 with `Location: /files/uploads/{id}` and `Upload-Offset: 0`. |
 | `HEAD /files/uploads/{id}` | The current `Upload-Offset` and `Upload-Length`, with `Cache-Control: no-store`. |
 | `PATCH /files/uploads/{id}` | Appends the body at `Upload-Offset` (`Content-Type: application/offset+octet-stream`). Answers 204 with the new offset. |
-| `DELETE /files/uploads/{id}` | Cancels the upload and removes its staged data. |
-| `GET /api/uploads` | The signed-in user's unfinished uploads (`id`, `volume`, `path`, `length`, `offset`, `modified_ms`), so a reloaded page can resume them. |
+| `DELETE /files/uploads/{id}` | Cancels the upload and removes its staged data. Answers 204, or 409 `upload_committed` when the upload was already complete (the file stays in place). |
+| `GET /api/uploads` | The signed-in user's unfinished uploads (`id`, `volume`, `path`, `length`, `offset`, `modified_ms`, `conflict`, `fingerprint`), so a reloaded page can resume them. |
 | `POST /api/volumes/{volume}/folders` | Body `{"path": "..."}`. Creates a folder and its missing parents; an existing folder is fine. Answers 204. Used to upload folder trees, including empty folders. |
 
 `Tus-Resumable: 1.0.0` is required on every request under `/files/uploads` except
@@ -130,7 +130,10 @@ New error codes (JSON error shape as above):
 |---|---|---|
 | `already_exists` | 409 | The destination exists and `conflict` is `fail` (or no free "keep both" name was found up to `(999)`). |
 | `read_only_volume` | 403 | The volume is read-only. |
-| `insufficient_storage` | 507 | `Upload-Length` is larger than the volume's free space, or the disk filled up while writing. |
+| `insufficient_storage` | 507 | `Upload-Length` is larger than the volume's free space less what its unfinished uploads still have to receive, or the disk filled up while writing. |
+| `too_many_uploads` | 429 | The user already has 1000 unfinished uploads (`MAX_PENDING_UPLOADS`). |
+| `upload_committed` | 409 | `DELETE` of an upload that was already committed; `details.final_path` is where the file is. The record is dropped all the same. |
+| `too_many_patches` | 429 | The user already has 8 `PATCH` requests in flight (`MAX_PATCHES_PER_USER`); retry later. |
 | `upload_not_found` | 404 | Unknown id, another user's upload, or an upload whose staged file is gone. |
 | `offset_mismatch` | 409 | `Upload-Offset` is not the server's offset; `details.offset` carries the right one. |
 | `upload_busy` | 423 | Another request is writing or finishing this upload. |
@@ -145,10 +148,11 @@ An empty destination path (the volume root) is `invalid_path`; `is_a_directory`,
 
 How an upload is stored:
 
-1. Creation checks the destination (a parent that is a file, an existing file with
-   `conflict=fail`, a folder with `replace`) and the free space, creates the staged file and
+1. Creation checks the user's count of unfinished uploads, the destination (a parent that
+   is a file, an existing file with `conflict=fail`, a folder with `replace`) and the free
+   space less the bytes the volume's unfinished uploads still owe, creates the staged file and
    inserts a record in the `uploads` table of `explorer.db` (id, owner `sub`, volume, path,
-   length, `modified`, conflict policy, timestamps).
+   length, `modified`, conflict policy, fingerprint, timestamps).
 2. Data is written to `.explorer-uploads/<id>` at the root of the volume. The directory is
    created on first upload with mode `0700`, the file with `0666` less the umask, both owned
    by the container user; the final file keeps that mode, like any file the container
@@ -162,8 +166,8 @@ How an upload is stored:
    write. A body that sends nothing for 60 seconds is treated as a disconnect; what arrived
    is kept and flushed to disk.
 4. When the staged file reaches `Upload-Length`, the server creates the missing parent
-   folders, applies `modified` as the file's modification time, syncs it and renames it
-   into place. `fail` and `keep_both` use a no-replace rename, so a file that appears
+   folders, syncs the file and renames it into place, then applies `modified` as its
+   modification time (only once placed, so a staged file never looks old to the sweep). `fail` and `keep_both` use a no-replace rename, so a file that appears
    during the upload is never overwritten (with `fail` the upload then takes a "keep both"
    name and the log says so); `replace` renames over the destination but never over a
    folder. "Keep both" names `Film.mkv` as `Film (1).mkv`, then `(2)` and so on: the suffix
@@ -179,7 +183,8 @@ How an upload is stored:
    filesystem than the volume. Mount such a folder as its own volume.
 
 Abandoned uploads: a record not touched for 24 hours is deleted with its staged file, and
-so is a staged file older than that without a record. The sweep runs at startup and then
+so is a staged file older than that without a record. The sweep checks each record again
+once it holds the upload's lock, so an upload resumed meanwhile is kept. The sweep runs at startup and then
 every hour; it logs each abandoned upload it removes at `info` (`action` = `sweep`), then
 a summary of what it removed.
 
@@ -401,13 +406,20 @@ browser. The engine lives in `crates/web/src/uploads`:
 - A file is cut into 16 MiB chunks, each sent as one `PATCH`; at most 3 files upload at
   once. Before creating an upload, the client resumes a pending one (from `GET /api/uploads`)
   whose volume, path, size and modification time all match, so reloading and picking the
-  same file again continues from the server's offset.
+  same file again continues from the server's offset. It resumes only an upload created with
+  the `fail` policy, so that a new batch still asks before overwriting, and only when the
+  fingerprints match: a 64-bit FNV-1a hash of the file's first and last 64 KiB
+  (`shared::tus::fingerprint`), sent at creation. A different file with the same name, size
+  and date is uploaded anew rather than appended to the first one's data.
 - After a transient failure (network error, a 5xx answer that is not an API error, such as a
-  proxy's 502, `internal`, `upload_busy`, `offset_mismatch`) the item asks the server for its offset and retries after
+  proxy's 502, `internal`, `upload_busy`, `offset_mismatch`, `too_many_patches`) the item asks the server for its offset and retries after
   `min(1 s x 2^(attempt-1), 30 s)`, until the user cancels. A `PATCH` that reports no
   progress for 120 seconds is aborted and counts as a network error. An upload the server no
   longer knows (`upload_not_found`) is recreated from the start, once. When that offset is
   the full length, an empty `PATCH` confirms the commit before the item is marked done.
+- Cancelling aborts the request in flight and deletes the upload. If the last chunk had
+  already been committed (`upload_committed`), the item shows as done, not cancelled, and
+  the listing refreshes.
 - An `already_exists` answer opens a dialog: Replace, Keep both or Cancel, with an "apply to
   all" option for the rest of the batch. Folders that already exist are merged into, never a
   conflict.
