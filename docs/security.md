@@ -157,7 +157,10 @@ Names that are not valid UTF-8 are skipped with a warning.
   uploads private, restrict access to the volume's folder on the host.
 - **Reserved name.** Any client path whose first component is `.explorer-uploads`, in any
   letter case (a volume may sit on a filesystem that ignores case), is rejected with
-  `invalid_path` (reason `reserved name`), and no such entry is listed at a volume root. The volume root and the staging
+  `invalid_path` (reason `reserved name`), and no such entry is listed, zipped or counted
+  in space usage at a volume root. A folder of that name made outside Explorer at a volume
+  root (say `.Explorer-Uploads` on a case-sensitive filesystem) is therefore out of reach
+  from Explorer; rename it on the host to reach it. The volume root and the staging
   directory are also recognised by device and inode, so a symlink inside the volume that
   points to the root or to the staging directory does not reach it either: it is never
   listed or zipped, and reading or writing through such a path is `path_not_found`. The

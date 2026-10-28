@@ -8,7 +8,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use rustix::fs::{AtFlags, FileType, Mode, OFlags, Stat};
 use rustix::io::Errno;
 
-use super::path::STAGING_DIR;
+use super::path::{STAGING_DIR, is_staging_name};
 use super::read::{EntryKind, fs_path};
 use super::write::keep_both_name;
 use super::{RelPath, StorageError, Volume};
@@ -169,7 +169,7 @@ impl TreeWalk {
 
     fn visit(&mut self, volume: &Volume, depth: usize, raw: CString) -> Visit {
         let frame = &self.frames[depth];
-        if frame.id == self.root_id && raw.as_bytes() == STAGING_DIR.as_bytes() {
+        if frame.id == self.root_id && raw.to_str().is_ok_and(is_staging_name) {
             return Visit::Hidden;
         }
         let rel = frame

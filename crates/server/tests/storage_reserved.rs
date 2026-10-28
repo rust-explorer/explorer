@@ -8,7 +8,7 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use explorer_server::storage::{RelPath, STAGING_DIR, StagedId, StorageError, Volumes};
+use explorer_server::storage::{RelPath, STAGING_DIR, StagedId, StorageError, TreeItem, Volumes};
 use shared::api::conflict::ConflictPolicy;
 
 fn rel(raw: &str) -> RelPath {
@@ -41,6 +41,18 @@ fn a_case_variant_of_the_staging_name_is_reserved() {
         .map(|entry| entry.name)
         .collect();
     assert_eq!(names, ["Holidays"]);
+    // Nor zipped.
+    fs::write(media.join(".Explorer-UPLOADS/hidden.txt"), b"x").unwrap();
+    let mut walk = volume.tree_walk(&RelPath::root(), None).unwrap();
+    let mut zipped = Vec::new();
+    while let Some(item) = walk.next(volume) {
+        zipped.push(match item {
+            TreeItem::Dir { name, .. }
+            | TreeItem::File { name, .. }
+            | TreeItem::Skipped { name, .. } => name,
+        });
+    }
+    assert_eq!(zipped, ["Holidays", "Holidays/photo.jpg"]);
 }
 
 /// Flips `R` between a plain folder and a symlink to the volume root while `probe` runs, and
