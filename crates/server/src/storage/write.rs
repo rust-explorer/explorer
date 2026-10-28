@@ -179,12 +179,25 @@ impl Volume {
             return Err(StorageError::IsADirectory(dest.clone()));
         };
         self.refuse_reserved(dest)?;
-        let created = self.create_missing_dirs(&parent)?;
-        let placed = self.place_staged(staging, id, &parent, name, conflict, modified);
-        if placed.is_err() {
+        let mut retried = false;
+        loop {
+            let created = self.create_missing_dirs(&parent)?;
+            let placed = self.place_staged(staging, id, &parent, name, conflict, modified);
+            let Err(err) = placed else {
+                return placed;
+            };
+            // A concurrent commit that failed may have removed an empty folder it created.
+            let vanished = !retried && self.parent_vanished(&parent, &err);
             self.remove_created_dirs(&created);
+            if !vanished {
+                return Err(err);
+            }
+            retried = true;
         }
-        placed
+    }
+
+    fn parent_vanished(&self, parent: &RelPath, err: &StorageError) -> bool {
+        matches!(err, StorageError::NotFound(_)) && matches!(self.is_dir_at(parent), Ok(None))
     }
 
     fn place_staged(
@@ -376,6 +389,20 @@ mod tests {
             rename_error(&path, Errno::XDEV),
             StorageError::CrossDevice(_)
         ));
+    }
+
+    #[test]
+    fn only_a_missing_parent_counts_as_vanished() {
+        let data = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(data.path().join("media/kept")).unwrap();
+        let volumes = crate::storage::Volumes::discover(data.path()).unwrap();
+        let media = volumes.get("media").unwrap();
+        let rel = |raw| RelPath::parse(raw).unwrap();
+        let not_found = StorageError::NotFound(rel("x"));
+        assert!(media.parent_vanished(&rel("gone"), &not_found));
+        assert!(!media.parent_vanished(&rel("kept"), &not_found));
+        let denied = StorageError::PermissionDenied(rel("x"));
+        assert!(!media.parent_vanished(&rel("gone"), &denied));
     }
 
     #[test]
