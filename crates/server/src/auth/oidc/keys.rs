@@ -32,7 +32,10 @@ impl Oidc {
         let jwks = match JsonWebKeySet::fetch_async(self.metadata.jwks_uri(), &self.http).await {
             Ok(jwks) => jwks,
             Err(err) => {
-                tracing::warn!(error = error_chain(&err), "cannot fetch the provider's keys");
+                tracing::warn!(
+                    error = error_chain(&err),
+                    "cannot fetch the provider's keys"
+                );
                 return None;
             }
         };

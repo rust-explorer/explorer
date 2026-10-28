@@ -25,7 +25,10 @@ pub struct Thumbnails {
 impl Thumbnails {
     /// Creates `dir` when missing.
     pub fn new(dir: PathBuf) -> io::Result<Self> {
-        fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&dir)?;
         Ok(Self {
             dir,
             permits: Arc::new(Semaphore::new(THUMB_CONCURRENCY)),
@@ -173,7 +176,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         Thumbnails::new(dir.path().join("cache/thumbnails")).unwrap();
         for sub in ["cache", "cache/thumbnails"] {
-            let mode = fs::metadata(dir.path().join(sub)).unwrap().permissions().mode();
+            let mode = fs::metadata(dir.path().join(sub))
+                .unwrap()
+                .permissions()
+                .mode();
             assert_eq!(mode & 0o777, 0o700, "{sub}");
         }
     }

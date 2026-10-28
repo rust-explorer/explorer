@@ -8,9 +8,9 @@ use shared::api::auth::{LogoutResponse, Me};
 use tower_sessions::Session;
 use url::{Position, Url};
 
-use super::{csrf, session};
 use super::current_user::{CurrentUser, USER_KEY};
 use super::oidc::PendingLogin;
+use super::{csrf, session};
 use crate::http::AppState;
 use crate::http::error::ApiError;
 use crate::http::request_id::request_id;
@@ -165,9 +165,7 @@ pub(super) async fn callback(
             .insert(ID_TOKEN_KEY, identity.id_token)
             .await
             .map_err(ApiError::internal)?;
-        session::start(&session)
-            .await
-            .map_err(ApiError::internal)?;
+        session::start(&session).await.map_err(ApiError::internal)?;
         return Ok(see_other(ACCESS_DENIED_PATH));
     }
 
@@ -186,9 +184,7 @@ pub(super) async fn callback(
         .insert(ID_TOKEN_KEY, identity.id_token)
         .await
         .map_err(ApiError::internal)?;
-    session::start(&session)
-        .await
-        .map_err(ApiError::internal)?;
+    session::start(&session).await.map_err(ApiError::internal)?;
     tracing::info!(request_id, sub = user.sub, "signed in");
     Ok(see_other(&return_to))
 }

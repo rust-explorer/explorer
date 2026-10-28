@@ -344,7 +344,9 @@ async fn an_unknown_state_burns_every_pending_login() {
     let url = h.login(&mut jar, None).await;
     h.login(&mut jar, None).await;
 
-    let res = h.callback(&mut jar, &[("code", "c"), ("state", "forged")]).await;
+    let res = h
+        .callback(&mut jar, &[("code", "c"), ("state", "forged")])
+        .await;
     assert_signin_error(&res, "state_mismatch");
 
     let code = h.fake.approve(&url).unwrap();

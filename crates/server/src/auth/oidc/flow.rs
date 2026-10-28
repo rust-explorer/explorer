@@ -117,9 +117,7 @@ impl Oidc {
         access_token: &AccessToken,
         subject: &SubjectIdentifier,
     ) -> Result<Option<Vec<String>>, SigninError> {
-        let Ok(request) = client
-            .user_info(access_token.clone(), Some(subject.clone()))
-        else {
+        let Ok(request) = client.user_info(access_token.clone(), Some(subject.clone())) else {
             return Ok(None);
         };
         let info: UserInfoClaims<ExtraClaims, CoreGenderClaim> = request
