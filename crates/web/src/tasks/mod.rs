@@ -134,7 +134,9 @@ impl TaskStore {
                 }
                 Effect::Delete { id } => {
                     spawn_forever(async move {
-                        let _ = transport::delete(&id).await;
+                        if let Err(failure) = transport::delete(&id).await {
+                            self.dispatch(Event::DeleteFailed { id, failure });
+                        }
                     });
                 }
                 Effect::PollAfter { ms } => {

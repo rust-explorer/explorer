@@ -145,6 +145,8 @@ task-moving = Moving { $name } to { $folder }
 task-cancel = Cancel { $name }
 task-progress = Task progress
 task-waiting = Waiting
+task-signed-out = Signed out: sign in again to follow this task.
+task-cancel-failed = This task couldn't be cancelled.
 task-files = { $done } / { $total }
 task-files-done =
     { $count ->

@@ -70,9 +70,21 @@ fn TaskRow(task: Task) -> Element {
 
 #[component]
 fn TaskStatus(task: Task) -> Element {
+    let signed_out = use_tasks().list().read().signed_out();
     if task.conflict().is_some() {
         return rsx! {
             p { class: NOTE, {t!("task-deciding")} }
+        };
+    }
+    if task.is_active() && signed_out {
+        return rsx! {
+            p { class: NOTE, {t!("task-signed-out")} }
+        };
+    }
+    if let Some(failure) = task.cancel_failure().filter(|_| task.is_active()) {
+        return rsx! {
+            p { class: "mt-0.5 text-xs text-red-700 dark:text-red-400", {t!("task-cancel-failed")} }
+            FailureNote { failure: failure.clone() }
         };
     }
     let usage = matches!(task.spec, TaskSpec::Usage { .. });

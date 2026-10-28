@@ -37,6 +37,8 @@ pub struct Task {
     finished_at_ms: Option<i64>,
     /// Cleared from the activity panel, but still known for its result.
     dismissed: bool,
+    /// Why the last cancel request failed.
+    cancel_failure: Option<ApiFailure>,
 }
 
 impl Task {
@@ -72,6 +74,10 @@ impl Task {
         })
     }
 
+    pub fn cancel_failure(&self) -> Option<&ApiFailure> {
+        self.cancel_failure.as_ref()
+    }
+
     pub fn finished_at_ms(&self) -> Option<i64> {
         self.finished_at_ms
     }
@@ -101,10 +107,21 @@ pub enum Effect {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    Posted { key: TaskKey, info: Box<TaskInfo> },
-    PostFailed { key: TaskKey, failure: ApiFailure },
+    Posted {
+        key: TaskKey,
+        info: Box<TaskInfo>,
+    },
+    PostFailed {
+        key: TaskKey,
+        failure: ApiFailure,
+    },
     Polled(Vec<TaskInfo>),
     PollFailed(ApiFailure),
+    /// The `Delete` of task `id` failed.
+    DeleteFailed {
+        id: String,
+        failure: ApiFailure,
+    },
 }
 
 /// The tab's tasks: events in, requests out. Polls only while one of them is queued or running.
@@ -119,6 +136,8 @@ pub struct TaskList {
     next_batch: u64,
     /// "Apply to all" answers, by batch.
     decisions: HashMap<u64, Decision>,
+    /// A poll found the session gone: polling stops until the user signs in again.
+    signed_out: bool,
 }
 
 impl TaskList {
@@ -129,6 +148,10 @@ impl TaskList {
     /// The tasks the activity panel lists.
     pub fn shown(&self) -> impl Iterator<Item = &Task> {
         self.tasks.iter().filter(|task| !task.dismissed)
+    }
+
+    pub fn signed_out(&self) -> bool {
+        self.signed_out
     }
 
     pub fn active_count(&self) -> usize {
@@ -179,6 +202,7 @@ impl TaskList {
                     open_at: None,
                     finished_at_ms: None,
                     dismissed: false,
+                    cancel_failure: None,
                 });
                 Effect::Post { key, spec }
             })
@@ -214,6 +238,7 @@ impl TaskList {
                 open_at: None,
                 finished_at_ms: None,
                 dismissed: finished_scan,
+                cancel_failure: None,
             });
         }
         let mut effects = Vec::new();
@@ -282,6 +307,7 @@ impl TaskList {
             Event::PostFailed { key, failure } => self.refused(key, failure, &mut effects),
             Event::Polled(infos) => {
                 self.polling = false;
+                self.signed_out = false;
                 if self.update(&infos) {
                     effects.push(Effect::Refresh);
                 }
@@ -289,9 +315,11 @@ impl TaskList {
             Event::PollFailed(failure) => {
                 self.polling = false;
                 if failure.is_unauthenticated() {
+                    self.signed_out = true;
                     return effects;
                 }
             }
+            Event::DeleteFailed { id, failure } => self.cancel_failed(&id, failure),
         }
         self.keep_polling(&mut effects);
         effects
@@ -306,6 +334,7 @@ impl TaskList {
             self.tasks.retain(|task| task.key != key);
             return Vec::new();
         }
+        task.cancel_failure = None;
         if let Some(id) = task.server_id() {
             return vec![Effect::Delete { id: id.to_owned() }];
         }
@@ -339,6 +368,27 @@ impl TaskList {
             if !task.is_active() && task.finished_at_ms.is_none() {
                 task.finished_at_ms = Some(now_ms);
             }
+        }
+    }
+
+    /// A task the server no longer knows is lost; any other failure is shown on its row, and
+    /// the task goes on until the user cancels again.
+    fn cancel_failed(&mut self, id: &str, failure: ApiFailure) {
+        if failure.is_unauthenticated() {
+            self.signed_out = true;
+            return;
+        }
+        let Some(task) = self
+            .tasks
+            .iter_mut()
+            .find(|task| task.is_active() && task.server_id() == Some(id))
+        else {
+            return;
+        };
+        if matches!(&failure, ApiFailure::Server(body) if body.code == TASK_NOT_FOUND) {
+            task.lost = Some(failure);
+        } else {
+            task.cancel_failure = Some(failure);
         }
     }
 
@@ -572,11 +622,15 @@ mod tests {
     fn network_failure_keeps_polling_but_sign_out_stops() {
         let mut list = posted();
         assert_eq!(list.handle(Event::PollFailed(ApiFailure::Network)), [POLL]);
+        assert!(!list.signed_out());
         assert_eq!(
             list.handle(Event::PollFailed(server("unauthenticated"))),
             []
         );
         assert_eq!(list.active_count(), 2);
+        assert!(list.signed_out());
+        list.handle(Event::Polled(vec![info("a", "a", TaskState::Running)]));
+        assert!(!list.signed_out());
     }
 
     #[test]
@@ -700,6 +754,29 @@ mod tests {
             info("b", "b", TaskState::Done),
         ]));
         assert_eq!(list.cancel(TaskKey(0)), [], "already finished");
+    }
+
+    #[test]
+    fn failed_cancel_shows_until_the_next_try() {
+        let mut list = posted();
+        list.cancel(TaskKey(0));
+        list.handle(Event::DeleteFailed {
+            id: "a".to_owned(),
+            failure: ApiFailure::Network,
+        });
+        assert_eq!(list.tasks()[0].cancel_failure(), Some(&ApiFailure::Network));
+        assert!(list.tasks()[0].is_active());
+        assert_eq!(
+            list.cancel(TaskKey(0)),
+            [Effect::Delete { id: "a".to_owned() }]
+        );
+        assert_eq!(list.tasks()[0].cancel_failure(), None);
+
+        list.handle(Event::DeleteFailed {
+            id: "b".to_owned(),
+            failure: server("task_not_found"),
+        });
+        assert_eq!(list.tasks()[1].state(), TaskState::Failed);
     }
 
     #[test]

@@ -149,6 +149,8 @@ task-moving = Déplacement de { $name } vers { $folder }
 task-cancel = Annuler { $name }
 task-progress = Progression de la tâche
 task-waiting = En attente
+task-signed-out = Session terminée : reconnectez-vous pour suivre cette tâche.
+task-cancel-failed = Cette tâche n'a pas pu être annulée.
 task-files = { $done } / { $total }
 task-files-done =
     { $count ->

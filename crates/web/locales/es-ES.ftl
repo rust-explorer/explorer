@@ -149,6 +149,8 @@ task-moving = Moviendo { $name } a { $folder }
 task-cancel = Cancelar { $name }
 task-progress = Progreso de la tarea
 task-waiting = En espera
+task-signed-out = Sesión cerrada: vuelve a iniciar sesión para seguir esta tarea.
+task-cancel-failed = No se pudo cancelar esta tarea.
 task-files = { $done } / { $total }
 task-files-done =
     { $count ->
