@@ -57,6 +57,7 @@ struct Shared {
 struct Inner {
     authorizations: HashMap<String, Authorization>,
     access_tokens: HashMap<String, String>,
+    claims: Option<Value>,
     next_claims: Option<Value>,
     next_userinfo: Option<Value>,
     discovery_outage: VecDeque<Outage>,
@@ -126,6 +127,11 @@ impl FakeOidc {
     #[must_use]
     pub fn issuer(&self) -> String {
         self.issuer.clone()
+    }
+
+    /// Overrides claims of every later ID token. A `null` value removes the claim.
+    pub fn claims(&self, claims: Value) {
+        self.shared.lock().claims = Some(claims);
     }
 
     /// Overrides claims of the next ID token. A `null` value removes the claim.
@@ -201,7 +207,11 @@ impl Shared {
         if let Some(nonce) = &authorization.nonce {
             claims["nonce"] = json!(nonce);
         }
-        if let Some(overrides) = self.lock().next_claims.take() {
+        let (persistent, next) = {
+            let mut inner = self.lock();
+            (inner.claims.clone(), inner.next_claims.take())
+        };
+        for overrides in [persistent, next].into_iter().flatten() {
             merge(&mut claims, overrides);
         }
         sign(&claims)
@@ -416,6 +426,34 @@ mod tests {
         let mut claims = json!({ "a": 1, "b": 2 });
         merge(&mut claims, json!({ "a": 3, "b": null, "c": 4 }));
         assert_eq!(claims, json!({ "a": 3, "c": 4 }));
+    }
+
+    #[test]
+    fn persistent_claims_apply_to_every_token_before_one_shot_overrides() {
+        let shared = Shared {
+            issuer: "http://127.0.0.1:1".to_owned(),
+            inner: Mutex::new(Inner::default()),
+        };
+        shared.lock().claims = Some(json!({ "name": "Ada Lovelace", "email": null }));
+        shared.lock().next_claims = Some(json!({ "name": "Once" }));
+        let authorization = Authorization {
+            client_id: CLIENT_ID.to_owned(),
+            redirect_uri: String::new(),
+            code_challenge: String::new(),
+            nonce: None,
+        };
+        let payload = |token: &str| -> Value {
+            let part = token.split('.').nth(1).unwrap();
+            serde_json::from_slice(&URL_SAFE_NO_PAD.decode(part).unwrap()).unwrap()
+        };
+
+        let first = payload(&shared.id_token(&authorization));
+        let second = payload(&shared.id_token(&authorization));
+
+        assert_eq!(first["name"], "Once");
+        assert_eq!(second["name"], "Ada Lovelace");
+        assert!(second.get("email").is_none());
+        assert_eq!(second["groups"], json!(["explorer-users"]));
     }
 
     #[test]

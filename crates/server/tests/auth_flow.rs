@@ -435,6 +435,25 @@ async fn logout_clears_session_and_returns_end_session_url() {
 }
 
 #[tokio::test]
+async fn denied_user_can_still_end_the_provider_session() {
+    let h = Harness::new().await;
+    let mut jar = Jar::default();
+    h.sign_in(&mut jar, json!({ "groups": ["other-group"] }))
+        .await;
+
+    let res = h.logout(&mut jar, Some(common::PUBLIC_URL)).await;
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body: LogoutResponse = json(res).await;
+    assert!(
+        body.redirect_to
+            .starts_with(&format!("{}/end-session?", h.fake.issuer())),
+        "{}",
+        body.redirect_to
+    );
+}
+
+#[tokio::test]
 async fn logout_without_session_redirects_home() {
     let h = Harness::new().await;
     let res = h
