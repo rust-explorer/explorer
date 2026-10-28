@@ -9,7 +9,9 @@ use serde::Deserialize;
 use shared::api::browse::EntryKind;
 use shared::api::search::{MIN_QUERY_CHARS, SearchHit, SearchResults};
 
-use super::SEARCH_TIMEOUT;
+use tokio::sync::{Semaphore, SemaphorePermit};
+
+use super::{SEARCH_CONCURRENCY, SEARCH_TIMEOUT};
 use crate::auth::{Action, CurrentUser};
 use crate::browse::epoch_millis;
 use crate::http::AppState;
@@ -21,6 +23,13 @@ use crate::storage::{self, SEARCH_LIMIT};
 pub struct SearchQuery {
     #[serde(default)]
     q: String,
+}
+
+static SEARCHES: Semaphore = Semaphore::const_new(SEARCH_CONCURRENCY);
+
+/// Waits for one of the [`SEARCH_CONCURRENCY`] search slots.
+async fn slot() -> Result<SemaphorePermit<'static>, ApiError> {
+    SEARCHES.acquire().await.map_err(ApiError::internal)
 }
 
 /// Sets the flag when dropped, so that a request the client abandoned stops its walk.
@@ -49,10 +58,12 @@ pub async fn search(
 
     let cancel = Arc::new(AtomicBool::new(false));
     let _guard = CancelOnDrop(Arc::clone(&cancel));
+    let slot = slot().await?;
     let started = Instant::now();
     let outcome = blocking_volume(&state.volumes, &volume, {
         let needle = needle.clone();
         move |vol| {
+            let _slot = slot;
             vol.search(
                 &needle,
                 SEARCH_LIMIT,
@@ -97,6 +108,23 @@ pub async fn search(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn searches_wait_for_a_free_slot() {
+        let held = hold_all().await;
+        let wait = std::time::Duration::from_millis(50);
+        assert!(tokio::time::timeout(wait, slot()).await.is_err());
+        drop(held);
+        assert!(tokio::time::timeout(wait, slot()).await.is_ok());
+    }
+
+    async fn hold_all() -> Vec<SemaphorePermit<'static>> {
+        let mut held = Vec::new();
+        for _ in 0..SEARCH_CONCURRENCY {
+            held.push(slot().await.unwrap());
+        }
+        held
+    }
 
     #[test]
     fn dropping_the_guard_cancels_the_walk() {

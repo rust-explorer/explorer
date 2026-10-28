@@ -317,7 +317,8 @@ volume on every request.
   escape), never matches an entry listed as `other` (absolute, broken or escaping symlinks,
   sockets, FIFOs, devices) and skips `.explorer-uploads`. A query needs 2 characters, the
   walk is capped at 200 hits and 20 seconds and stops when the client goes away, so one
-  request cannot keep a thread for long. The query is only logged at `debug`.
+  request cannot keep a thread for long. At most 4 searches walk at once across all users;
+  more wait for one to end. The query is only logged at `debug`.
 - **Space usage** walks a folder with directory file descriptors opened with `O_NOFOLLOW`
   and checks each folder's device and inode again when it opens it, so a folder swapped for a
   symlink during the scan is not entered. It never follows a symlink, never crosses to another
