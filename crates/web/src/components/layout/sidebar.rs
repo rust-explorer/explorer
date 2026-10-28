@@ -6,6 +6,7 @@ use shared::api::browse::{Space, VolumeInfo};
 use crate::components::common::icons::{LockIcon, VolumeIcon};
 use crate::components::favorites::FavoritesList;
 use crate::format::format_size;
+use crate::i18n::attr;
 use crate::routes::{Route, Segments};
 
 /// Share of the volume in use, in whole percent.
@@ -95,7 +96,7 @@ fn FreeSpace(volume: String, space: Space) -> Element {
                 aria_valuemin: "0",
                 aria_valuemax: "100",
                 aria_valuenow: "{percent}",
-                aria_valuetext: t!("sidebar-used", used: used, total: total),
+                aria_valuetext: attr(t!("sidebar-used", used: used, total: total)),
                 div {
                     class: "h-1 rounded-full bg-indigo-300 dark:bg-indigo-400",
                     width: "{percent}%",

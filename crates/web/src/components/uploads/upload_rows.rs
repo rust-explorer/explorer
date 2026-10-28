@@ -5,6 +5,7 @@ use dioxus_i18n::t;
 use crate::components::common::icons::{CheckIcon, CloseIcon};
 use crate::components::common::{FailureNote, ICON_BUTTON, file_name};
 use crate::format::{format_size, format_speed, now_ms};
+use crate::i18n::attr;
 use crate::uploads::{Item, Kind, Status, use_uploads};
 
 /// Volume and path the item is uploaded to.
@@ -71,8 +72,8 @@ fn UploadRow(item: Item) -> Element {
                     button {
                         r#type: "button",
                         class: ICON_BUTTON,
-                        aria_label: t!("uploads-cancel", name: name.clone()),
-                        title: t!("uploads-cancel", name: name),
+                        aria_label: attr(t!("uploads-cancel", name: name.clone())),
+                        title: attr(t!("uploads-cancel", name: name)),
                         onclick: move |_| uploads.cancel(key),
                         CloseIcon { class: "size-3.5" }
                     }

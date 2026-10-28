@@ -6,6 +6,7 @@ use shared::api::tasks::Location;
 use crate::components::common::file_name;
 use crate::components::common::icons::CloseIcon;
 use crate::favorites::use_favorites;
+use crate::i18n::attr;
 use crate::routes::{Route, Segments};
 
 /// The Favorites section of the sidebar; absent while there are none.
@@ -73,7 +74,7 @@ fn FavoriteRow(favorite: Favorite) -> Element {
     let store = use_favorites();
     let name = display_name(&favorite).to_owned();
     let title = full_name(&favorite);
-    let remove_label = t!("favorites-remove", name: name.clone());
+    let remove_label = attr(t!("favorites-remove", name: name.clone()));
     let location = Location {
         volume: favorite.volume.clone(),
         path: favorite.path.clone(),

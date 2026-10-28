@@ -6,6 +6,7 @@ use shared::api::browse::Entry;
 
 use crate::actions::{RowAction, row_actions};
 use crate::components::common::{FocusTarget, Menu, MenuItem};
+use crate::i18n::attr;
 
 pub const ROW_MENU_ID: &str = "row-menu";
 
@@ -114,7 +115,7 @@ pub fn RowMenu(
         Menu {
             id: ROW_MENU_ID,
             class: "fixed z-20",
-            label: t!("row-menu-open", name: request.entry.name.clone()),
+            label: attr(t!("row-menu-open", name: request.entry.name.clone())),
             at,
             on_close,
             on_mounted: move |menu: Rc<MountedData>| async move {

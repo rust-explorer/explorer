@@ -5,6 +5,7 @@ use crate::components::common::ICON_BUTTON;
 use crate::components::common::icons::{CloseIcon, MinusIcon, PlusIcon};
 use crate::components::tasks::TaskRows;
 use crate::components::uploads::{UploadRows, active_uploads};
+use crate::i18n::attr;
 use crate::tasks::use_tasks;
 use crate::uploads::use_uploads;
 
@@ -45,7 +46,7 @@ pub fn ActivityPanel() -> Element {
     rsx! {
         section {
             class: "fixed inset-x-4 bottom-20 z-30 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm shadow-lg md:inset-x-auto md:bottom-4 md:right-4 md:w-80 dark:border-slate-700 dark:bg-slate-900",
-            aria_label: t!("activity-title", count: active),
+            aria_label: attr(t!("activity-title", count: active)),
             div { class: "flex items-center gap-1",
                 h2 { class: "flex-1 font-semibold text-gray-900 dark:text-white",
                     {t!("activity-title", count: active)}

@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use dioxus_i18n::t;
 
 use crate::components::common::icons::{ArrowLeftIcon, SearchIcon};
+use crate::i18n::attr;
 use crate::search::{DEBOUNCE_MS, SearchQuery, sleep};
 
 const INPUT_CLASS: &str = "h-10 min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 text-base text-slate-900 placeholder:text-slate-500 focus-visible:outline-2 focus-visible:outline-indigo-600 md:h-9 md:text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:placeholder:text-slate-400";
@@ -50,7 +51,7 @@ pub fn SearchField(volume: String) -> Element {
         apply("");
     };
 
-    let placeholder = t!("search-placeholder", volume: volume);
+    let placeholder = attr(t!("search-placeholder", volume: volume));
     let wrapper = if open() {
         "absolute inset-0 z-10 flex items-center gap-2 bg-white px-2 md:static md:inset-auto md:z-auto md:w-64 md:bg-transparent md:px-0 dark:bg-slate-900"
     } else {

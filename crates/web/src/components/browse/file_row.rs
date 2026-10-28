@@ -15,6 +15,7 @@ use crate::components::common::icons::{
 };
 use crate::components::usage::FolderSizeLabel;
 use crate::format::{format_modified, format_size};
+use crate::i18n::attr;
 use crate::listing::{FileType, file_type};
 use crate::routes::{Route, Segment, Segments};
 
@@ -174,9 +175,9 @@ pub fn FileRow(
                         href,
                         download: "",
                         aria_label: if entry.kind == EntryKind::Dir {
-                            t!("download-folder", name: entry.name.clone())
+                            attr(t!("download-folder", name: entry.name.clone()))
                         } else {
-                            t!("download-file", name: entry.name.clone())
+                            attr(t!("download-file", name: entry.name.clone()))
                         },
                         class: ROW_BUTTON,
                         DownloadIcon {}
@@ -186,7 +187,7 @@ pub fn FileRow(
                     button {
                         r#type: "button",
                         class: ROW_BUTTON,
-                        aria_label: t!("row-menu-open", name: entry.name.clone()),
+                        aria_label: attr(t!("row-menu-open", name: entry.name.clone())),
                         aria_haspopup: "menu",
                         aria_expanded: menu_open,
                         aria_controls: if menu_open { ROW_MENU_ID },

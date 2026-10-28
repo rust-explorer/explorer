@@ -3,6 +3,7 @@ use dioxus_i18n::prelude::i18n;
 use dioxus_i18n::t;
 
 use crate::format::{format_modified, format_size, now_ms};
+use crate::i18n::attr;
 use crate::tasks::{FolderSize, Task, use_tasks};
 
 /// A folder's size once a usage scan measured it, in italic; an ellipsis while one runs, and
@@ -31,7 +32,7 @@ pub fn FolderSizeLabel(
         FolderSize::Known(bytes) => rsx! {
             span {
                 class: "italic",
-                title: finished_at.map(|ms| t!("folder-size-calculated", time: format_modified(ms, now_ms(), &locale))),
+                title: finished_at.map(|ms| attr(t!("folder-size-calculated", time: format_modified(ms, now_ms(), &locale)))),
                 {format_size(bytes, &locale)}
             }
             {tail}

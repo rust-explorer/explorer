@@ -6,6 +6,7 @@ use shared::api::tasks::{Location, TaskInfo, TaskSpec, TaskState};
 use crate::components::common::icons::{CheckIcon, CloseIcon};
 use crate::components::common::{FailureNote, ICON_BUTTON, file_name};
 use crate::format::{format_count, format_size};
+use crate::i18n::attr;
 use crate::routes::{Route, go, usage_route};
 use crate::tasks::{Task, use_tasks};
 
@@ -56,8 +57,8 @@ fn TaskRow(task: Task) -> Element {
                     button {
                         r#type: "button",
                         class: ICON_BUTTON,
-                        aria_label: t!("task-cancel", name: name.clone()),
-                        title: t!("task-cancel", name: name),
+                        aria_label: attr(t!("task-cancel", name: name.clone())),
+                        title: attr(t!("task-cancel", name: name)),
                         onclick: move |_| store.cancel(key),
                         CloseIcon { class: "size-3.5" }
                     }
@@ -137,7 +138,7 @@ fn ViewLink(route: Route, name: String) -> Element {
         a {
             href: route.to_string(),
             class: "shrink-0 rounded px-1 text-xs font-medium text-indigo-600 hover:underline focus-visible:outline-2 focus-visible:outline-indigo-600 dark:text-indigo-400",
-            aria_label: t!("task-view-usage", name: name),
+            aria_label: attr(t!("task-view-usage", name: name)),
             onclick: move |event: MouseEvent| {
                 let modifiers = event.modifiers();
                 if modifiers.ctrl() || modifiers.meta() || modifiers.shift() {

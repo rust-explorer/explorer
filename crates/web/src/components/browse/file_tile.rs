@@ -14,6 +14,7 @@ use crate::components::common::FocusTarget;
 use crate::components::common::icons::MoreIcon;
 use crate::components::usage::FolderSizeLabel;
 use crate::format::format_size;
+use crate::i18n::attr;
 use crate::listing::has_thumbnail;
 use crate::routes::{Route, Segment, Segments};
 
@@ -160,7 +161,7 @@ pub fn FileTile(
                 button {
                     r#type: "button",
                     class: "{MORE} {ON_HOVER}",
-                    aria_label: t!("row-menu-open", name: entry.name.clone()),
+                    aria_label: attr(t!("row-menu-open", name: entry.name.clone())),
                     aria_haspopup: "menu",
                     aria_expanded: menu_open,
                     aria_controls: if menu_open { ROW_MENU_ID },

@@ -3,6 +3,8 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 use dioxus_i18n::t;
 
+use crate::i18n::attr;
+
 const BOX: &str = "size-4 cursor-pointer rounded border-slate-300 accent-indigo-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:border-slate-600";
 
 // The selection owns the state. A click is not cancelled (the browser would revert the box after
@@ -27,7 +29,7 @@ pub fn SelectBox(name: String, checked: bool, on_select: EventHandler<bool>) -> 
         input {
             r#type: "checkbox",
             class: BOX,
-            aria_label: t!("select-entry", name: name.clone()),
+            aria_label: attr(t!("select-entry", name: name.clone())),
             checked,
             onmounted: move |event| input.set(Some(event.data())),
             onclick: move |event: MouseEvent| {
