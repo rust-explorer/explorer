@@ -69,7 +69,7 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
         );
 
     let session = session::layer(state.db.clone()).await?;
-    let lifetime = session::Lifetime::new(state.config.session_ttl);
+    let keep_alive = session::KeepAlive::new(state.config.session_ttl, state.db.clone());
     let origin: Arc<str> = csrf::public_origin(&state.config.public_url).into();
 
     let router = extra
@@ -115,7 +115,7 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
                 ))
                 .layer(session)
                 .layer(middleware::from_fn_with_state(
-                    lifetime,
+                    keep_alive,
                     session::keep_alive,
                 )),
         );

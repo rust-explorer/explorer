@@ -41,7 +41,10 @@ again, at most once a minute, and verifies the token once more; no restart is ne
   by Explorer's user only (mode `600`, `-wal` and `-shm` included); keep `/config` at `700`.
 - Expiry is sliding: a session ends after `EXPLORER_SESSION_TTL` of inactivity (default
   7 days, capped at 400). Activity pushes the expiry back at most once an hour (or every half
-  TTL, if shorter), so an idle session may end up to that much earlier.
+  TTL, if shorter), so an idle session may end up to that much earlier. Only requests under
+  `/api`, `/files` and `/auth` read the session; static files and `/healthz` never touch the
+  database. A request that pushed the expiry back does not save it if the session was signed
+  out while it ran, so it cannot bring that session back.
 - However active, a session ends 30 days after sign-in, or after `EXPLORER_SESSION_TTL` if
   that is longer. The user then signs in again, and their groups are read again.
 - A sign-in in progress (its `state`, `nonce`, PKCE verifier and return path) is kept in a

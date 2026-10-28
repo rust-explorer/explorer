@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use time::OffsetDateTime;
 use tower_sessions::cookie::SameSite;
-use tower_sessions::{ExpiredDeletion as _, Expiry, Session, SessionManagerLayer};
+use tower_sessions::{
+    ExpiredDeletion as _, Expiry, Session, SessionManagerLayer, SessionStore as _,
+};
 use tower_sessions_sqlx_store::SqliteStore;
 
 use crate::http::error::ApiError;
@@ -95,9 +97,10 @@ impl Lifetime {
     }
 
     /// Ends a session past its maximum lifetime, and marks an active one for saving now and then.
-    async fn check(&self, session: &Session) -> Result<(), tower_sessions::session::Error> {
+    /// Returns whether it did the latter.
+    async fn check(&self, session: &Session) -> Result<bool, tower_sessions::session::Error> {
         let Some(stamps) = session.get::<Stamps>(STAMPS_KEY).await? else {
-            return Ok(());
+            return Ok(false);
         };
         let now = OffsetDateTime::now_utc();
         match self.verdict(stamps, now) {
@@ -108,10 +111,11 @@ impl Lifetime {
                     ..stamps
                 };
                 session.insert(STAMPS_KEY, touched).await?;
+                return Ok(true);
             }
             Verdict::End => session.flush().await?,
         }
-        Ok(())
+        Ok(false)
     }
 
     /// A signed-in session about to be saved lasts the TTL from now, within its maximum lifetime.
@@ -134,25 +138,70 @@ pub async fn start(session: &Session) -> Result<(), tower_sessions::session::Err
     session.insert(STAMPS_KEY, stamps).await
 }
 
+/// What [`keep_alive`] needs: the lifetime rules and the store, to check that a session it
+/// touched still exists.
+#[derive(Clone, Debug)]
+pub struct KeepAlive {
+    lifetime: Lifetime,
+    store: SqliteStore,
+}
+
+impl KeepAlive {
+    #[must_use]
+    pub fn new(ttl: Duration, db: SqlitePool) -> Self {
+        Self {
+            lifetime: Lifetime::new(ttl),
+            store: SqliteStore::new(db),
+        }
+    }
+}
+
 /// Applies [`Lifetime`] around each request; runs inside the session layer.
 pub async fn keep_alive(
-    State(lifetime): State<Lifetime>,
+    State(keep): State<KeepAlive>,
     session: Session,
     req: Request,
     next: Next,
 ) -> Response {
-    if session.id().is_some()
-        && let Err(err) = lifetime.check(&session).await
-    {
-        return ApiError::internal(err).into_response();
+    if !uses_session(req.uri().path()) {
+        return next.run(req).await;
     }
+    let touched = match session.id() {
+        Some(_) => match keep.lifetime.check(&session).await {
+            Ok(touched) => touched,
+            Err(err) => return ApiError::internal(err).into_response(),
+        },
+        None => false,
+    };
     let res = next.run(req).await;
+    // A sign-out while this request ran removed the session: saving the touch would bring it
+    // back, since the store saves with an upsert.
+    if touched && let Some(id) = session.id() {
+        match keep.store.load(&id).await {
+            Ok(Some(_)) => {}
+            Ok(None) => {
+                if let Err(err) = session.flush().await {
+                    return ApiError::internal(err).into_response();
+                }
+                return res;
+            }
+            Err(err) => return ApiError::internal(err).into_response(),
+        }
+    }
     if session.is_modified()
-        && let Err(err) = lifetime.set_expiry(&session).await
+        && let Err(err) = keep.lifetime.set_expiry(&session).await
     {
         return ApiError::internal(err).into_response();
     }
     res
+}
+
+/// Static files and `/healthz` never read the session, so they skip the database.
+fn uses_session(path: &str) -> bool {
+    ["/api", "/files", "/auth"].iter().any(|prefix| {
+        path.strip_prefix(prefix)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+    })
 }
 
 /// Deletes expired sessions every hour; a failed sweep is logged and retried at the next tick.
@@ -175,6 +224,23 @@ pub fn spawn_expired_cleanup(db: SqlitePool) -> tokio::task::JoinHandle<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_api_files_and_auth_use_the_session() {
+        for path in ["/api", "/api/me", "/files/zip", "/auth/login", "/auth/"] {
+            assert!(uses_session(path), "{path}");
+        }
+        for path in [
+            "/",
+            "/index.html",
+            "/assets/app.js",
+            "/healthz",
+            "/apix",
+            "/filesystem",
+        ] {
+            assert!(!uses_session(path), "{path}");
+        }
+    }
 
     #[test]
     fn ttl_is_kept_when_reasonable() {

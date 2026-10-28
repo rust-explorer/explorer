@@ -143,3 +143,78 @@ async fn activity_keeps_a_session_alive_past_its_ttl() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+/// A request that loaded the session and pushed its expiry back must not bring it back after a
+/// sign-out that ran meanwhile.
+#[tokio::test]
+async fn a_touch_does_not_undo_a_sign_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut state, fake) = common::state_with_oidc(dir.path()).await;
+    let mut config = common::config(dir.path().to_str().unwrap(), &fake.issuer());
+    config.session_ttl = Duration::from_secs(2);
+    state.config = Arc::new(config);
+    let db = state.db.clone();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let extra: Router<AppState> = Router::new().route(
+        "/api/_session/wait",
+        get({
+            let (release, entered) = (Arc::clone(&release), Arc::clone(&entered));
+            move || async move {
+                entered.notify_one();
+                release.notified().await;
+                "done"
+            }
+        }),
+    );
+    let mut client = Client::signed_in(router_with(state, extra).await.unwrap(), &fake).await;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+
+    let mut waiting = Client {
+        app: client.app.clone(),
+        jar: client.jar.clone(),
+    };
+    let slow = tokio::spawn(async move { waiting.get("/api/_session/wait").await });
+    entered.notified().await;
+    let logout = Request::post("/auth/logout")
+        .header(header::ORIGIN, common::PUBLIC_URL)
+        .body(Body::empty())
+        .unwrap();
+    let mut old = client.jar.clone();
+    assert_eq!(client.send(logout).await.status(), StatusCode::OK);
+    release.notify_one();
+    assert_eq!(slow.await.unwrap().status(), StatusCode::OK);
+
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tower_sessions")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
+    std::mem::swap(&mut client.jar, &mut old);
+    assert_eq!(
+        client.get("/api/me").await.status(),
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+/// Static files and the health check never read the session, so a busy or failing session
+/// store does not break them.
+#[tokio::test]
+async fn static_files_do_not_read_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("index.html"), "<html>app</html>").unwrap();
+    let (state, fake) = common::state_with_oidc(dir.path()).await;
+    let db = state.db.clone();
+    let mut client = Client::signed_in(router(state).await.unwrap(), &fake).await;
+    sqlx::query("DROP TABLE tower_sessions")
+        .execute(&db)
+        .await
+        .unwrap();
+
+    assert_eq!(client.get("/").await.status(), StatusCode::OK);
+    assert_eq!(client.get("/healthz").await.status(), StatusCode::OK);
+    assert_eq!(
+        client.get("/api/me").await.status(),
+        StatusCode::INTERNAL_SERVER_ERROR
+    );
+}
