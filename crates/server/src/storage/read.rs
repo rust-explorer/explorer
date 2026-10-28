@@ -107,9 +107,19 @@ pub(super) fn fs_path(path: &RelPath) -> &str {
 impl Volume {
     /// Entries sorted by name, bytewise.
     pub fn list(&self, dir: &RelPath) -> Result<Vec<EntryMeta>, StorageError> {
+        self.list_while(dir, &|| true)
+    }
+
+    /// Like [`Volume::list`], failing with `Cancelled` as soon as `go_on` answers `false`; it is
+    /// asked before each entry.
+    pub fn list_while(
+        &self,
+        dir: &RelPath,
+        go_on: &dyn Fn() -> bool,
+    ) -> Result<Vec<EntryMeta>, StorageError> {
         self.refuse_reserved(dir)?;
         Ok(self
-            .entries(dir)?
+            .entries_while(dir, go_on)?
             .into_iter()
             .map(|entry| entry.meta)
             .collect())

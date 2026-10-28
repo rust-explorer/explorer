@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use axum::http::StatusCode;
 use serde::Deserialize;
@@ -63,4 +64,36 @@ pub async fn blocking_volume<T: Send + 'static>(
     })
     .await
     .map_err(ApiError::internal)?
+}
+
+/// Sets its flag when dropped, so that a blocking walk stops once the request that started it
+/// is abandoned.
+pub struct CancelOnDrop(Arc<AtomicBool>);
+
+impl CancelOnDrop {
+    /// The guard, and the flag it sets.
+    #[must_use]
+    pub fn new() -> (Self, Arc<AtomicBool>) {
+        let flag = Arc::new(AtomicBool::new(false));
+        (Self(Arc::clone(&flag)), flag)
+    }
+}
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dropping_the_guard_cancels() {
+        let (guard, cancel) = CancelOnDrop::new();
+        assert!(!cancel.load(Ordering::Relaxed));
+        drop(guard);
+        assert!(cancel.load(Ordering::Relaxed));
+    }
 }

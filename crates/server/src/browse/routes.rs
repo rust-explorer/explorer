@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::Json;
@@ -13,7 +14,7 @@ use shared::api::browse::{
 use crate::auth::Action;
 use crate::auth::CurrentUser;
 use crate::http::AppState;
-use crate::http::access::{authorize, blocking_volume};
+use crate::http::access::{CancelOnDrop, authorize, blocking_volume};
 use crate::http::error::ApiError;
 use crate::storage::{self, InvalidPath};
 
@@ -68,9 +69,10 @@ pub async fn entries(
     let path = authorize(&state, &user, &volume, &query.path, Action::Read)?;
     tracing::debug!(user = user.sub, volume, path = path.as_str(), "listing");
 
+    let (_guard, cancel) = CancelOnDrop::new();
     let listed = blocking_volume(&state.volumes, &volume, {
         let path = path.clone();
-        move |vol| vol.list(&path)
+        move |vol| vol.list_while(&path, &|| !cancel.load(Ordering::Relaxed))
     })
     .await?
     .map_err(|err| ApiError::from_storage(&volume, err))?;
