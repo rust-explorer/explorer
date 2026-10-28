@@ -73,7 +73,7 @@ pub fn move_entry(
     let plan = if let Some(plan) = plan {
         plan
     } else {
-        planned = plan_transfer(source, path)?;
+        planned = plan_transfer(source, path, progress)?;
         progress.planned(&planned);
         &planned
     };

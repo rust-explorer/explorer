@@ -34,6 +34,9 @@ pub enum StorageError {
     /// the source, next to its copy.
     #[error("changed during the move: {}", .0.as_str())]
     ChangedDuringMove(RelPath),
+    /// A copy or move of a folder holding more entries than one task takes on.
+    #[error("too many entries in {}", .0.as_str())]
+    TooManyEntries(RelPath),
     /// A staged upload that is not a regular file with a single link: it is never written to
     /// or committed.
     #[error("the staged upload is not a regular file with a single link")]

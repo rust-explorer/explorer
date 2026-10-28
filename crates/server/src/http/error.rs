@@ -232,6 +232,7 @@ impl ApiError {
                 path,
             ),
             StorageError::ChangedDuringMove(path) => return Self::changed(volume, &path, log),
+            StorageError::TooManyEntries(path) => return Self::too_many(volume, &path, log),
             StorageError::NoSpace(path) => {
                 if log {
                     tracing::warn!(volume, path = path.as_str(), "not enough space");
@@ -305,6 +306,12 @@ impl ApiError {
     fn changed(volume: &str, path: &RelPath, log: bool) -> Self {
         let label = "Changed during the move, so both copies were kept: ";
         let failure = (StatusCode::CONFLICT, "changed_during_move", label);
+        Self::storage_failure(volume, failure, path, log)
+    }
+
+    fn too_many(volume: &str, path: &RelPath, log: bool) -> Self {
+        let label = "Too many entries to copy or move at once in ";
+        let failure = (StatusCode::BAD_REQUEST, "too_many_entries", label);
         Self::storage_failure(volume, failure, path, log)
     }
 

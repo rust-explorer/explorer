@@ -227,6 +227,7 @@ New error codes (JSON error shape as above):
 | `invalid_destination` | 400 | A copy or move of a folder into itself or one of its descendants, or a move into the folder the entry is already in. `details` name the entry, on its source volume. |
 | `task_not_found` | 404 | Unknown task id, or another user's. |
 | `changed_during_move` | 409 | A move to another volume found, when deleting the source, that a file had changed or been replaced since it was copied. That file stays in the source (with the folders holding it) and the copy is in the destination; the rest of the move is done. `details` name the file, on its source volume. |
+| `too_many_entries` | 400 | A copy, or a move to another volume, of a folder holding more than 1,000,000 files and folders in all. Nothing was copied. |
 | `too_many_tasks` | 429 | The user already has 1000 tasks queued or running. The web app posts the task again once some have finished. |
 
 Existing codes also apply: `already_exists` (409), `is_a_directory` (`replace` over or of a

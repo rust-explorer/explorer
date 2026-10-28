@@ -77,6 +77,7 @@ error-favorites_full = You can't have more than { $max } favorites. Remove one f
 error-thumbnail_unavailable = No preview is available for this file.
 error-too_many_tasks = Too many tasks are waiting. Try again once some have finished.
 error-changed_during_move = { $path } changed while it was being moved, so it was kept in its old place as well as copied to the new one.
+error-too_many_entries = { $path } holds too many files and folders to copy or move at once (a million at most). Copy or move its sub-folders one at a time.
 upload = Upload
 upload-open = Upload files or a folder
 upload-files = Files…

@@ -205,7 +205,7 @@ fn cancelled_copy_never_removes_a_folder_that_took_its_name() {
         fixture.documents(),
         &RelPath::root(),
         ConflictPolicy::Fail,
-        &storage::plan_transfer(fixture.media(), &rel("src")).unwrap(),
+        &storage::plan_transfer(fixture.media(), &rel("src"), &Hook::new(|_| false)).unwrap(),
         &progress,
     );
 
@@ -236,7 +236,7 @@ fn failed_copy_keeps_what_others_put_in_its_folder() {
         fixture.documents(),
         &RelPath::root(),
         ConflictPolicy::Fail,
-        &storage::plan_transfer(fixture.media(), &rel("F")).unwrap(),
+        &storage::plan_transfer(fixture.media(), &rel("F"), &Hook::new(|_| false)).unwrap(),
         &progress,
     );
 
@@ -281,7 +281,7 @@ fn copy_and_cross_volume_move_keep_permissions() {
         fixture.documents(),
         &RelPath::root(),
         ConflictPolicy::Fail,
-        &storage::plan_transfer(fixture.media(), &rel("D")).unwrap(),
+        &storage::plan_transfer(fixture.media(), &rel("D"), &Hook::new(|_| false)).unwrap(),
         &none,
     );
     move_entry(&fixture, "secret.txt", &none).unwrap();
@@ -312,7 +312,7 @@ fn keep_both_shortens_a_name_near_the_limit() {
         fixture.documents(),
         &RelPath::root(),
         ConflictPolicy::KeepBoth,
-        &storage::plan_transfer(fixture.media(), &rel(&name)).unwrap(),
+        &storage::plan_transfer(fixture.media(), &rel(&name), &Hook::new(|_| false)).unwrap(),
         &Hook::new(|_| false),
     )
     .unwrap();

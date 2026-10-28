@@ -204,6 +204,9 @@ action reach outside its volume.
   removed; nothing is lost, but the move is reported as failed. A move within one volume that hits a nested mount falls back to the same copy and delete.
   Copies use the staging directory of the destination volume, so their data never leaves it
   until it is renamed into place.
+- **Size of a copy.** A copy, or a move to another volume, first lists the whole folder,
+  which it keeps in memory while it runs: past 1,000,000 files and folders it stops and fails
+  with `too_many_entries` before copying anything. Cancelling the task also stops the listing.
 - **Permissions.** A copy, and a move to another volume, give each file and folder the
   permission bits of its source (read, write and execute for owner, group and others), so a
   private `0600` file stays private; set-user-ID, set-group-ID and sticky bits are dropped.

@@ -77,6 +77,7 @@ error-favorites_full = Vous ne pouvez pas avoir plus de { $max } favoris. Retire
 error-thumbnail_unavailable = Aucun aperçu n'est disponible pour ce fichier.
 error-too_many_tasks = Trop de tâches sont en attente. Réessayez quand certaines seront terminées.
 error-changed_during_move = { $path } a été modifié pendant le déplacement : il a été conservé à son ancien emplacement en plus de sa copie au nouvel emplacement.
+error-too_many_entries = { $path } contient trop de fichiers et de dossiers pour être copié ou déplacé d’un coup (un million au plus). Copiez ou déplacez ses sous-dossiers un par un.
 upload = Uploader
 upload-open = Uploader des fichiers ou un dossier
 upload-files = Fichiers…
