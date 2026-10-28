@@ -239,7 +239,8 @@ How tasks run:
 
 - The registry is in memory (`crates/server/src/tasks`): a restart loses every task, and a
   task that was running stops with the process. A task belongs to the `sub` that created it.
-  A finished task is listed for one hour unless dismissed.
+  A finished task is listed for one hour unless dismissed, and only a user's 1000 most
+  recently created finished tasks are kept: older ones are forgotten first.
 - At most 2 tasks run at once, across all users; the others stay `queued`. Each runs on
   Tokio's blocking pool. A queued task is cancelled at once; a running copy, or the copy
   phase of a move, when it next checks (between 1 MiB chunks, and between entries of a

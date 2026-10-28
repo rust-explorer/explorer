@@ -220,7 +220,8 @@ action reach outside its volume.
   folder or a staged file in `.explorer-uploads` (the hourly sweep removes the staged file
   after 24 hours). At most 2 tasks run at
   once for the whole server, so a large copy delays others. A finished task is forgotten after
-  an hour. Failures keep the request id of the request that created the task.
+  an hour, or sooner once its user has 1000 newer finished tasks, so a script posting tasks
+  in a loop cannot grow the server's memory without bound. Failures keep the request id of the request that created the task.
 - **Zip of several entries.** Each `name=` must be a single valid component: empty, `.`,
   `..`, containing `/`, a control character, or the reserved name at the volume root is
   `invalid_path`, and a
