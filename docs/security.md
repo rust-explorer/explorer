@@ -256,8 +256,13 @@ never serve the original:
 - **Limits.** Only `jpg`, `jpeg`, `png`, `gif` and `webp` names are tried, and the content must
   actually be one of those formats (a renamed file is refused). A source over 64 MiB is
   refused, and at most 64 MiB are read even if the file grows meanwhile. The decoder is given
-  limits of 16,384 px per side and 512 MiB of allocation, and an image whose decoded size
-  exceeds that is refused. Anything refused or undecodable is 404 `thumbnail_unavailable`
+  limits of 16,384 px per side and 512 MiB of allocation. Before decoding, the memory the
+  decode will take is estimated and an image over 512 MiB is refused: the source (read whole)
+  plus the decoded size, counted three times for a progressive JPEG and for WebP and twice
+  for GIF, whose decoders keep coefficients, planes or a frame besides the output. Measured
+  with images just under the limit (baseline and progressive JPEG, WebP lossy and lossless,
+  GIF), one decode peaks at 525 MiB of resident memory at most, so the 2 concurrent decodes
+  stay near 1 GiB; a 16,384 x 10,922 progressive JPEG, which used to take 1.6 GB, is refused. Anything refused or undecodable is 404 `thumbnail_unavailable`
   and logged at `debug`.
 - **Concurrency.** At most 2 decodes run at once across all users, each on the blocking pool.
   The permit stays with the work when the request is cancelled, so scrolling through a large

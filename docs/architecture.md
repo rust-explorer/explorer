@@ -284,7 +284,8 @@ superseded search does not keep a thread busy. Nothing is indexed.
 Thumbnails are made for `jpg`, `jpeg`, `png`, `gif` and `webp` files of at most 64 MiB;
 anything else, a missing file or an image that cannot be decoded is 404
 `thumbnail_unavailable` (a decode failure is logged at `debug` only). The image is decoded
-within limits, shrunk, rotated according to its EXIF orientation and **re-encoded**: PNG when
+within limits (its estimated decode memory at most 512 MiB, see
+[security.md](security.md#thumbnails)), shrunk, rotated according to its EXIF orientation and **re-encoded**: PNG when
 it has transparency, JPEG otherwise. The user's bytes are never sent. At most 2 images are
 decoded at once across all users; a request that is cancelled mid-render keeps its slot until
 the work ends. Results are cached as files under `/config/cache/thumbnails` (see
