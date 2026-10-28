@@ -61,6 +61,18 @@ impl RelPath {
     pub fn is_root(&self) -> bool {
         self.0.is_empty()
     }
+
+    /// Appends a single entry name, validated like any other path.
+    pub fn join(&self, name: &str) -> Result<Self, InvalidPath> {
+        if name.is_empty() || name.contains('/') {
+            return Err(invalid("not a single component"));
+        }
+        if self.is_root() {
+            Self::parse(name)
+        } else {
+            Self::parse(&format!("{}/{name}", self.0))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -111,6 +123,21 @@ mod tests {
         ] {
             assert!(RelPath::parse(raw).is_err(), "{raw:?}");
         }
+    }
+
+    #[test]
+    fn rel_path_join() {
+        assert_eq!(
+            RelPath::root().join("a").unwrap(),
+            RelPath::parse("a").unwrap()
+        );
+        let parent = RelPath::parse("a/b").unwrap();
+        assert_eq!(parent.join("c d").unwrap().as_str(), "a/b/c d");
+        for name in ["", "..", ".", "x/y", "a\nb"] {
+            assert!(parent.join(name).is_err(), "{name:?}");
+        }
+        let near_limit = RelPath::parse(&"a/".repeat(2047)).unwrap();
+        assert!(near_limit.join("bcde").is_err());
     }
 
     #[test]
