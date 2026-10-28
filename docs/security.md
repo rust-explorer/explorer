@@ -20,8 +20,14 @@ per-volume or per-folder permissions do not exist yet.
 
 Explorer is a backend-for-frontend. The server performs the OIDC authorization code flow
 with PKCE (S256), `state` and `nonce`, and verifies the ID token (signature, issuer,
-audience, expiry, nonce, access token hash). Access, ID and refresh tokens are never sent
-to the browser and never logged. The browser only holds a session cookie.
+audience, expiry, nonce, access token hash). Access and refresh tokens are never sent to
+the browser, and no token is logged. The browser only holds a session cookie.
+
+The one exception is signing out: the ID token is kept in the session and sent once, as
+`id_token_hint` in the provider's end-session URL, so that the provider can end its own
+session and redirect back without asking. That URL passes through the browser, so the ID
+token (subject, name, email, groups; already expired or about to) can appear in the
+browser history and in the access logs of the reverse proxy and the provider.
 
 ## Session cookie
 
