@@ -8,6 +8,7 @@ use shared::api::conflict::ConflictPolicy;
 use super::form::{BUTTON, INPUT, PRIMARY, Problem};
 use crate::api::{self, ApiFailure};
 use crate::components::common::{ConflictPrompt, FocusTarget, Modal};
+use crate::conflict::use_queued_conflict;
 use crate::names::validate_name;
 use crate::revision::Revision;
 
@@ -32,6 +33,7 @@ pub fn RenameDialog(
     let mut problem = use_signal(|| None::<Problem>);
     let mut busy = use_signal(|| false);
     let mut conflict = use_signal(|| None::<String>);
+    let queued_conflict = use_queued_conflict();
     let at_root = parent.is_empty();
     let folder = if at_root {
         volume.clone()
@@ -89,7 +91,8 @@ pub fn RenameDialog(
     let kind = entry.kind;
     let select_end = stem_end(&entry.name, kind);
     let message = problem.read().as_ref().map(Problem::message);
-    let prompt = conflict().map(|taken| {
+    // One conflict prompt at a time: this one comes back once the queued one is answered.
+    let prompt = conflict().filter(|_| !queued_conflict()).map(|taken| {
         let target = entries
             .read()
             .iter()
