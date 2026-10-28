@@ -39,6 +39,8 @@ http-range-header = { workspace = true }
 httpdate = { workspace = true }
 percent-encoding = { workspace = true }
 tokio-util = { workspace = true }
+tokio-stream = { workspace = true }
+zip = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true, features = ["query", "form"] }
