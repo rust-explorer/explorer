@@ -28,10 +28,10 @@ pub(super) async fn supersede(
         .list_pending(user_sub)
         .await
         .map_err(ApiError::internal)?;
-    let stale = pending.into_iter().filter(|record| {
+    let idle = pending.into_iter().filter(|record| {
         record.volume == volume && record.path == *path && record.updated_at < idle_before
     });
-    for record in stale {
+    for record in idle {
         let Some(_lock) = state.uploads.try_lock(&record.id) else {
             continue;
         };
