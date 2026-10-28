@@ -37,7 +37,7 @@ expires after this much inactivity. Values above 400 days are capped at 400 days
 | Path | Purpose |
 |---|---|
 | `/data` | Each real directory mounted under `/data` is a volume, named after its mount point. Read at startup. |
-| `/config` | Explorer's state: sessions, upload records and favorites in `explorer.db` (SQLite), and the thumbnail cache. Must be writable by the container user; startup checks this and exits with a clear message otherwise. |
+| `/config` | Explorer's state: sessions, upload records and favorites in `explorer.db` (SQLite), and the thumbnail cache. Must be writable by the container user; startup checks this and exits with a clear message otherwise. Explorer creates the database files with mode `600` and the cache folders with `700`; keep `/config` itself `700`. |
 | `/usr/share/explorer/web` | Web bundle, shipped in the image. |
 
 The server listens on `0.0.0.0:8080`. These are fixed in the image.

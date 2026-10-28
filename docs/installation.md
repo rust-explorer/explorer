@@ -71,13 +71,16 @@ step 4).
 
 ```sh
 mkdir explorer && cd explorer
-mkdir config
+mkdir -m 700 config
 sudo chown 1000:1000 config   # use your UID:GID
 ```
 
 `config/` holds Explorer's state (database, thumbnail cache). Create it yourself before
 the first start: if Docker creates a missing bind-mount source, it is owned by root and
-Explorer cannot write to it.
+Explorer cannot write to it. Keep it `700`: the database holds live session ids, and
+anyone who can read it can sign in as those users. Explorer creates `explorer.db` (and its
+`-wal` and `-shm` files) readable by its own user only, and tightens them at startup if an
+older version left them readable by others.
 
 Download [`docker-compose.example.yml`](../docker-compose.example.yml) as
 `docker-compose.yml` and [`.env.example`](../.env.example) as `.env`.

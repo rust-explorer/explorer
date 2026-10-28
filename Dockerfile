@@ -41,6 +41,7 @@ RUN cargo chef cook --release --locked -p explorer-server --recipe-path recipe.j
 COPY . .
 RUN cargo build --release --locked -p explorer-server \
     && mkdir -p /out/data /out/config \
+    && chmod 700 /out/config \
     && cp target/release/explorer /out/explorer
 
 FROM gcr.io/distroless/cc-debian12

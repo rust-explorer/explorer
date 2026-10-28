@@ -27,7 +27,8 @@ to the browser and never logged. The browser only holds a session cookie.
 
 - Name `explorer_session`; `HttpOnly`, `Secure`, `SameSite=Lax`, `Path=/`.
 - Session data lives server-side in SQLite (`/config/explorer.db`); the cookie is an
-  opaque identifier.
+  opaque identifier. The database stores session ids in clear, so it is created readable
+  by Explorer's user only (mode `600`, `-wal` and `-shm` included); keep `/config` at `700`.
 - Expiry is sliding: `EXPLORER_SESSION_TTL` of inactivity (default 7 days, capped at 400).
 - The session id is rotated on successful login (against session fixation).
 - Logout and access denial flush the session. After a denial only the ID token is kept,
