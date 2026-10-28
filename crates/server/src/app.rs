@@ -64,9 +64,11 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
                 .fallback(not_found),
         )
         .nest("/auth", auth::routes().fallback(not_found))
+        .nest("/files", Router::new().fallback(not_found))
         // nest() does not match the empty tail, so the bare-slash forms need explicit routes
         .route("/api/", any(not_found))
         .route("/auth/", any(not_found))
+        .route("/files/", any(not_found))
         .fallback_service(web::service(&state.config.web_dir))
         .with_state(state)
         .layer(

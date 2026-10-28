@@ -132,3 +132,32 @@ fn check_bundle_fails_when_index_is_a_directory() {
     std::fs::create_dir(dir.path().join("index.html")).unwrap();
     assert!(check_bundle(dir.path()).is_err());
 }
+
+#[tokio::test]
+async fn missing_asset_is_bare_404() {
+    let dir = bundle();
+    let res = app_with_web_dir(dir.path())
+        .await
+        .oneshot(get("/assets/nope-123.js"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert!(!body_string(res).await.contains("<html"));
+}
+
+#[tokio::test]
+async fn files_prefix_is_reserved() {
+    let dir = bundle();
+    for uri in ["/files/unknown", "/files/"] {
+        let res = app_with_web_dir(dir.path())
+            .await
+            .oneshot(get(uri))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NOT_FOUND, "{uri}");
+        assert_eq!(res.headers()[header::CONTENT_TYPE], "application/json");
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        let body: ErrorBody = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body.code, "not_found", "{uri}");
+    }
+}

@@ -116,3 +116,56 @@ async fn internal_error_is_generic_and_carries_request_id() {
     assert!(!body.message.contains("exploded"));
     assert_eq!(body.request_id, Some(id));
 }
+
+async fn sandboxed() -> impl axum::response::IntoResponse {
+    ([(header::CONTENT_SECURITY_POLICY, "sandbox")], "x")
+}
+
+async fn plain() -> &'static str {
+    "x"
+}
+
+#[tokio::test]
+async fn handler_csp_is_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let extra: Router<AppState> = Router::new()
+        .route("/_sandboxed", axum::routing::get(sandboxed))
+        .route("/_plain", axum::routing::get(plain));
+    let app = router_with(common::state_with_web_dir(dir.path()).await, extra)
+        .await
+        .unwrap();
+    let res = app.clone().oneshot(get("/_sandboxed")).await.unwrap();
+    let all: Vec<_> = res
+        .headers()
+        .get_all(header::CONTENT_SECURITY_POLICY)
+        .iter()
+        .collect();
+    assert_eq!(all, ["sandbox"]);
+    let res = app.oneshot(get("/_plain")).await.unwrap();
+    let csp = res.headers()[header::CONTENT_SECURITY_POLICY]
+        .to_str()
+        .unwrap();
+    assert!(csp.contains("frame-ancestors 'none'"));
+}
+
+async fn detailed() -> ApiError {
+    ApiError::new(StatusCode::BAD_REQUEST, "invalid_path", "x")
+        .with_details(serde_json::json!({"volume": "media"}))
+}
+
+#[tokio::test]
+async fn error_details_are_serialised() {
+    let dir = tempfile::tempdir().unwrap();
+    let extra: Router<AppState> =
+        Router::new().route("/api/_detailed", axum::routing::get(detailed));
+    let app = router_with(common::state_with_web_dir(dir.path()).await, extra)
+        .await
+        .unwrap();
+    let res = app.oneshot(get("/api/_detailed")).await.unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let body: ErrorBody = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body.code, "invalid_path");
+    assert_eq!(body.details.unwrap()["volume"], "media");
+    assert!(body.request_id.is_some());
+}
