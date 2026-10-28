@@ -322,12 +322,17 @@ impl Files<'_> {
         id: &StagedId,
     ) -> Result<(std::fs::File, Stamp, u32), StorageError> {
         let read_err = |err| StorageError::from_io(from, err).on_source();
+        // Before the open: a symlink replaced after it is another inode.
+        let entry = self.source.root.symlink_metadata(from.as_str()).ok();
         let (mut input, _) = self
             .source
             .open_file(from)
             .map_err(StorageError::on_source)?;
         let meta = input.metadata().map_err(read_err)?;
-        let (source, mode) = (Stamp::source(&meta), kept_mode(meta.permissions().mode()));
+        let (source, mode) = (
+            Stamp::source(&meta, entry.as_ref()),
+            kept_mode(meta.permissions().mode()),
+        );
         let mut output = self.staging.create(id)?;
         let mut chunk = vec![0; COPY_CHUNK];
         loop {

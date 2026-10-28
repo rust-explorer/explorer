@@ -323,3 +323,68 @@ fn keep_both_shortens_a_name_near_the_limit() {
     assert_eq!(read(&documents.join(&expected)), "mine");
     assert_eq!(read(&documents.join(&name)), "theirs");
 }
+
+fn names(dir: &Path) -> Vec<String> {
+    let mut names: Vec<_> = fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn cross_volume_move_removes_an_unchanged_symlink_to_a_moved_file() {
+    let fixture = Fixture::new(|media, _| {
+        write(&media.join("F/a.jpg"), b"a");
+        std::os::unix::fs::symlink("a.jpg", media.join("F/latest.jpg")).unwrap();
+    });
+
+    let result = move_entry(&fixture, "F", &Hook::new(|_| false));
+
+    assert!(result.is_ok(), "{result:?}");
+    assert!(!fixture.path("media").join("F").exists());
+    let moved = fixture.path("documents").join("F");
+    assert_eq!(names(&moved), ["a.jpg", "latest.jpg"]);
+    assert_eq!(read(&moved.join("latest.jpg")), "a");
+}
+
+#[test]
+fn cross_volume_move_removes_unchanged_hard_links() {
+    let fixture = Fixture::new(|media, _| {
+        write(&media.join("F/x.mkv"), b"x");
+        fs::hard_link(media.join("F/x.mkv"), media.join("F/x-copy.mkv")).unwrap();
+        fs::hard_link(media.join("F/x.mkv"), media.join("F/x-third.mkv")).unwrap();
+    });
+
+    let result = move_entry(&fixture, "F", &Hook::new(|_| false));
+
+    assert!(result.is_ok(), "{result:?}");
+    assert!(!fixture.path("media").join("F").exists());
+    assert_eq!(
+        names(&fixture.path("documents").join("F")),
+        ["x-copy.mkv", "x-third.mkv", "x.mkv"]
+    );
+}
+
+#[test]
+fn cross_volume_move_keeps_a_symlink_retargeted_after_its_copy() {
+    let fixture = Fixture::new(|media, _| {
+        write(&media.join("F/a.txt"), b"a");
+        write(&media.join("F/b.txt"), b"b");
+        std::os::unix::fs::symlink("a.txt", media.join("F/link.txt")).unwrap();
+    });
+    let source = fixture.path("media").join("F");
+    let progress = Hook::new(|files| {
+        if files == 3 {
+            fs::remove_file(source.join("link.txt")).unwrap();
+            std::os::unix::fs::symlink("b.txt", source.join("link.txt")).unwrap();
+        }
+        false
+    });
+
+    let result = move_entry(&fixture, "F", &progress);
+
+    assert!(is_changed_during_move(&result, "F/link.txt"), "{result:?}");
+    assert_eq!(names(&source), ["link.txt"]);
+}

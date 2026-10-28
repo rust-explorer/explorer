@@ -240,7 +240,11 @@ action reach outside its volume.
   A source file is deleted only if it is still the file that was read: same device and
   inode, size, modification and change time as when the copy opened it. One that was
   written to, replaced or renamed over since stays in the source next to its copy, and the
-  move fails with `changed_during_move` (409). Only a change in the instant between that
+  move fails with `changed_during_move` (409). A symlink to a file, copied as the file it
+  leads to, is checked and deleted as the link itself (same device, inode and modification
+  time), so it goes even once its target was moved, while its target stays unless moved
+  too. For a file with several hard links in the moved folder, deleting one name moves the
+  change time of the others; that change, made by the move itself, is not counted. Only a change in the instant between that
   check and the delete can slip through.
   If a delete fails midway, the destination is complete and the source may be partly
   removed; nothing is lost, but the move is reported as failed. A move within one volume that hits a nested mount falls back to the same copy and delete.

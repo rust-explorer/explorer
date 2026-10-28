@@ -1,9 +1,11 @@
+use std::collections::HashMap;
+
 use rustix::io::Errno;
 
 use shared::api::conflict::ConflictPolicy;
 
 use super::copy::{Taken, copy_taking};
-use super::remove::{Expect, Removed, remove_if};
+use super::remove::{Expect, Removed, Stamp, remove_if};
 use super::{TransferPlan, TransferProgress, check_transfer, plan_transfer};
 use crate::storage::read::{Identity, fs_path};
 use crate::storage::{InvalidPath, RelPath, StorageError, Volume, WalkItem};
@@ -127,15 +129,32 @@ fn remove_moved(
     taken: &Taken,
 ) -> Result<(), StorageError> {
     let mut changed = None;
-    let mut remove = |at: &RelPath, expect: Expect| -> Result<(), StorageError> {
-        if remove_if(source, at, expect, true)? == Removed::Changed && changed.is_none() {
+    let mut remove = |at: &RelPath, expect: Expect| -> Result<Removed, StorageError> {
+        let removed = remove_if(source, at, expect, true)?;
+        if removed == Removed::Changed && changed.is_none() {
             changed = Some(at.clone());
         }
-        Ok(())
+        Ok(removed)
     };
     if matches!(taken.top, Expect::Dir(_)) && source.is_real_dir(path) {
-        for (index, stamp) in &taken.files {
-            remove(item_path(plan, *index), Expect::File(*stamp))?;
+        let mut files = taken.files.clone();
+        let next_name = later_names(&files);
+        for at in 0..files.len() {
+            let (index, stamp) = files[at];
+            let removed = remove(item_path(plan, index), Expect::File(stamp))?;
+            // It matched, so the file had not changed: removing one of its names moved its
+            // change time, which its other names now show.
+            if removed == Removed::Yes
+                && let Some(&later) = next_name.get(&at)
+            {
+                let (index, stamp) = &mut files[later];
+                if let Ok(meta) = source
+                    .root
+                    .symlink_metadata(item_path(plan, *index).as_str())
+                {
+                    stamp.renew_ctime(&meta);
+                }
+            }
         }
         for (index, id) in taken.dirs.iter().rev() {
             remove(item_path(plan, *index), Expect::Dir(*id))?;
@@ -146,6 +165,20 @@ fn remove_moved(
         Some(path) => Err(StorageError::ChangedDuringMove(path)),
         None => Ok(()),
     }
+}
+
+/// For each file of the list, the next one that is another name of the same file.
+fn later_names(files: &[(usize, Stamp)]) -> HashMap<usize, usize> {
+    let mut last = HashMap::new();
+    let mut next = HashMap::new();
+    for (at, (_, stamp)) in files.iter().enumerate() {
+        if let Some(inode) = stamp.file_inode()
+            && let Some(before) = last.insert(inode, at)
+        {
+            next.insert(before, at);
+        }
+    }
+    next
 }
 
 fn item_path(plan: &TransferPlan, index: usize) -> &RelPath {
