@@ -10,6 +10,14 @@ const ALREADY_EXISTS: &str = "already_exists";
 const UPLOAD_NOT_FOUND: &str = "upload_not_found";
 const UPLOAD_BUSY: &str = "upload_busy";
 const OFFSET_MISMATCH: &str = "offset_mismatch";
+/// Commit failures the user can fix; the staged file stays so that the upload can resume.
+const FIXABLE_AT_COMMIT: [&str; 5] = [
+    ALREADY_EXISTS,
+    "permission_denied",
+    "not_a_directory",
+    "is_a_directory",
+    "path_not_found",
+];
 /// The server's only JSON 5xx besides 507 `insufficient_storage`.
 const INTERNAL: &str = "internal";
 
@@ -119,8 +127,10 @@ impl Queue {
             }
             _ => {
                 // The server keeps the staged file until its sweep unless told otherwise.
+                let resumable = item.commits() && FIXABLE_AT_COMMIT.contains(&code);
                 if let Some(url) = item.upload_url.take()
                     && code != UPLOAD_NOT_FOUND
+                    && !resumable
                 {
                     effects.push(Effect::Delete { url });
                 }

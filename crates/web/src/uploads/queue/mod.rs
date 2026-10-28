@@ -956,6 +956,37 @@ mod tests {
     }
 
     #[test]
+    fn fixable_commit_failure_keeps_the_staged_file() {
+        for code in ["permission_denied", "already_exists", "path_not_found"] {
+            let mut queue = Queue::default();
+            queue.add(plan(vec![spec("a.bin", 20 * MIB)]), &[], 0);
+            let key = key(&queue, 0);
+            created(&mut queue, 0, 0);
+            queue.handle(
+                Event::Patched {
+                    key,
+                    offset: 16 * MIB,
+                },
+                1,
+            );
+            assert!(fail(&mut queue, 0, server(code), 2).is_empty());
+            assert_eq!(queue.items()[0].status, Status::Failed(server(code)));
+        }
+    }
+
+    #[test]
+    fn fixable_failure_before_the_last_chunk_deletes() {
+        let mut queue = Queue::default();
+        queue.add(plan(vec![spec("a.bin", 20 * MIB)]), &[], 0);
+        let key = key(&queue, 0);
+        created(&mut queue, 0, 0);
+        assert_eq!(
+            fail(&mut queue, 0, server("permission_denied"), 1),
+            [Effect::Delete { url: url(key) }]
+        );
+    }
+
+    #[test]
     fn cross_device_commit_fails() {
         let mut queue = Queue::default();
         queue.add(files(1, 10), &[], 0);

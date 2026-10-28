@@ -92,6 +92,11 @@ impl Item {
         }
     }
 
+    /// Whether the PATCH in flight carries the last bytes, so that the server commits on it.
+    pub(super) fn commits(&self) -> bool {
+        self.phase == Phase::Patching && self.size() - self.confirmed <= CHUNK_SIZE
+    }
+
     pub(super) fn patch(&mut self, url: String, offset: u64) -> Effect {
         self.phase = Phase::Patching;
         self.sent = offset;
