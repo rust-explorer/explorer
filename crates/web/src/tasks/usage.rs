@@ -1,6 +1,6 @@
 use shared::api::tasks::{Location, TaskSpec, TaskState};
 
-use super::store::{Effect, Task, TaskList};
+use super::store::{Effect, Task, TaskKey, TaskList};
 
 /// The server keeps the results of a user's newest finished scans only, one per folder: see
 /// `MAX_USAGE_TREES` in `crates/server/src/tasks/mod.rs`.
@@ -55,6 +55,27 @@ impl TaskList {
             }
         }
         false
+    }
+
+    /// Forgets the dismissed scans whose result is no longer of use: not the newest of their
+    /// folder, or likely dropped by the server.
+    pub(super) fn drop_stale_scans(&mut self) {
+        let stale: Vec<TaskKey> = self
+            .tasks()
+            .iter()
+            .filter(|task| task.dismissed())
+            .filter(|task| {
+                let TaskSpec::Usage { source } = &task.spec else {
+                    return false;
+                };
+                let newest = self
+                    .newest_usage(&source.volume, &source.path)
+                    .map(|newest| newest.key);
+                newest != Some(task.key) || !self.result_kept(task)
+            })
+            .map(|task| task.key)
+            .collect();
+        self.tasks_mut().retain(|task| !stale.contains(&task.key));
     }
 
     /// Opens the newest usage task of `source` when there is one, otherwise starts one; with
@@ -229,6 +250,49 @@ mod tests {
                 .unwrap()
                 .finished_at_ms(),
             Some(7)
+        );
+    }
+
+    #[test]
+    fn adopted_finished_scans_have_no_finish_time() {
+        let mut list = TaskList::default();
+        assert!(!list.adopted());
+        list.adopt(vec![info("a", "Films", TaskState::Done, 500)]);
+        assert!(list.adopted());
+        list.stamp_finished(7);
+        let task = list.newest_usage("media", "Films").unwrap();
+        assert_eq!(task.finished_at_ms(), None);
+        assert_eq!(list.folder_size("media", "Films"), FolderSize::Known(500));
+    }
+
+    #[test]
+    fn clearing_forgets_scans_whose_result_is_of_no_use() {
+        let mut list = TaskList::default();
+        scanned(&mut list, info("a", "Films", TaskState::Done, 1));
+        scanned(&mut list, info("b", "Films", TaskState::Done, 2));
+        for (i, path) in ["A", "B", "C", "D"].into_iter().enumerate() {
+            scanned(&mut list, info(&format!("x{i}"), path, TaskState::Done, 3));
+        }
+        scanned(&mut list, info("run", "E", TaskState::Running, 4));
+        list.clear_finished();
+        let ids: Vec<&str> = list
+            .tasks()
+            .iter()
+            .filter_map(|task| task.server_id())
+            .collect();
+        // "a" is not the newest of Films; "b" has four newer finished folders.
+        assert_eq!(ids, ["x0", "x1", "x2", "x3", "run"]);
+    }
+
+    #[test]
+    fn a_gone_result_makes_the_next_analysis_scan_anew() {
+        let mut list = TaskList::default();
+        scanned(&mut list, info("a", "Films", TaskState::Done, 500));
+        list.result_gone("a");
+        assert_eq!(list.folder_size("media", "Films"), FolderSize::Unknown);
+        assert_eq!(
+            list.analyze(location("Films"), false, false),
+            [post("Films", 1)]
         );
     }
 

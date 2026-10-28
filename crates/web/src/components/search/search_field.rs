@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use dioxus_i18n::t;
 
 use crate::components::common::icons::{ArrowLeftIcon, SearchIcon};
+use crate::i18n::attr;
 use crate::search::{DEBOUNCE_MS, SearchQuery, sleep};
 
 const INPUT_CLASS: &str = "h-10 min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 text-base text-slate-900 placeholder:text-slate-500 focus-visible:outline-2 focus-visible:outline-indigo-600 md:h-9 md:text-sm dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:placeholder:text-slate-400";
@@ -19,9 +20,10 @@ pub fn SearchField(volume: String) -> Element {
     let mut generation = use_signal(|| 0_u64);
     let mut input = use_signal(|| None::<Rc<MountedData>>);
 
-    // Navigation clears the query: the field follows, and a pending keystroke is dropped.
+    // Navigation clears the query: the field follows, and a pending keystroke is dropped. Spaces
+    // alone are no query and stay as typed.
     use_effect(move || {
-        if query.read().is_empty() && !text.peek().is_empty() {
+        if query.read().is_empty() && !text.peek().trim().is_empty() {
             generation.with_mut(|generation| *generation += 1);
             text.set(String::new());
         }
@@ -39,14 +41,17 @@ pub fn SearchField(volume: String) -> Element {
 
     let mut apply = move |value: &str| {
         generation.with_mut(|generation| *generation += 1);
-        query.set(value.trim().to_owned());
+        let value = value.trim();
+        if *query.peek() != value {
+            query.set(value.to_owned());
+        }
     };
     let mut clear = move || {
         text.set(String::new());
         apply("");
     };
 
-    let placeholder = t!("search-placeholder", volume: volume);
+    let placeholder = attr(t!("search-placeholder", volume: volume));
     let wrapper = if open() {
         "absolute inset-0 z-10 flex items-center gap-2 bg-white px-2 md:static md:inset-auto md:z-auto md:w-64 md:bg-transparent md:px-0 dark:bg-slate-900"
     } else {

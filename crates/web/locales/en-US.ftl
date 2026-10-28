@@ -28,11 +28,13 @@ sidebar-used = { $used } used of { $total }
 favorites-title = Favorites
 favorites-not-found = Not found
 favorites-remove = Remove { $name } from favorites
+favorites-load-failed = Favorites couldn't be loaded.
 favorites-add = Add to favorites
 favorites-remove-current = Remove from favorites
 breadcrumb = Breadcrumb
 browse-empty = This folder is empty.
 browse-empty-hint = Drop files here or use Upload.
+browse-empty-hint-touch = Use + to add files.
 read-only-notice = Read-only: you can browse, download and copy from this volume, not change it.
 read-only-notice-short = Read-only volume
 table-label = Folder contents
@@ -71,7 +73,7 @@ error-unsupported_media_type = The server refused the format of this upload.
 error-cross_device = { $path } is on another filesystem than its volume, so nothing can be saved there. An administrator can mount that folder as a volume of its own.
 error-invalid_destination = { $path } can't be moved or copied there.
 error-task_not_found = This task no longer exists on the server.
-error-favorites_full = You can't have more than 100 favorites. Remove one first.
+error-favorites_full = You can't have more than { $max } favorites. Remove one first.
 error-thumbnail_unavailable = No preview is available for this file.
 error-too_many_tasks = Too many tasks are waiting. Try again once some have finished.
 upload = Upload
@@ -95,6 +97,14 @@ uploads-unreadable =
         [one] 1 item couldn't be read and was skipped.
        *[other] { $count } items couldn't be read and were skipped.
     }
+uploads-retrying-server = The server couldn't take it, retrying in { $seconds } s
+uploads-invalid-names =
+    { $count ->
+        [one] 1 item has a name that can't be used here and was skipped.
+       *[other] { $count } items have names that can't be used here and were skipped.
+    }
+uploads-error-permission_denied = You don't have permission to save { $path }.
+uploads-error-too-large = The server or a proxy in front of it refused this upload as too large.
 conflict-title = { $name } already exists in { $folder }
 conflict-replace = Replace
 conflict-keep-both = Keep both
@@ -138,6 +148,8 @@ task-moving = Moving { $name } to { $folder }
 task-cancel = Cancel { $name }
 task-progress = Task progress
 task-waiting = Waiting
+task-signed-out = Signed out: sign in again to follow this task.
+task-cancel-failed = This task couldn't be cancelled.
 task-files = { $done } / { $total }
 task-files-done =
     { $count ->

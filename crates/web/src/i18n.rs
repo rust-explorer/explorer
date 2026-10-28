@@ -14,6 +14,16 @@ const RESOURCES: [(LanguageIdentifier, &str); 3] = [
     (langid!("es-ES"), include_str!("../locales/es-ES.ftl")),
 ];
 
+/// `text` without the bidi isolation marks Fluent puts around arguments, for attributes such as
+/// `aria-label` and `title`, where assistive technologies may read them out.
+pub fn attr(text: String) -> String {
+    if text.contains(['\u{2068}', '\u{2069}']) {
+        text.replace(['\u{2068}', '\u{2069}'], "")
+    } else {
+        text
+    }
+}
+
 /// Picks the first supported locale whose language subtag matches one of `preferred`.
 pub fn negotiate(preferred: &[String]) -> LanguageIdentifier {
     let supported: Vec<LanguageIdentifier> = SUPPORTED
@@ -134,6 +144,15 @@ fn browser_languages() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attr_drops_isolation_marks() {
+        assert_eq!(
+            attr("Cancel \u{2068}a.txt\u{2069}".to_owned()),
+            "Cancel a.txt"
+        );
+        assert_eq!(attr("Upload".to_owned()), "Upload");
+    }
 
     fn tags(values: &[&str]) -> Vec<String> {
         values.iter().map(ToString::to_string).collect()

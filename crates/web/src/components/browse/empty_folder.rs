@@ -10,7 +10,9 @@ pub fn EmptyFolder(read_only: bool) -> Element {
         div { class: "py-10 text-center {MUTED}",
             p { {t!("browse-empty")} }
             if !read_only {
-                p { class: "mt-1", {t!("browse-empty-hint")} }
+                // Phones have the floating "+" instead of the Upload button.
+                p { class: "mt-1 hidden md:block", {t!("browse-empty-hint")} }
+                p { class: "mt-1 md:hidden", {t!("browse-empty-hint-touch")} }
             }
         }
     }

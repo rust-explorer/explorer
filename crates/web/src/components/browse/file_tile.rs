@@ -14,7 +14,8 @@ use crate::components::common::FocusTarget;
 use crate::components::common::icons::MoreIcon;
 use crate::components::usage::FolderSizeLabel;
 use crate::format::format_size;
-use crate::listing::{FileType, file_type};
+use crate::i18n::attr;
+use crate::listing::has_thumbnail;
 use crate::routes::{Route, Segment, Segments};
 
 const TILE: &str = "flex h-full flex-col overflow-hidden rounded-lg border p-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600";
@@ -160,7 +161,7 @@ pub fn FileTile(
                 button {
                     r#type: "button",
                     class: "{MORE} {ON_HOVER}",
-                    aria_label: t!("row-menu-open", name: entry.name.clone()),
+                    aria_label: attr(t!("row-menu-open", name: entry.name.clone())),
                     aria_haspopup: "menu",
                     aria_expanded: menu_open,
                     aria_controls: if menu_open { ROW_MENU_ID },
@@ -173,11 +174,11 @@ pub fn FileTile(
     }
 }
 
-/// A thumbnail for image files, falling back to the type icon when the server has none.
+/// A thumbnail for the images the server renders, falling back to the type icon.
 #[component]
 fn TilePreview(volume: String, path: String, entry: Entry) -> Element {
     let mut failed = use_signal(|| None::<String>);
-    let url = (entry.kind == EntryKind::File && file_type(&entry.name) == FileType::Image)
+    let url = (entry.kind == EntryKind::File && has_thumbnail(&entry.name))
         .then(|| api::thumbnail_url(&volume, &path, entry.modified_ms))
         .filter(|url| failed.read().as_ref() != Some(url));
 

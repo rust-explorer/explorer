@@ -6,6 +6,7 @@ use shared::api::tasks::Location;
 use crate::components::common::file_name;
 use crate::components::common::icons::CloseIcon;
 use crate::favorites::use_favorites;
+use crate::i18n::attr;
 use crate::routes::{Route, Segments};
 
 /// The Favorites section of the sidebar; absent while there are none.
@@ -13,7 +14,8 @@ use crate::routes::{Route, Segments};
 pub fn FavoritesList() -> Element {
     let favorites = use_favorites();
     let list = favorites.list()().unwrap_or_default();
-    if list.is_empty() {
+    let load_failed = favorites.load_failed();
+    if list.is_empty() && !load_failed {
         return rsx! {};
     }
 
@@ -21,6 +23,17 @@ pub fn FavoritesList() -> Element {
         section { class: "mt-3 flex flex-col gap-1", aria_label: t!("favorites-title"),
             h2 { class: "mx-1 mb-1 mt-1.5 text-[11px] font-medium uppercase tracking-wider text-slate-400 dark:text-slate-500",
                 {t!("favorites-title")}
+            }
+            if load_failed {
+                div { role: "alert", class: "mx-1 flex flex-wrap items-center gap-x-2 text-xs text-slate-600 dark:text-slate-400",
+                    span { {t!("favorites-load-failed")} }
+                    button {
+                        r#type: "button",
+                        class: "rounded text-indigo-600 hover:underline focus-visible:outline-2 focus-visible:outline-indigo-600 dark:text-indigo-400",
+                        onclick: move |_| favorites.reload(),
+                        {t!("try-again")}
+                    }
+                }
             }
             ul { class: "flex flex-col gap-0.5",
                 for favorite in list {
@@ -61,7 +74,7 @@ fn FavoriteRow(favorite: Favorite) -> Element {
     let store = use_favorites();
     let name = display_name(&favorite).to_owned();
     let title = full_name(&favorite);
-    let remove_label = t!("favorites-remove", name: name.clone());
+    let remove_label = attr(t!("favorites-remove", name: name.clone()));
     let location = Location {
         volume: favorite.volume.clone(),
         path: favorite.path.clone(),

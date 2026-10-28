@@ -54,7 +54,7 @@ pub fn UserMenu(user: Me) -> Element {
                 aria_label: t!("user-menu-open"),
                 aria_haspopup: "dialog",
                 aria_expanded: open(),
-                aria_controls: PANEL_ID,
+                aria_controls: if open() { PANEL_ID },
                 onmounted: move |event| avatar.set(Some(event.data())),
                 onclick: move |_| open.toggle(),
                 {initials(&user.name)}

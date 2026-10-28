@@ -43,6 +43,14 @@ impl Selection {
         }
     }
 
+    /// Whether something selected, or the anchor, is no longer listed.
+    pub fn has_unlisted(&self, rows: &[&str]) -> bool {
+        self.names
+            .iter()
+            .chain(&self.anchor)
+            .any(|name| !rows.contains(&name.as_str()))
+    }
+
     /// Drops what is no longer listed.
     pub fn retain(&mut self, rows: &[&str]) {
         self.names.retain(|name| rows.contains(&name.as_str()));
@@ -145,8 +153,20 @@ mod tests {
     fn retain_drops_vanished_names() {
         let mut selection = Selection::default();
         selection.set_all(&ROWS, true);
+        assert!(selection.has_unlisted(&["b", "d", "z"]));
         selection.retain(&["b", "d", "z"]);
         assert_eq!(names(&selection), ["b", "d"]);
+        assert!(!selection.has_unlisted(&["b", "d", "z"]));
+    }
+
+    #[test]
+    fn a_vanished_anchor_is_unlisted() {
+        let mut selection = Selection::default();
+        selection.toggle("a");
+        selection.toggle("a");
+        assert!(selection.is_empty());
+        assert!(selection.has_unlisted(&["b"]));
+        assert!(!selection.has_unlisted(&["a"]));
     }
 
     #[test]

@@ -150,15 +150,28 @@ fn utility(token: &str) -> &str {
     token.rsplit(':').next().unwrap_or(token)
 }
 
+/// The variants of `token` other than `dark`, in a stable order: `hover:md:` and `md:hover:`
+/// are the same state.
+fn states(token: &str) -> Vec<&str> {
+    let mut parts: Vec<&str> = token.split(':').collect();
+    parts.pop();
+    parts.retain(|part| *part != "dark");
+    parts.sort_unstable();
+    parts
+}
+
+/// Light colour classes without a `dark:` class of the same family for the same state.
 fn violations(literal: &str) -> Vec<String> {
     let tokens: Vec<&str> = literal.split_whitespace().collect();
     tokens
         .iter()
         .filter(|token| !token.split(':').any(|part| part == "dark"))
         .filter_map(|token| family(utility(token)).map(|family| (*token, family)))
-        .filter(|(_, family)| {
+        .filter(|(token, family)| {
             !tokens.iter().any(|other| {
-                other.split(':').any(|part| part == "dark") && utility(other).starts_with(family)
+                other.split(':').any(|part| part == "dark")
+                    && utility(other).starts_with(family)
+                    && states(other) == states(token)
             })
         })
         .map(|(token, _)| token.to_owned())
@@ -209,7 +222,15 @@ fn scanner_understands_rust_literals() {
     assert_eq!(literals[1].0, 4);
     assert_eq!(violations(&literals[1].1), ["text-slate-700"]);
     assert_eq!(
+        violations("hover:bg-slate-100 dark:hover:bg-slate-800"),
+        Vec::<String>::new()
+    );
+    assert_eq!(
         violations("hover:bg-slate-100 dark:bg-slate-800"),
+        ["hover:bg-slate-100"]
+    );
+    assert_eq!(
+        violations("md:hover:bg-white dark:hover:md:bg-slate-900"),
         Vec::<String>::new()
     );
     assert_eq!(

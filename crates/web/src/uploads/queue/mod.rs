@@ -1,26 +1,22 @@
+mod actions;
 mod effects;
 mod item;
+mod refresh;
+mod transfer;
 
 use std::collections::{HashMap, HashSet};
 
 use shared::api::conflict::ConflictPolicy;
 use shared::api::uploads::PendingUpload;
 
+use super::MAX_PARALLEL;
 use super::plan::BatchPlan;
-use super::{MAX_PARALLEL, REFRESH_EVERY_MS, retry_delay_ms};
-use crate::api::{self, ApiFailure};
+use crate::api;
 use crate::conflict::Decision;
 
 pub use effects::{Effect, Event};
 use item::Phase;
 pub use item::{Item, ItemKey, Kind, Status};
-
-const ALREADY_EXISTS: &str = "already_exists";
-const UPLOAD_NOT_FOUND: &str = "upload_not_found";
-const UPLOAD_BUSY: &str = "upload_busy";
-const OFFSET_MISMATCH: &str = "offset_mismatch";
-/// The server's only JSON 5xx besides 507 `insufficient_storage`.
-const INTERNAL: &str = "internal";
 
 /// Upload state machine: events in, requests to send out.
 #[derive(Debug, Default)]
@@ -31,24 +27,16 @@ pub struct Queue {
     decisions: HashMap<u64, Decision>,
     last_refresh: HashMap<String, i64>,
     unrefreshed: HashSet<String>,
-    skipped: usize,
-}
-
-fn is_transient(failure: &ApiFailure) -> bool {
-    match failure {
-        ApiFailure::Network => true,
-        ApiFailure::Http(status) => *status >= 500 && *status != 507,
-        ApiFailure::Server(body) => {
-            matches!(body.code.as_str(), INTERNAL | UPLOAD_BUSY | OFFSET_MISMATCH)
-        }
-    }
+    invalid_names: usize,
+    unreadable: usize,
 }
 
 impl Queue {
     pub fn add(&mut self, plan: BatchPlan, pending: &[PendingUpload], _now_ms: i64) -> Vec<Effect> {
         let batch = self.next_batch;
         self.next_batch += 1;
-        self.skipped += plan.skipped;
+        self.invalid_names += plan.skipped;
+        self.unreadable += plan.unreadable;
         let folders = plan.folders.into_iter().map(|path| {
             let kind = Kind::Folder {
                 volume: plan.volume.clone(),
@@ -156,9 +144,14 @@ impl Queue {
         effects
     }
 
-    /// Picked or dropped items that could not be read or named, since the last clear.
-    pub fn skipped(&self) -> usize {
-        self.skipped
+    /// Picked or dropped items left out for their name, since the last clear.
+    pub fn invalid_names(&self) -> usize {
+        self.invalid_names
+    }
+
+    /// Picked or dropped items the browser could not read, since the last clear.
+    pub fn unreadable(&self) -> usize {
+        self.unreadable
     }
 
     pub fn items(&self) -> &[Item] {
@@ -181,7 +174,8 @@ impl Queue {
 
     pub fn clear_finished(&mut self) {
         self.items.retain(|item| item.status.is_active());
-        self.skipped = 0;
+        self.invalid_names = 0;
+        self.unreadable = 0;
     }
 
     fn index(&self, key: ItemKey) -> Option<usize> {
@@ -241,187 +235,6 @@ impl Queue {
             }
         }
     }
-
-    /// Continues from the server's `offset`; only a PATCH that moved it resets the backoff.
-    fn resume(
-        &mut self,
-        key: ItemKey,
-        offset: u64,
-        patched: bool,
-        now_ms: i64,
-        effects: &mut Vec<Effect>,
-    ) {
-        let Some(index) = self.in_flight(key) else {
-            return;
-        };
-        let item = &mut self.items[index];
-        if patched && offset > item.confirmed {
-            item.attempts = 0;
-        }
-        item.confirmed = offset;
-        let Some(url) = item.upload_url.clone() else {
-            self.finish(index, Status::Failed(ApiFailure::Network), now_ms, effects);
-            return;
-        };
-        if !patched && offset >= item.size() {
-            // A HEAD also reports every byte when the commit failed after the last PATCH; an
-            // empty PATCH at the end commits it, or confirms an upload already committed.
-            effects.push(item.patch(url, item.size()));
-            return;
-        }
-        self.advance(index, url, offset, now_ms, effects);
-    }
-
-    fn advance(
-        &mut self,
-        index: usize,
-        url: String,
-        offset: u64,
-        now_ms: i64,
-        effects: &mut Vec<Effect>,
-    ) {
-        let item = &mut self.items[index];
-        if offset >= item.size() {
-            item.sent = item.size();
-            self.finish(index, Status::Done, now_ms, effects);
-        } else {
-            effects.push(item.patch(url, offset));
-        }
-    }
-
-    fn fail(&mut self, index: usize, failure: ApiFailure, now_ms: i64, effects: &mut Vec<Effect>) {
-        let decision = self.decisions.get(&self.items[index].batch).copied();
-        let item = &mut self.items[index];
-        if is_transient(&failure) {
-            item.attempts += 1;
-            let at_ms = now_ms + retry_delay_ms(item.attempts);
-            item.status = Status::Retrying {
-                attempt: item.attempts,
-                at_ms,
-            };
-            item.phase = Phase::Idle;
-            effects.push(Effect::WakeAt { at_ms });
-            return;
-        }
-        let code = match &failure {
-            ApiFailure::Server(body) => body.code.as_str(),
-            _ => "",
-        };
-        match (code, item.phase) {
-            (ALREADY_EXISTS, Phase::Creating) if item.conflict == ConflictPolicy::Fail => {
-                match decision.map(Decision::policy) {
-                    Some(Some(conflict)) => {
-                        item.conflict = conflict;
-                        effects.push(item.create());
-                    }
-                    Some(None) => self.finish(index, Status::Skipped, now_ms, effects),
-                    None => {
-                        item.status = Status::NeedsDecision;
-                        item.phase = Phase::Idle;
-                    }
-                }
-            }
-            (UPLOAD_NOT_FOUND, Phase::Heading | Phase::Patching) if !item.restarted => {
-                item.restarted = true;
-                item.upload_url = None;
-                item.sent = 0;
-                item.confirmed = 0;
-                effects.push(item.create());
-            }
-            _ => self.finish(index, Status::Failed(failure), now_ms, effects),
-        }
-    }
-
-    fn decide(
-        &mut self,
-        key: ItemKey,
-        decision: Decision,
-        apply_to_all: bool,
-        now_ms: i64,
-        effects: &mut Vec<Effect>,
-    ) {
-        let Some(index) = self
-            .index(key)
-            .filter(|&index| self.items[index].status == Status::NeedsDecision)
-        else {
-            return;
-        };
-        let batch = self.items[index].batch;
-        let targets: Vec<usize> = if apply_to_all {
-            self.decisions.insert(batch, decision);
-            (0..self.items.len())
-                .filter(|&i| {
-                    self.items[i].batch == batch && self.items[i].status == Status::NeedsDecision
-                })
-                .collect()
-        } else {
-            vec![index]
-        };
-        for target in targets {
-            match decision.policy() {
-                Some(conflict) => {
-                    let item = &mut self.items[target];
-                    item.conflict = conflict;
-                    item.status = Status::Queued;
-                }
-                None => self.finish(target, Status::Skipped, now_ms, effects),
-            }
-        }
-    }
-
-    fn cancel(&mut self, key: ItemKey, now_ms: i64, effects: &mut Vec<Effect>) {
-        let Some(index) = self.index(key) else {
-            return;
-        };
-        let item = &self.items[index];
-        if !item.status.is_active() {
-            return;
-        }
-        if item.status == Status::Uploading {
-            effects.push(Effect::Abort { key });
-        }
-        if let Some(url) = item.upload_url.clone() {
-            effects.push(Effect::Delete { url });
-        }
-        self.finish(index, Status::Cancelled, now_ms, effects);
-    }
-
-    /// Ends an item and refreshes its volume's listing when completions are due; a throttled
-    /// completion schedules the refresh for when the throttle ends.
-    fn finish(&mut self, index: usize, status: Status, now_ms: i64, effects: &mut Vec<Effect>) {
-        let done = status == Status::Done;
-        let item = &mut self.items[index];
-        item.status = status;
-        item.phase = Phase::Idle;
-        let volume = item.volume().to_owned();
-        let first_unrefreshed = done && self.unrefreshed.insert(volume.clone());
-        if !self.unrefreshed.contains(&volume) {
-            return;
-        }
-        let idle = !self
-            .items
-            .iter()
-            .any(|item| item.status.is_active() && item.volume() == volume);
-        if idle || (done && self.refresh_due(&volume, now_ms)) {
-            self.refresh(volume, now_ms, effects);
-        } else if first_unrefreshed && let Some(&last) = self.last_refresh.get(&volume) {
-            effects.push(Effect::WakeAt {
-                at_ms: last + REFRESH_EVERY_MS,
-            });
-        }
-    }
-
-    fn refresh_due(&self, volume: &str, now_ms: i64) -> bool {
-        self.last_refresh
-            .get(volume)
-            .is_none_or(|&last| now_ms - last >= REFRESH_EVERY_MS)
-    }
-
-    fn refresh(&mut self, volume: String, now_ms: i64, effects: &mut Vec<Effect>) {
-        self.unrefreshed.remove(&volume);
-        self.last_refresh.insert(volume.clone(), now_ms);
-        effects.push(Effect::Refresh { volume });
-    }
 }
 
 #[cfg(test)]
@@ -429,6 +242,7 @@ mod tests {
     use shared::api::error::ErrorBody;
 
     use super::*;
+    use crate::api::ApiFailure;
     use crate::uploads::CHUNK_SIZE;
     use crate::uploads::plan::FileSpec;
 
@@ -449,6 +263,7 @@ mod tests {
             files,
             folders: Vec::new(),
             skipped: 0,
+            unreadable: 0,
         }
     }
 
@@ -610,7 +425,8 @@ mod tests {
             queue.items()[0].status,
             Status::Retrying {
                 attempt: 1,
-                at_ms: 1100
+                at_ms: 1100,
+                connection_lost: true,
             }
         );
         assert!(queue.tick(1099).is_empty());
@@ -635,6 +451,13 @@ mod tests {
             fail(&mut queue, 0, server("upload_busy"), 2000),
             [Effect::WakeAt { at_ms: 4000 }]
         );
+        assert!(matches!(
+            queue.items()[0].status,
+            Status::Retrying {
+                connection_lost: false,
+                ..
+            }
+        ));
         queue.tick(4000);
         assert_eq!(
             fail(&mut queue, 0, ApiFailure::Http(502), 4000),
@@ -1142,13 +965,16 @@ mod tests {
         let mut queue = Queue::default();
         let mut batch = files(1, 1);
         batch.skipped = 2;
+        batch.unreadable = 4;
         queue.add(batch, &[], 0);
         let mut batch = files(0, 0);
         batch.skipped = 1;
         queue.add(batch, &[], 0);
-        assert_eq!(queue.skipped(), 3);
+        assert_eq!(queue.invalid_names(), 3);
+        assert_eq!(queue.unreadable(), 4);
         queue.clear_finished();
-        assert_eq!(queue.skipped(), 0);
+        assert_eq!(queue.invalid_names(), 0);
+        assert_eq!(queue.unreadable(), 0);
         assert_eq!(queue.items().len(), 1);
     }
 }

@@ -138,7 +138,7 @@ fn UploadMenu(
                 aria_label: if floating { t!("upload-open") },
                 aria_haspopup: "menu",
                 aria_expanded: open(),
-                aria_controls: menu_id,
+                aria_controls: if open() { menu_id },
                 onmounted: move |event| {
                     on_trigger.call(FocusTarget(event.data()));
                     trigger.set(Some(event.data()));

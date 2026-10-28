@@ -1,4 +1,8 @@
+use dioxus::prelude::*;
 use shared::api::conflict::ConflictPolicy;
+
+use crate::tasks::use_tasks;
+use crate::uploads::use_uploads;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Decision {
@@ -15,6 +19,17 @@ impl Decision {
             Self::KeepBoth => Some(ConflictPolicy::KeepBoth),
         }
     }
+}
+
+/// True while an upload or a task waits for a conflict answer: its prompt has the screen, and a
+/// rename's prompt waits for it to close.
+pub fn use_queued_conflict() -> Memo<bool> {
+    let uploads = use_uploads();
+    let tasks = use_tasks();
+    use_memo(move || {
+        uploads.queue().read().pending_decision().is_some()
+            || tasks.list().read().pending_decision().is_some()
+    })
 }
 
 #[cfg(test)]

@@ -13,7 +13,12 @@ pub enum Status {
     Queued,
     NeedsDecision,
     Uploading,
-    Retrying { attempt: u32, at_ms: i64 },
+    Retrying {
+        attempt: u32,
+        at_ms: i64,
+        /// The request never reached the server, rather than the server failing it.
+        connection_lost: bool,
+    },
     Done,
     Failed(ApiFailure),
     Cancelled,

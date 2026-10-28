@@ -47,6 +47,7 @@ pub fn Menu(
     label: String,
     #[props(default)] at: Option<(f64, f64)>,
     on_close: EventHandler<bool>,
+    #[props(default)] on_mounted: Option<EventHandler<std::rc::Rc<MountedData>>>,
     children: Element,
 ) -> Element {
     let mut menu = use_signal(|| None::<std::rc::Rc<MountedData>>);
@@ -67,6 +68,9 @@ pub fn Menu(
             onmounted: move |event| {
                 focus_item(&event.data(), None);
                 menu.set(Some(event.data()));
+                if let Some(on_mounted) = on_mounted {
+                    on_mounted.call(event.data());
+                }
             },
             onkeydown: move |event| {
                 let key = event.key();

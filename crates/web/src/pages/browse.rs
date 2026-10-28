@@ -110,7 +110,9 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
     };
 
     let ready = *listing.state().read() == UseResourceState::Ready;
-    let current = current_result(listing.read().as_ref(), &url, ready);
+    // The listing waits for the volumes, so the read-only notice does not push it down.
+    let volumes_known = volumes.read().is_some();
+    let current = current_result(listing.read().as_ref(), &url, ready).filter(|_| volumes_known);
     let searching = effective_query(&query.read()).map(ToOwned::to_owned);
     let content = match current {
         _ if searching.is_some() => rsx! {

@@ -1,13 +1,15 @@
+mod decisions;
+mod lifecycle;
+mod polling;
+
 use std::collections::HashMap;
 
 use shared::api::browse::EntryKind;
-use shared::api::conflict::ConflictPolicy;
-use shared::api::error::ErrorBody;
 use shared::api::tasks::{Location, TaskInfo, TaskSpec, TaskState};
 
-use super::conflict::{Conflict, policy_of, with_policy};
 use crate::api::ApiFailure;
 use crate::conflict::Decision;
+use crate::tasks::conflict::Conflict;
 
 pub const POLL_EVERY_MS: u32 = 1000;
 const TASK_NOT_FOUND: &str = "task_not_found";
@@ -35,8 +37,12 @@ pub struct Task {
     pub(super) open_at: Option<String>,
     /// When this tab saw it finish.
     finished_at_ms: Option<i64>,
+    /// It had finished before this tab took it over: when is unknown.
+    finished_before: bool,
     /// Cleared from the activity panel, but still known for its result.
     dismissed: bool,
+    /// Why the last cancel request failed.
+    cancel_failure: Option<ApiFailure>,
 }
 
 impl Task {
@@ -72,6 +78,14 @@ impl Task {
         })
     }
 
+    pub(in crate::tasks) fn dismissed(&self) -> bool {
+        self.dismissed
+    }
+
+    pub fn cancel_failure(&self) -> Option<&ApiFailure> {
+        self.cancel_failure.as_ref()
+    }
+
     pub fn finished_at_ms(&self) -> Option<i64> {
         self.finished_at_ms
     }
@@ -101,10 +115,21 @@ pub enum Effect {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
-    Posted { key: TaskKey, info: Box<TaskInfo> },
-    PostFailed { key: TaskKey, failure: ApiFailure },
+    Posted {
+        key: TaskKey,
+        info: Box<TaskInfo>,
+    },
+    PostFailed {
+        key: TaskKey,
+        failure: ApiFailure,
+    },
     Polled(Vec<TaskInfo>),
     PollFailed(ApiFailure),
+    /// The `Delete` of task `id` failed.
+    DeleteFailed {
+        id: String,
+        failure: ApiFailure,
+    },
 }
 
 /// The tab's tasks: events in, requests out. Polls only while one of them is queued or running.
@@ -119,6 +144,10 @@ pub struct TaskList {
     next_batch: u64,
     /// "Apply to all" answers, by batch.
     decisions: HashMap<u64, Decision>,
+    /// A poll found the session gone: polling stops until the user signs in again.
+    signed_out: bool,
+    /// The server's tasks were taken over, or could not be listed.
+    adopted: bool,
 }
 
 impl TaskList {
@@ -129,6 +158,15 @@ impl TaskList {
     /// The tasks the activity panel lists.
     pub fn shown(&self) -> impl Iterator<Item = &Task> {
         self.tasks.iter().filter(|task| !task.dismissed)
+    }
+
+    /// Whether the tasks from before a reload are known by now.
+    pub fn adopted(&self) -> bool {
+        self.adopted
+    }
+
+    pub fn signed_out(&self) -> bool {
+        self.signed_out
     }
 
     pub fn active_count(&self) -> usize {
@@ -144,301 +182,13 @@ impl TaskList {
         self.tasks.iter().filter(|task| task.batch == batch).count()
     }
 
-    /// Starts one batch of tasks whose source kinds are unknown.
-    pub fn start(&mut self, specs: Vec<TaskSpec>) -> Vec<Effect> {
-        self.start_batch(specs.into_iter().map(|spec| (spec, None)).collect())
-    }
-
-    /// Starts one batch of copies or moves of entries of known kinds.
-    pub fn start_transfers(&mut self, specs: Vec<(TaskSpec, EntryKind)>) -> Vec<Effect> {
-        self.start_batch(
-            specs
-                .into_iter()
-                .map(|(spec, kind)| (spec, Some(kind)))
-                .collect(),
-        )
-    }
-
-    pub(super) fn start_batch(&mut self, specs: Vec<(TaskSpec, Option<EntryKind>)>) -> Vec<Effect> {
-        let batch = self.next_batch;
-        self.next_batch += 1;
-        specs
-            .into_iter()
-            .map(|(spec, source_kind)| {
-                let key = TaskKey(self.next_key);
-                self.next_key += 1;
-                self.tasks.push(Task {
-                    key,
-                    spec: spec.clone(),
-                    info: None,
-                    lost: None,
-                    cancel_requested: false,
-                    batch,
-                    source_kind,
-                    conflict: None,
-                    open_at: None,
-                    finished_at_ms: None,
-                    dismissed: false,
-                });
-                Effect::Post { key, spec }
-            })
-            .collect()
-    }
-
-    /// Takes over the queued and running tasks the server has for this user, such as those an
-    /// earlier page started before a reload. Finished scans are taken too, for their result,
-    /// but stay out of the panel like the other finished tasks.
-    pub fn adopt(&mut self, infos: Vec<TaskInfo>) -> Vec<Effect> {
-        for info in infos {
-            let known = self
-                .tasks
-                .iter()
-                .any(|task| task.server_id() == Some(info.id.as_str()));
-            let finished_scan =
-                matches!(info.spec, TaskSpec::Usage { .. }) && info.state == TaskState::Done;
-            if known || !(info.state.is_active() || finished_scan) {
-                continue;
-            }
-            let (key, batch) = (TaskKey(self.next_key), self.next_batch);
-            self.next_key += 1;
-            self.next_batch += 1;
-            self.tasks.push(Task {
-                key,
-                spec: info.spec.clone(),
-                info: Some(info),
-                lost: None,
-                cancel_requested: false,
-                batch,
-                source_kind: None,
-                conflict: None,
-                open_at: None,
-                finished_at_ms: None,
-                dismissed: finished_scan,
-            });
-        }
-        let mut effects = Vec::new();
-        self.keep_polling(&mut effects);
-        effects
-    }
-
-    /// Answers the conflict of `key`, or of every task of its batch waiting with one that the
-    /// decision suits; a later conflict in the batch then gets the same answer.
-    pub fn decide(&mut self, key: TaskKey, decision: Decision, apply_to_all: bool) -> Vec<Effect> {
-        let Some(batch) = self
-            .tasks
-            .iter()
-            .find(|task| task.key == key && task.conflict.is_some())
-            .map(|task| task.batch)
-        else {
-            return Vec::new();
-        };
-        let keys: Vec<TaskKey> = if apply_to_all {
-            self.decisions.insert(batch, decision);
-            self.tasks
-                .iter()
-                .filter(|task| task.batch == batch && task.conflict.is_some())
-                .filter(|task| suits(task, decision))
-                .map(|task| task.key)
-                .collect()
-        } else {
-            vec![key]
-        };
-        let mut effects = Vec::new();
-        for key in keys {
-            self.apply(key, decision, &mut effects);
-        }
-        effects
-    }
-
-    pub fn handle(&mut self, event: Event) -> Vec<Effect> {
-        let mut effects = Vec::new();
-        match event {
-            Event::Posted { key, info } => {
-                // An adoption may have listed it before this answer.
-                self.tasks
-                    .retain(|task| task.key == key || task.server_id() != Some(info.id.as_str()));
-                if let Some(task) = self.task_mut(key) {
-                    if task.cancel_requested && info.state.is_active() {
-                        effects.push(Effect::Delete {
-                            id: info.id.clone(),
-                        });
-                    }
-                    if let Some(path) = task.open_at.take() {
-                        effects.push(Effect::Open {
-                            id: info.id.clone(),
-                            at: Location {
-                                volume: task.spec.source().volume.clone(),
-                                path,
-                            },
-                        });
-                    }
-                    let finished = !info.state.is_active() && changes_files(&task.spec);
-                    task.info = Some(*info);
-                    if finished {
-                        effects.push(Effect::Refresh);
-                    }
-                }
-            }
-            Event::PostFailed { key, failure } => self.refused(key, failure, &mut effects),
-            Event::Polled(infos) => {
-                self.polling = false;
-                if self.update(&infos) {
-                    effects.push(Effect::Refresh);
-                }
-            }
-            Event::PollFailed(failure) => {
-                self.polling = false;
-                if failure.is_unauthenticated() {
-                    return effects;
-                }
-            }
-        }
-        self.keep_polling(&mut effects);
-        effects
-    }
-
-    /// The task stops once the server notices; before the server has it, once it does.
-    pub fn cancel(&mut self, key: TaskKey) -> Vec<Effect> {
-        let Some(task) = self.task_mut(key).filter(|task| task.is_active()) else {
-            return Vec::new();
-        };
-        if task.conflict.is_some() {
-            self.tasks.retain(|task| task.key != key);
-            return Vec::new();
-        }
-        if let Some(id) = task.server_id() {
-            return vec![Effect::Delete { id: id.to_owned() }];
-        }
-        task.cancel_requested = true;
-        Vec::new()
-    }
-
-    /// Forgets the finished tasks, here and on the server. A finished scan only leaves the
-    /// panel: its result stays on the server, which drops old ones by itself.
-    pub fn clear_finished(&mut self) -> Vec<Effect> {
-        let mut effects = Vec::new();
-        self.tasks.retain_mut(|task| {
-            if task.is_active() {
-                return true;
-            }
-            if matches!(task.spec, TaskSpec::Usage { .. }) && task.state() == TaskState::Done {
-                task.dismissed = true;
-                return true;
-            }
-            if let Some(id) = task.server_id() {
-                effects.push(Effect::Delete { id: id.to_owned() });
-            }
-            false
-        });
-        effects
-    }
-
-    /// Notes `now_ms` as the finish time of the tasks that just finished.
-    pub fn stamp_finished(&mut self, now_ms: i64) {
-        for task in &mut self.tasks {
-            if !task.is_active() && task.finished_at_ms.is_none() {
-                task.finished_at_ms = Some(now_ms);
-            }
-        }
-    }
-
-    /// Applies a poll; true when a task that changes files finished.
-    fn update(&mut self, infos: &[TaskInfo]) -> bool {
-        let mut finished = false;
-        for task in &mut self.tasks {
-            let Some(current) = task.info.as_ref().filter(|_| task.is_active()) else {
-                continue;
-            };
-            if let Some(info) = infos.iter().find(|info| info.id == current.id) {
-                finished |= !info.state.is_active() && changes_files(&task.spec);
-                task.info = Some(info.clone());
-            } else if self.polled.contains(&current.id) {
-                // Lost with a server restart.
-                task.lost = Some(ApiFailure::Server(ErrorBody {
-                    code: TASK_NOT_FOUND.to_owned(),
-                    message: String::new(),
-                    details: None,
-                    request_id: None,
-                }));
-                finished |= changes_files(&task.spec);
-            }
-        }
-        finished
-    }
-
-    fn keep_polling(&mut self, effects: &mut Vec<Effect>) {
-        if self.polling {
-            return;
-        }
-        let waiting: Vec<String> = self
-            .tasks
-            .iter()
-            .filter(|task| task.is_active())
-            .filter_map(|task| task.server_id().map(str::to_owned))
-            .collect();
-        if !waiting.is_empty() {
-            self.polling = true;
-            self.polled = waiting;
-            effects.push(Effect::PollAfter { ms: POLL_EVERY_MS });
-        }
-    }
-
-    /// A copy or move refused because its destination exists waits for a decision, unless
-    /// its batch already has one; any other refusal fails the task.
-    fn refused(&mut self, key: TaskKey, failure: ApiFailure, effects: &mut Vec<Effect>) {
-        let decision = self
-            .tasks
-            .iter()
-            .find(|task| task.key == key)
-            .and_then(|task| self.decisions.get(&task.batch).copied());
-        let Some(task) = self.task_mut(key) else {
-            return;
-        };
-        let conflict =
-            Conflict::of(&failure).filter(|_| policy_of(&task.spec) == Some(ConflictPolicy::Fail));
-        let Some(conflict) = conflict else {
-            task.lost = Some(failure);
-            return;
-        };
-        if task.cancel_requested {
-            self.tasks.retain(|task| task.key != key);
-            return;
-        }
-        task.conflict = Some(conflict);
-        if let Some(decision) = decision.filter(|&decision| suits(task, decision)) {
-            self.apply(key, decision, effects);
-        }
-    }
-
-    /// Resends the task with the decision's policy, or drops it on Cancel.
-    fn apply(&mut self, key: TaskKey, decision: Decision, effects: &mut Vec<Effect>) {
-        match decision.policy() {
-            None => self.tasks.retain(|task| task.key != key),
-            Some(conflict) => {
-                if let Some(task) = self.task_mut(key) {
-                    task.conflict = None;
-                    task.spec = with_policy(&task.spec, conflict);
-                    effects.push(Effect::Post {
-                        key,
-                        spec: task.spec.clone(),
-                    });
-                }
-            }
-        }
-    }
-
-    pub(super) fn tasks_mut(&mut self) -> &mut Vec<Task> {
+    pub(in crate::tasks) fn tasks_mut(&mut self) -> &mut Vec<Task> {
         &mut self.tasks
     }
 
-    pub(super) fn task_mut(&mut self, key: TaskKey) -> Option<&mut Task> {
+    pub(in crate::tasks) fn task_mut(&mut self, key: TaskKey) -> Option<&mut Task> {
         self.tasks.iter_mut().find(|task| task.key == key)
     }
-}
-
-/// Replace only suits a file over a file.
-fn suits(task: &Task, decision: Decision) -> bool {
-    decision != Decision::Replace || task.allows_replace()
 }
 
 /// A space usage scan only reads: the listing need not reload when it ends.
@@ -448,10 +198,12 @@ fn changes_files(spec: &TaskSpec) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use shared::api::conflict::ConflictPolicy;
+    use shared::api::error::ErrorBody;
     use shared::api::tasks::Location;
 
-    use super::super::conflict::ALREADY_EXISTS;
     use super::*;
+    use crate::tasks::conflict::ALREADY_EXISTS;
 
     fn delete(path: &str) -> TaskSpec {
         TaskSpec::Delete {
@@ -572,11 +324,15 @@ mod tests {
     fn network_failure_keeps_polling_but_sign_out_stops() {
         let mut list = posted();
         assert_eq!(list.handle(Event::PollFailed(ApiFailure::Network)), [POLL]);
+        assert!(!list.signed_out());
         assert_eq!(
             list.handle(Event::PollFailed(server("unauthenticated"))),
             []
         );
         assert_eq!(list.active_count(), 2);
+        assert!(list.signed_out());
+        list.handle(Event::Polled(vec![info("a", "a", TaskState::Running)]));
+        assert!(!list.signed_out());
     }
 
     #[test]
@@ -700,6 +456,29 @@ mod tests {
             info("b", "b", TaskState::Done),
         ]));
         assert_eq!(list.cancel(TaskKey(0)), [], "already finished");
+    }
+
+    #[test]
+    fn failed_cancel_shows_until_the_next_try() {
+        let mut list = posted();
+        list.cancel(TaskKey(0));
+        list.handle(Event::DeleteFailed {
+            id: "a".to_owned(),
+            failure: ApiFailure::Network,
+        });
+        assert_eq!(list.tasks()[0].cancel_failure(), Some(&ApiFailure::Network));
+        assert!(list.tasks()[0].is_active());
+        assert_eq!(
+            list.cancel(TaskKey(0)),
+            [Effect::Delete { id: "a".to_owned() }]
+        );
+        assert_eq!(list.tasks()[0].cancel_failure(), None);
+
+        list.handle(Event::DeleteFailed {
+            id: "b".to_owned(),
+            failure: server("task_not_found"),
+        });
+        assert_eq!(list.tasks()[1].state(), TaskState::Failed);
     }
 
     #[test]
