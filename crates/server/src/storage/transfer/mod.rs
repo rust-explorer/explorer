@@ -1,5 +1,6 @@
 mod check;
 mod copy;
+mod mode;
 mod r#move;
 mod remove;
 

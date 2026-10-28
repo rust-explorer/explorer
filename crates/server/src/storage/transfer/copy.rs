@@ -1,8 +1,11 @@
 use std::io::{self, Read, Write};
+use std::os::unix::fs::PermissionsExt as _;
 use std::time::SystemTime;
 
+use cap_std::fs::MetadataExt as _;
 use shared::api::conflict::ConflictPolicy;
 
+use super::mode::{kept_mode, set_dir_mode, set_file_mode};
 use super::remove::{Expect, Removed, Stamp, remove_if};
 use super::{COPY_CHUNK, TransferPlan, TransferProgress};
 use crate::storage::read::Identity;
@@ -37,9 +40,11 @@ pub(super) struct Taken {
 
 /// What a folder copy made in the destination, by index in the plan, with the path a file
 /// ended up at when it is not the planned one.
+/// Each copied folder also comes with its source's permissions, applied once the copy is done.
 #[derive(Default)]
 struct Made {
     entries: Vec<(usize, Option<RelPath>, Expect)>,
+    dir_modes: Vec<(RelPath, Identity, u32)>,
 }
 
 /// Like [`copy`], also returning what it took from the source.
@@ -87,7 +92,8 @@ pub(super) fn copy_taking(
     }
 
     let source_err = |err| StorageError::from_io(path, err).on_source();
-    let top_id = Identity::of(&source.root.metadata(path.as_str()).map_err(source_err)?);
+    let top_meta = source.root.metadata(path.as_str()).map_err(source_err)?;
+    let top_id = Identity::of(&top_meta);
     let top = create_top(dest, dest_dir, name, conflict)?;
     let made_top = dest
         .root
@@ -101,7 +107,13 @@ pub(super) fn copy_taking(
     };
     let mut made = Made::default();
     match files.copy_tree(path, &top, plan, &mut made, &mut taken) {
-        Ok(()) => Ok((top, taken)),
+        Ok(()) => {
+            for (dir, id, mode) in made.dir_modes.iter().rev() {
+                set_dir_mode(dest, dir, *id, *mode);
+            }
+            set_dir_mode(dest, &top, made_top, kept_mode(top_meta.mode()));
+            Ok((top, taken))
+        }
         Err(err) => {
             undo(dest, path, &top, made_top, plan, &made);
             Err(err)
@@ -230,10 +242,11 @@ impl Files<'_> {
                         .root
                         .symlink_metadata(to.as_str())
                         .map_err(|err| StorageError::from_io(&to, err))?;
-                    made.entries
-                        .push((index, None, Expect::Dir(Identity::of(&created))));
+                    let created = Identity::of(&created);
+                    made.entries.push((index, None, Expect::Dir(created)));
                     if let Some(source) = source {
                         taken.dirs.push((index, Identity::of(&source)));
+                        made.dir_modes.push((to, created, kept_mode(source.mode())));
                     }
                 }
                 WalkItem::File {
@@ -262,22 +275,26 @@ impl Files<'_> {
         modified: Option<SystemTime>,
     ) -> Result<CopiedFile, StorageError> {
         let id = StagedId::random();
-        let placed = self.stream(from, to, &id).and_then(|(output, source)| {
-            if self.progress.is_cancelled() {
-                return Err(StorageError::Cancelled);
-            }
-            let placed = self
-                .dest
-                .commit_staged(self.staging, &id, to, conflict, modified)?;
-            let made = output
-                .metadata()
-                .map_err(|err| StorageError::from_io(&placed, err))?;
-            Ok(CopiedFile {
-                placed,
-                source,
-                made: Stamp::placed(&made),
-            })
-        });
+        let placed = self
+            .stream(from, to, &id)
+            .and_then(|(output, source, mode)| {
+                if self.progress.is_cancelled() {
+                    return Err(StorageError::Cancelled);
+                }
+                set_file_mode(&output, mode, false, self.dest);
+                let placed = self
+                    .dest
+                    .commit_staged(self.staging, &id, to, conflict, modified)?;
+                set_file_mode(&output, mode, true, self.dest);
+                let made = output
+                    .metadata()
+                    .map_err(|err| StorageError::from_io(&placed, err))?;
+                Ok(CopiedFile {
+                    placed,
+                    source,
+                    made: Stamp::placed(&made),
+                })
+            });
         match placed {
             Ok(placed) => {
                 self.progress.add_file();
@@ -296,19 +313,21 @@ impl Files<'_> {
         }
     }
 
-    /// Returns the staged file, still open, and the source as it was when opened.
+    /// Returns the staged file, still open, the source as it was when opened and the
+    /// permissions the copy keeps.
     fn stream(
         &self,
         from: &RelPath,
         to: &RelPath,
         id: &StagedId,
-    ) -> Result<(std::fs::File, Stamp), StorageError> {
+    ) -> Result<(std::fs::File, Stamp, u32), StorageError> {
         let read_err = |err| StorageError::from_io(from, err).on_source();
         let (mut input, _) = self
             .source
             .open_file(from)
             .map_err(StorageError::on_source)?;
-        let source = Stamp::source(&input.metadata().map_err(read_err)?);
+        let meta = input.metadata().map_err(read_err)?;
+        let (source, mode) = (Stamp::source(&meta), kept_mode(meta.permissions().mode()));
         let mut output = self.staging.create(id)?;
         let mut chunk = vec![0; COPY_CHUNK];
         loop {
@@ -317,7 +336,7 @@ impl Files<'_> {
             }
             let n = fill(&mut input, &mut chunk).map_err(read_err)?;
             if n == 0 {
-                return Ok((output, source));
+                return Ok((output, source, mode));
             }
             output
                 .write_all(&chunk[..n])

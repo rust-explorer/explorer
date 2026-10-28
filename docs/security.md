@@ -204,6 +204,12 @@ action reach outside its volume.
   removed; nothing is lost, but the move is reported as failed. A move within one volume that hits a nested mount falls back to the same copy and delete.
   Copies use the staging directory of the destination volume, so their data never leaves it
   until it is renamed into place.
+- **Permissions.** A copy, and a move to another volume, give each file and folder the
+  permission bits of its source (read, write and execute for owner, group and others), so a
+  private `0600` file stays private; set-user-ID, set-group-ID and sticky bits are dropped.
+  The owner and group are the container user's, as for any file it creates. A move within a
+  volume is a rename and keeps everything. On a filesystem without Unix permissions (exFAT,
+  some SMB mounts) the copy gets whatever that filesystem gives.
 - **Tasks.** A task belongs to the OIDC `sub` that created it; listing, cancelling or
   dismissing another user's task is a 404 `task_not_found`, and the ids are 128 random bits.
   A user has at most 1000 tasks queued or running; more answer 429 `too_many_tasks`. The web

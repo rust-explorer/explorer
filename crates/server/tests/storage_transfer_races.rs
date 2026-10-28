@@ -249,3 +249,51 @@ fn failed_copy_keeps_what_others_put_in_its_folder() {
         .collect();
     assert_eq!(left, ["mine.txt"]);
 }
+
+fn mode(path: &Path) -> u32 {
+    use std::os::unix::fs::PermissionsExt as _;
+    fs::symlink_metadata(path).unwrap().permissions().mode() & 0o7777
+}
+
+fn set_mode(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt as _;
+    fs::set_permissions(path, fs::Permissions::from_mode(mode)).unwrap();
+}
+
+#[test]
+fn copy_and_cross_volume_move_keep_permissions() {
+    let fixture = Fixture::new(|media, _| {
+        write(&media.join("secret.txt"), b"s");
+        write(&media.join("D/run.sh"), b"#!/bin/sh");
+        write(&media.join("D/Locked/read-only.txt"), b"r");
+        set_mode(&media.join("secret.txt"), 0o600);
+        set_mode(&media.join("D/run.sh"), 0o750);
+        set_mode(&media.join("D/Locked/read-only.txt"), 0o400);
+        set_mode(&media.join("D/Locked"), 0o500);
+        set_mode(&media.join("D"), 0o700);
+    });
+    let documents = fixture.path("documents");
+    let none = Hook::new(|_| false);
+
+    let copied = storage::copy(
+        fixture.media(),
+        &rel("D"),
+        fixture.documents(),
+        &RelPath::root(),
+        ConflictPolicy::Fail,
+        &storage::plan_transfer(fixture.media(), &rel("D")).unwrap(),
+        &none,
+    );
+    move_entry(&fixture, "secret.txt", &none).unwrap();
+
+    assert_eq!(copied.unwrap(), rel("D"));
+    assert_eq!(mode(&documents.join("secret.txt")), 0o600);
+    assert_eq!(mode(&documents.join("D")), 0o700);
+    assert_eq!(mode(&documents.join("D/run.sh")), 0o750);
+    assert_eq!(mode(&documents.join("D/Locked")), 0o500);
+    assert_eq!(mode(&documents.join("D/Locked/read-only.txt")), 0o400);
+    assert_eq!(read(&documents.join("D/Locked/read-only.txt")), "r");
+    for dir in ["media/D/Locked", "documents/D/Locked"] {
+        set_mode(&fixture.data.path().join(dir), 0o700);
+    }
+}
