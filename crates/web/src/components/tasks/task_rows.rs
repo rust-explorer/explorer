@@ -97,7 +97,7 @@ fn TaskRow(task: Task) -> Element {
                 if let (TaskSpec::Usage { source }, Some(info), TaskState::Done) = (&task.spec, &task.info, state) {
                     ViewLink { route: usage_route(&info.id, source), name: name.clone() }
                 }
-                if state == TaskState::Done {
+                if state == TaskState::Done && !task.vanished() {
                     span {
                         class: "text-green-600 dark:text-green-400",
                         role: "img",
@@ -138,6 +138,11 @@ fn TaskStatus(task: Task) -> Element {
         return rsx! {
             p { class: "mt-0.5 text-xs text-red-700 dark:text-red-400", {t!("task-cancel-failed")} }
             FailureNote { failure: failure.clone() }
+        };
+    }
+    if task.vanished() {
+        return rsx! {
+            p { class: NOTE, {t!("task-vanished")} }
         };
     }
     let usage = matches!(task.spec, TaskSpec::Usage { .. });

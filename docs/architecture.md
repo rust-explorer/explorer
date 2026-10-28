@@ -372,7 +372,9 @@ The tab polls `GET /api/tasks` every second while one of its tasks is queued or 
 refreshes the listing and the free space when one finishes. A tab shows the tasks it started;
 on load it also lists the user's queued and running tasks once and adopts them, so a reload
 keeps showing them until they finish (an adopted task never asks about a conflict, it is past
-that step).
+that step). A file task that drops out of the poll (another tab cleared it, it expired while
+the tab slept, or the server restarted) is shown as no longer tracked, with an unknown outcome,
+not as failed.
 
 Polish: a refresh button next to the breadcrumb reloads the listing, the free space and the
 favorites. The star next to the folder name adds or removes a favorite; favorites are listed

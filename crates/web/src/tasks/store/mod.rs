@@ -26,7 +26,7 @@ pub struct Task {
     /// The server's view, once it created the task.
     pub info: Option<TaskInfo>,
     /// The server refused the task, or no longer knows it.
-    lost: Option<ApiFailure>,
+    lost: Option<Lost>,
     cancel_requested: bool,
     /// The tasks of one user action share a batch, for "apply to all".
     pub batch: u64,
@@ -46,6 +46,15 @@ pub struct Task {
     cancel_failure: Option<ApiFailure>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+enum Lost {
+    /// Refused, or a scan the server no longer knows: its result is gone with it.
+    Failed(ApiFailure),
+    /// A file task the server no longer knows: another tab cleared it once finished, or a
+    /// restart cut it. How it ended is unknown.
+    Vanished,
+}
+
 impl Task {
     pub fn conflict(&self) -> Option<&Conflict> {
         self.conflict.as_ref()
@@ -60,9 +69,12 @@ impl Task {
                 .is_some_and(|conflict| conflict.kind == EntryKind::File)
     }
 
+    /// A vanished task reads as done: it is over, but [`Task::vanished`] tells its outcome is
+    /// unknown.
     pub fn state(&self) -> TaskState {
         match (&self.lost, &self.info) {
-            (Some(_), _) => TaskState::Failed,
+            (Some(Lost::Failed(_)), _) => TaskState::Failed,
+            (Some(Lost::Vanished), _) => TaskState::Done,
             (None, Some(info)) => info.state,
             (None, None) => TaskState::Queued,
         }
@@ -72,11 +84,28 @@ impl Task {
         self.state().is_active()
     }
 
+    pub fn vanished(&self) -> bool {
+        self.lost == Some(Lost::Vanished)
+    }
+
+    /// The server answered that it does not know the task.
+    fn forgotten(&mut self, failure: ApiFailure) {
+        self.lost = Some(if changes_files(&self.spec) {
+            Lost::Vanished
+        } else {
+            Lost::Failed(failure)
+        });
+    }
+
     pub fn failure(&self) -> Option<ApiFailure> {
-        self.lost.clone().or_else(|| {
-            let error = self.info.as_ref()?.error.clone()?;
-            Some(ApiFailure::Server(error))
-        })
+        if let Some(lost) = &self.lost {
+            return match lost {
+                Lost::Failed(failure) => Some(failure.clone()),
+                Lost::Vanished => None,
+            };
+        }
+        let error = self.info.as_ref()?.error.clone()?;
+        Some(ApiFailure::Server(error))
     }
 
     pub(in crate::tasks) fn dismissed(&self) -> bool {
@@ -404,15 +433,16 @@ mod tests {
     }
 
     #[test]
-    fn task_missing_from_the_poll_is_lost() {
+    fn task_missing_from_the_poll_has_vanished() {
         let mut list = posted();
         let effects = list.handle(Event::Polled(vec![info("b", "b", TaskState::Running)]));
         assert_eq!(effects, [Effect::Refresh, POLL]);
-        assert_eq!(states(&list), [TaskState::Failed, TaskState::Running]);
-        assert!(matches!(
-            list.tasks()[0].failure(),
-            Some(ApiFailure::Server(body)) if body.code == TASK_NOT_FOUND
-        ));
+        // Another tab may have cleared it once done: not shown as failed.
+        assert_eq!(states(&list), [TaskState::Done, TaskState::Running]);
+        assert!(list.tasks()[0].vanished());
+        assert_eq!(list.tasks()[0].failure(), None);
+        assert_eq!(list.tasks()[0].server_id(), None);
+        assert_eq!(list.clear_finished(), []);
     }
 
     #[test]
@@ -441,7 +471,7 @@ mod tests {
             info("b", "b", TaskState::Running),
         ]));
         assert_eq!(effects, [Effect::Refresh, POLL]);
-        assert_eq!(list.tasks()[2].state(), TaskState::Failed);
+        assert!(list.tasks()[2].vanished());
     }
 
     #[test]
@@ -531,7 +561,8 @@ mod tests {
             id: "b".to_owned(),
             failure: server("task_not_found"),
         });
-        assert_eq!(list.tasks()[1].state(), TaskState::Failed);
+        assert!(list.tasks()[1].vanished());
+        assert!(!list.tasks()[1].is_active());
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use shared::api::conflict::ConflictPolicy;
 
-use super::{Effect, TOO_MANY_TASKS, Task, TaskKey, TaskList};
+use super::{Effect, Lost, TOO_MANY_TASKS, Task, TaskKey, TaskList};
 use crate::api::ApiFailure;
 use crate::conflict::Decision;
 use crate::tasks::conflict::{Conflict, policy_of, with_policy};
@@ -69,7 +69,7 @@ impl TaskList {
         let conflict =
             Conflict::of(&failure).filter(|_| policy_of(&task.spec) == Some(ConflictPolicy::Fail));
         let Some(conflict) = conflict else {
-            task.lost = Some(failure);
+            task.lost = Some(Lost::Failed(failure));
             return;
         };
         if task.cancel_requested {
