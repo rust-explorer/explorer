@@ -62,6 +62,20 @@ const WEB_CLIPPY: Step = Step {
     ],
 };
 
+const AUDIT: Step = Step {
+    name: "audit",
+    program: "cargo",
+    args: &["audit"],
+};
+
+// Retried when `AUDIT` fails outside CI, so a failed advisory database fetch (offline)
+// falls back to the local copy; a real advisory fails both runs.
+const AUDIT_OFFLINE: Step = Step {
+    name: "audit (local advisory database)",
+    program: "cargo",
+    args: &["audit", "--no-fetch", "--stale"],
+};
+
 const DOCKER_BUILD: Step = Step {
     name: "docker build",
     program: "docker",
@@ -99,6 +113,10 @@ fn ci(docker: bool) -> ExitCode {
         }
     }
 
+    if !audit() {
+        return ExitCode::FAILURE;
+    }
+
     if command_exists("dx") {
         for step in [&WEB_BUILD, &WEB_CLIPPY] {
             if !run(step) {
@@ -130,6 +148,28 @@ fn ci(docker: bool) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+fn audit() -> bool {
+    let ci = env::var("CI").is_ok_and(|v| v == "true");
+    if !command_exists_with("cargo", &["audit", "--version"]) {
+        if ci {
+            eprintln!(
+                "\n==> FAILED: {}: `cargo audit` not found but CI=true (cargo binstall cargo-audit)",
+                AUDIT.name
+            );
+            return false;
+        }
+        eprintln!(
+            "\n==> skipping {}: `cargo audit` not found (cargo binstall cargo-audit)",
+            AUDIT.name
+        );
+        return true;
+    }
+    if run(&AUDIT) {
+        return true;
+    }
+    !ci && run(&AUDIT_OFFLINE)
+}
+
 fn run(step: &Step) -> bool {
     eprintln!(
         "\n==> {}: {} {}",
@@ -154,8 +194,12 @@ fn run(step: &Step) -> bool {
 }
 
 fn command_exists(program: &str) -> bool {
+    command_exists_with(program, &["--version"])
+}
+
+fn command_exists_with(program: &str, args: &[&str]) -> bool {
     Command::new(program)
-        .arg("--version")
+        .args(args)
         .output()
         .is_ok_and(|out| out.status.success())
 }

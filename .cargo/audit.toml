@@ -1,0 +1,11 @@
+# Advisories that cannot affect Explorer. Revisit when openidconnect moves to rsa 0.10
+# and crypto-bigint 0.7.
+[advisories]
+ignore = [
+    # rsa (Marvin): timing leak in private-key operations; Explorer only verifies the
+    # provider's public-key signatures and holds no RSA private key.
+    "RUSTSEC-2023-0071",
+    # crypto-bigint 0.5 (via p256/p384/rsa): non-constant-time arithmetic; only public-key
+    # signature verification runs on it, nothing secret to leak.
+    "RUSTSEC-2026-0387",
+]
