@@ -40,7 +40,11 @@ pub async fn thumbnail(
         StorageError::NotFound(_) | StorageError::IsADirectory(_) => {
             ApiError::thumbnail_unavailable()
         }
-        err => ApiError::from_storage(&volume, err),
+        // A folder of unreadable images would log one warning per tile.
+        err => {
+            tracing::debug!(volume, path = path.as_str(), error = %err, "thumbnail source unreadable");
+            ApiError::from_logged_storage(&volume, err)
+        }
     })?;
     let size = meta.size.unwrap_or_default();
     if size > MAX_SOURCE_BYTES {
@@ -156,16 +160,15 @@ fn generate(thumbnails: &Thumbnails, key: &str, file: std::fs::File) -> Option<T
     Some(thumbnail)
 }
 
-/// Weak comparison (RFC 9110 section 13.1.2), as `If-None-Match` requires.
+/// Weak comparison (RFC 9110 section 13.1.2), as `If-None-Match` requires. `*` never matches:
+/// the thumbnail may not exist yet, and a 304 would leave the client with nothing to show.
 fn etag_matches(if_none_match: &str, key: &str) -> bool {
     if_none_match.split(',').map(str::trim).any(|tag| {
-        tag == "*"
-            || tag
-                .strip_prefix("W/")
-                .unwrap_or(tag)
-                .strip_prefix('"')
-                .and_then(|tag| tag.strip_suffix('"'))
-                == Some(key)
+        tag.strip_prefix("W/")
+            .unwrap_or(tag)
+            .strip_prefix('"')
+            .and_then(|tag| tag.strip_suffix('"'))
+            == Some(key)
     })
 }
 
@@ -179,7 +182,7 @@ mod tests {
         assert!(etag_matches("\"abc\"", "abc"));
         assert!(etag_matches("W/\"abc\"", "abc"));
         assert!(etag_matches("\"x\", \"abc\"", "abc"));
-        assert!(etag_matches("*", "abc"));
+        assert!(!etag_matches("*", "abc"));
         assert!(!etag_matches("\"abcd\"", "abc"));
         assert!(!etag_matches("abc", "abc"));
         assert!(!etag_matches("", "abc"));
