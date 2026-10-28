@@ -352,7 +352,9 @@ never serve the original:
   with images just under the limit (baseline and progressive JPEG, WebP lossy and lossless,
   GIF), one decode peaks at 525 MiB of resident memory at most, so the 2 concurrent decodes
   stay near 1 GiB; a 16,384 x 10,922 progressive JPEG, which used to take 1.6 GB, is refused. Anything refused or undecodable is 404 `thumbnail_unavailable`
-  and logged at `debug`.
+  and logged at `debug`; a source the server cannot open is refused like a download
+  (403 `permission_denied`), also logged at `debug` only, since a folder of such images
+  would log one line per tile.
 - **Concurrency.** At most 2 decodes run at once across all users, each on the blocking pool.
   The permit stays with the work when the request is cancelled, so scrolling through a large
   grid cannot start more decodes than that. A request waiting for a permit has only looked the

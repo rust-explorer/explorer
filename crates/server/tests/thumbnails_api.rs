@@ -197,3 +197,22 @@ async fn thumbnails_require_login() {
     let body: ErrorBody = json(res).await;
     assert_eq!(body.code, "unauthenticated");
 }
+
+#[tokio::test]
+async fn unreadable_source_is_permission_denied() {
+    if rustix::process::geteuid().is_root() {
+        return;
+    }
+    use std::os::unix::fs::PermissionsExt as _;
+    let mut s = setup().await;
+    s.write_photo(&png(64, 64));
+    let photo = s.data.join("Photos/a.png");
+    fs::set_permissions(&photo, fs::Permissions::from_mode(0o000)).unwrap();
+
+    let res = s.client.get(URI).await;
+
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+    let body: ErrorBody = json(res).await;
+    assert_eq!(body.code, "permission_denied");
+    assert_eq!(cached_files(&s), 0);
+}
