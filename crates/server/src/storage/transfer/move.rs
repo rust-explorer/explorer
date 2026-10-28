@@ -99,6 +99,10 @@ fn rename(
         .root
         .open_dir(fs_path(dest_dir))
         .map_err(|err| StorageError::from_io(dest_dir, err))?;
+    volume
+        .refuse_staging_in(&from, name, path)
+        .map_err(StorageError::on_source)?;
+    volume.refuse_staging_in(&to, name, &dest_dir.join(name)?)?;
     // `EINVAL`: a folder renamed into itself.
     volume
         .place(&from, name, &to, dest_dir, name, conflict)

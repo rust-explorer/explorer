@@ -1,8 +1,14 @@
-//! The staging directory stays out of reach whatever names lead to it.
+//! The staging directory stays out of reach whatever names and symlinks lead to it, even while
+//! they change.
 
 use std::fs;
+use std::io::{Read as _, Write as _};
+use std::os::unix::fs::symlink;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
-use explorer_server::storage::{RelPath, StorageError, Volumes};
+use explorer_server::storage::{RelPath, STAGING_DIR, StagedId, StorageError, Volumes};
 use shared::api::conflict::ConflictPolicy;
 
 fn rel(raw: &str) -> RelPath {
@@ -35,4 +41,65 @@ fn a_case_variant_of_the_staging_name_is_reserved() {
         .map(|entry| entry.name)
         .collect();
     assert_eq!(names, ["Holidays"]);
+}
+
+/// Flips `R` between a plain folder and a symlink to the volume root while `probe` runs, and
+/// fails if `probe` ever reaches the staging area.
+fn race(media: &Path, probe: impl Fn() -> bool + Sync) {
+    fs::create_dir(media.join("plain")).unwrap();
+    symlink(".", media.join("link")).unwrap();
+    let stop = AtomicBool::new(false);
+    let leaked = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            while !stop.load(Ordering::Relaxed) {
+                let _ = fs::rename(media.join("link"), media.join("R"));
+                let _ = fs::rename(media.join("R"), media.join("link"));
+                let _ = fs::rename(media.join("plain"), media.join("R"));
+                let _ = fs::rename(media.join("R"), media.join("plain"));
+            }
+        });
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut leaked = 0;
+        while Instant::now() < deadline {
+            if probe() {
+                leaked += 1;
+            }
+        }
+        stop.store(true, Ordering::Relaxed);
+        leaked
+    });
+    assert_eq!(leaked, 0, "the staging area was reached {leaked} times");
+}
+
+#[test]
+fn a_racing_rename_never_reaches_the_staging_area() {
+    let data = tempfile::tempdir().unwrap();
+    let media = data.path().join("media");
+    fs::create_dir(&media).unwrap();
+    let volumes = Volumes::discover(data.path()).unwrap();
+    let volume = volumes.get("media").unwrap();
+    let staging = volume.staging().unwrap();
+    let id = StagedId::random();
+    staging
+        .create(&id)
+        .unwrap()
+        .write_all(b"secret partial upload")
+        .unwrap();
+    let listed = rel(&format!("R/{STAGING_DIR}"));
+    let staged = rel(&format!("R/{STAGING_DIR}/{}", id.as_str()));
+    let made = rel(&format!("R/{STAGING_DIR}/made"));
+
+    race(&media, || {
+        let listed = volume.list(&listed).is_ok();
+        let read = volume.open_file(&staged).is_ok_and(|(mut file, _)| {
+            let mut contents = String::new();
+            file.read_to_string(&mut contents).is_ok() && contents.contains("secret")
+        });
+        let stat = volume.stat(&staged).is_ok();
+        let created = volume.create_dir(&made).is_ok();
+        let deleted = volume.delete(&staged).is_ok();
+        listed || read || stat || created || deleted
+    });
+    assert!(media.join(STAGING_DIR).join(id.as_str()).is_file());
+    assert!(!media.join(STAGING_DIR).join("made").exists());
 }

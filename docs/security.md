@@ -131,7 +131,9 @@ Names that are not valid UTF-8 are skipped with a warning.
   `invalid_path` (reason `reserved name`), and no such entry is listed at a volume root. The volume root and the staging
   directory are also recognised by device and inode, so a symlink inside the volume that
   points to the root or to the staging directory does not reach it either: it is never
-  listed or zipped, and reading or writing through such a path is `path_not_found`.
+  listed or zipped, and reading or writing through such a path is `path_not_found`. The
+  check is made again on the folder handle the operation then acts through, so a symlink
+  renamed in and out of place while a request runs cannot slip past it.
 - **Ownership.** An upload belongs to the OIDC `sub` that created it. Looking it up, resuming
   it, appending to it or cancelling it as another user is a 404 `upload_not_found`; the
   upload id is 128 random bits and is not a capability on its own. `GET /api/uploads` lists

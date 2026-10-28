@@ -62,9 +62,7 @@ impl Volume {
     /// Creates one folder under an existing parent; anything already at `dir` is an error.
     pub fn create_dir(&self, dir: &RelPath) -> Result<(), StorageError> {
         self.refuse_reserved(dir)?;
-        self.root
-            .create_dir(fs_path(dir))
-            .map_err(|err| StorageError::from_io(dir, err))
+        self.create_dir_in_checked_parent(dir)
     }
 
     pub fn create_dir_all(&self, dir: &RelPath) -> Result<(), StorageError> {
@@ -87,19 +85,17 @@ impl Volume {
             let result = match self.is_dir_at(&prefix) {
                 Ok(Some(true)) => Ok(()),
                 Ok(Some(false)) => Err(not_a_dir(prefix.clone())),
-                Ok(None) => match self.root.create_dir(prefix.as_str()) {
+                Ok(None) => match self.create_dir_in_checked_parent(&prefix) {
                     Ok(()) => {
                         created.push(prefix.clone());
                         Ok(())
                     }
-                    Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
-                        match self.is_dir_at(&prefix) {
-                            Ok(Some(true)) => Ok(()),
-                            Ok(_) => Err(not_a_dir(prefix.clone())),
-                            Err(err) => Err(err),
-                        }
-                    }
-                    Err(err) => Err(StorageError::from_io(&prefix, err)),
+                    Err(StorageError::AlreadyExists(_)) => match self.is_dir_at(&prefix) {
+                        Ok(Some(true)) => Ok(()),
+                        Ok(_) => Err(not_a_dir(prefix.clone())),
+                        Err(err) => Err(err),
+                    },
+                    Err(err) => Err(err),
                 },
                 Err(err) => Err(err),
             };
@@ -109,6 +105,16 @@ impl Volume {
             }
         }
         Ok(created)
+    }
+
+    fn create_dir_in_checked_parent(&self, dir: &RelPath) -> Result<(), StorageError> {
+        if dir.is_root() {
+            return Err(StorageError::AlreadyExists(dir.clone()));
+        }
+        let (parent, name) = self.checked_parent(dir)?;
+        parent
+            .create_dir(name)
+            .map_err(|err| StorageError::from_io(dir, err))
     }
 
     /// Removes folders a failed operation created, deepest first, as long as they are empty.
@@ -232,6 +238,7 @@ impl Volume {
             .map_err(|err| StorageError::from_io(parent, err))?;
 
         let dest = parent.join(name)?;
+        self.refuse_staging_in(&parent_dir, name, &dest)?;
         let staged_err = |err| StorageError::from_io(&dest, err);
         let file = staging.open_staged(id, &dest)?;
         if let Some(modified) = modified {

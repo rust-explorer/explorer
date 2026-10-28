@@ -34,6 +34,9 @@ pub(super) fn scan(
         .map(|stat| Measured::of(&stat))
         .filter(|stat| stat.is_dir)
         .map(Measured::id);
+    if staging == Some(start_stat.id()) {
+        return Err(StorageError::NotFound(path.clone()));
+    }
 
     progress.add_bytes(start_stat.bytes);
     let scan = Scan {

@@ -1,5 +1,6 @@
 mod delete;
 mod error;
+mod guard;
 mod path;
 mod read;
 mod rename;

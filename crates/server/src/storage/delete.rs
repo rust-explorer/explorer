@@ -47,6 +47,7 @@ impl Volume {
             .root
             .open_dir(fs_path(&parent))
             .map_err(|err| StorageError::from_io(&parent, err))?;
+        self.refuse_staging_in(&dir, name, path)?;
         let meta = dir
             .symlink_metadata(name)
             .map_err(|err| StorageError::from_io(path, err))?;
