@@ -11,9 +11,9 @@ const ID_LEN: usize = 32;
 
 /// Names a staged upload: 32 lowercase hex characters, so it is always a plain file name.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct UploadId(String);
+pub struct StagedId(String);
 
-impl UploadId {
+impl StagedId {
     #[must_use]
     pub fn random() -> Self {
         let bytes: [u8; ID_LEN / 2] = rand::random();
@@ -49,7 +49,7 @@ fn map_err(err: io::Error) -> StorageError {
 impl Staging {
     /// Created `0o666` less the umask, like any new file: the `0700` directory keeps it private
     /// until the rename, and the uploaded file keeps that mode.
-    pub fn create(&self, id: &UploadId) -> Result<std::fs::File, StorageError> {
+    pub fn create(&self, id: &StagedId) -> Result<std::fs::File, StorageError> {
         let mut options = OpenOptions::new();
         options
             .write(true)
@@ -60,13 +60,13 @@ impl Staging {
         Ok(file.into_std())
     }
 
-    pub fn open_append(&self, id: &UploadId) -> Result<(std::fs::File, u64), StorageError> {
+    pub fn open_append(&self, id: &StagedId) -> Result<(std::fs::File, u64), StorageError> {
         let mut file = self.open_write(id)?;
         let len = file.seek(SeekFrom::End(0)).map_err(map_err)?;
         Ok((file, len))
     }
 
-    pub fn len(&self, id: &UploadId) -> Result<Option<u64>, StorageError> {
+    pub fn len(&self, id: &StagedId) -> Result<Option<u64>, StorageError> {
         match self.dir.symlink_metadata(id.as_str()) {
             Ok(meta) => Ok(Some(meta.len())),
             Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -74,7 +74,7 @@ impl Staging {
         }
     }
 
-    pub fn remove(&self, id: &UploadId) -> Result<(), StorageError> {
+    pub fn remove(&self, id: &StagedId) -> Result<(), StorageError> {
         match self.dir.remove_file(id.as_str()) {
             Err(err) if err.kind() != io::ErrorKind::NotFound => Err(map_err(err)),
             _ => Ok(()),
@@ -100,7 +100,7 @@ impl Staging {
         Ok(files)
     }
 
-    pub(super) fn open_write(&self, id: &UploadId) -> Result<std::fs::File, StorageError> {
+    pub(super) fn open_write(&self, id: &StagedId) -> Result<std::fs::File, StorageError> {
         let mut options = OpenOptions::new();
         options
             .write(true)
@@ -116,11 +116,11 @@ mod tests {
 
     #[test]
     fn upload_id_parse() {
-        let id = UploadId::random();
+        let id = StagedId::random();
         assert_eq!(id.as_str().len(), 32);
-        assert_eq!(UploadId::parse(id.as_str()), Some(id.clone()));
-        assert_ne!(UploadId::random(), id);
-        assert!(UploadId::parse("0123456789abcdef0123456789abcdef").is_some());
+        assert_eq!(StagedId::parse(id.as_str()), Some(id.clone()));
+        assert_ne!(StagedId::random(), id);
+        assert!(StagedId::parse("0123456789abcdef0123456789abcdef").is_some());
 
         for raw in [
             "../x",
@@ -130,7 +130,7 @@ mod tests {
             "0123456789abcdef0123456789abcdeg",
             "",
         ] {
-            assert_eq!(UploadId::parse(raw), None, "{raw:?}");
+            assert_eq!(StagedId::parse(raw), None, "{raw:?}");
         }
     }
 }

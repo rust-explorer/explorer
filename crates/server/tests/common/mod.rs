@@ -8,11 +8,12 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::Request;
-use explorer_server::app::{AppState, router};
+use explorer_server::auth::oidc::Oidc;
 use explorer_server::config::Config;
 use explorer_server::db;
-use explorer_server::oidc::Oidc;
+use explorer_server::http::{AppState, router};
 use explorer_server::storage::Volumes;
+use explorer_server::tasks::Tasks;
 use explorer_server::uploads::Uploads;
 use fake_oidc::FakeOidc;
 
@@ -62,6 +63,7 @@ pub async fn state_with_volumes(web_dir: &Path, volumes: &[&str]) -> (AppState, 
         config: Arc::new(config),
         oidc: Arc::new(oidc),
         volumes: Arc::new(volumes),
+        tasks: Arc::new(Tasks::new()),
     };
     (state, fake)
 }

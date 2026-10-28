@@ -3,7 +3,9 @@ use std::rc::Rc;
 
 use gloo_net::http::{Method, RequestBuilder, Response};
 use gloo_timers::callback::Interval;
-use shared::api::{ConflictPolicy, CreateFolder, ErrorBody};
+use shared::api::browse::CreateFolder;
+use shared::api::conflict::ConflictPolicy;
+use shared::api::error::ErrorBody;
 use shared::tus::{TUS_VERSION, encode_metadata};
 use wasm_bindgen::JsCast as _;
 use wasm_bindgen::closure::Closure;
@@ -99,6 +101,7 @@ pub async fn create_folder(volume: &str, path: &str) -> Result<(), ApiFailure> {
         .header("Accept", "application/json")
         .json(&CreateFolder {
             path: path.to_owned(),
+            exclusive: false,
         })
         .map_err(|_| ApiFailure::Network)?
         .send()

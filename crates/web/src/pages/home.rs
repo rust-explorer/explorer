@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_i18n::t;
-use shared::api::{Me, VolumeInfo};
+use shared::api::auth::Me;
+use shared::api::browse::VolumeInfo;
 
 use crate::api;
 use crate::components::{ErrorPanel, Notice, Shell};

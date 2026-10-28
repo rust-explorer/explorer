@@ -2,7 +2,7 @@ use std::io;
 
 use rustix::io::Errno;
 
-use super::RelPath;
+use super::{InvalidPath, RelPath};
 
 /// The message of cap-std's error for a path that resolves outside its `Dir`.
 const ESCAPE_MESSAGE: &str = "a path led outside of the filesystem";
@@ -26,11 +26,30 @@ pub enum StorageError {
     /// A rename onto another filesystem: a mount nested in the volume.
     #[error("on another filesystem than the volume: {}", .0.as_str())]
     CrossDevice(RelPath),
+    /// The entry (the path of the source) can't go to the chosen folder: into itself, one of
+    /// its descendants, or for a move, the folder it is already in.
+    #[error("invalid destination for {}", .0.as_str())]
+    InvalidDestination(RelPath),
+    /// A copy or move noticed its task was cancelled; never an HTTP error.
+    #[error("cancelled")]
+    Cancelled,
+    /// A copy or move failed on its source volume rather than on its destination.
+    #[error("on the source: {0}")]
+    Source(Box<StorageError>),
+    #[error(transparent)]
+    InvalidPath(#[from] InvalidPath),
     #[error("i/o error on {}: {source}", .path.as_str())]
     Io { path: RelPath, source: io::Error },
 }
 
 impl StorageError {
+    pub(super) fn on_source(self) -> Self {
+        match self {
+            Self::Source(_) | Self::Cancelled | Self::InvalidPath(_) => self,
+            other => Self::Source(Box::new(other)),
+        }
+    }
+
     pub(super) fn from_io(path: &RelPath, err: io::Error) -> Self {
         let path = path.clone();
         if is_escape(&err) {

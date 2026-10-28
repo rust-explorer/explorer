@@ -31,7 +31,7 @@ table-label = Contenido de la carpeta
 table-name = Nombre
 table-size = Tamaño
 table-modified = Modificado
-table-download = Descargar
+table-actions = Acciones
 modified-yesterday = ayer
 download-file = Descargar { $name }
 download-folder = Descargar { $name } como zip
@@ -60,16 +60,14 @@ error-upload_too_large = Este archivo es demasiado grande para subirlo.
 error-invalid_upload = El servidor ha rechazado esta subida.
 error-unsupported_tus_version = El servidor no admite esta versión del protocolo de subida.
 error-unsupported_media_type = El servidor ha rechazado el formato de esta subida.
-error-cross_device = { $path } está en otro sistema de archivos que su volumen, así que la subida no se puede guardar ahí. Un administrador puede montar esa carpeta como un volumen propio.
+error-cross_device = { $path } está en otro sistema de archivos que su volumen, así que no se puede guardar nada ahí. Un administrador puede montar esa carpeta como un volumen propio.
+error-invalid_destination = { $path } no se puede mover ni copiar ahí.
+error-task_not_found = Esta tarea ya no existe en el servidor.
 upload = Subir
 upload-open = Subir archivos o una carpeta
 upload-files = Archivos…
 upload-folder = Carpeta…
 upload-read-only = Este volumen es de solo lectura, así que no se puede subir nada.
-uploads-title = Subidas ({ $count })
-uploads-collapse = Contraer las subidas
-uploads-expand = Expandir las subidas
-uploads-close = Cerrar las subidas
 uploads-cancel = Cancelar { $name }
 uploads-progress = Progreso de la subida
 uploads-waiting = En espera
@@ -89,6 +87,90 @@ uploads-unreadable =
 conflict-title = { $name } ya existe en { $folder }
 conflict-replace = Reemplazar
 conflict-keep-both = Conservar ambos
-conflict-cancel = Cancelar
 conflict-apply-all = Aplicar a todos
 upload-drop = Suelta para subir a { $folder }
+new-folder = Nueva carpeta
+new-folder-title = Nueva carpeta
+new-folder-name = Nombre
+new-folder-create = Crear
+cancel = Cancelar
+name-error-empty = Introduce un nombre.
+name-error-slash = Un nombre no puede contener barras.
+name-error-dot = Un nombre no puede ser . ni ..
+name-error-reserved = Ese nombre está reservado.
+name-error-too-long = Ese nombre es demasiado largo (máximo 255 bytes).
+row-menu-open = Acciones para { $name }
+action-download = Descargar
+action-rename = Cambiar nombre
+action-move-to = Mover a…
+action-copy-to = Copiar a…
+action-delete = Eliminar
+select-all = Seleccionar todas las entradas
+select-entry = Seleccionar { $name }
+selection-count =
+    { $count ->
+        [one] { $count } seleccionado
+       *[other] { $count } seleccionados
+    }
+selection-clear = Borrar selección
+rename-title = Cambiar el nombre de { $name }
+rename-name = Nuevo nombre
+rename-save = Guardar
+activity-title =
+    { $count ->
+        [0] Actividad
+        [one] Actividad · 1 en curso
+       *[other] Actividad · { $count } en curso
+    }
+activity-collapse = Contraer el panel de actividad
+activity-expand = Expandir el panel de actividad
+activity-close = Cerrar el panel de actividad
+task-deleting = Eliminando { $name }
+task-copying = Copiando { $name } a { $folder }
+task-moving = Moviendo { $name } a { $folder }
+task-cancel = Cancelar { $name }
+task-progress = Progreso de la tarea
+task-waiting = En espera
+task-files = { $done } / { $total }
+task-files-done =
+    { $count ->
+        [one] 1 elemento
+       *[other] { $count } elementos
+    }
+task-done = Terminada
+task-cancelled = Cancelada
+delete-title =
+    { $count ->
+        [one] ¿Eliminar { $name }?
+       *[other] ¿Eliminar { $count } elementos?
+    }
+delete-warning = Las carpetas se eliminan con todo su contenido. Esta acción no se puede deshacer.
+delete-confirm = Eliminar
+task-deciding = Ya existe: esperando tu respuesta
+task-skipped =
+    { $count ->
+        [one] 1 elemento no se pudo copiar y se omitió
+       *[other] { $count } elementos no se pudieron copiar y se omitieron
+    }
+task-skipped-move =
+    { $count ->
+        [one] 1 elemento no se pudo mover y se quedó en su sitio
+       *[other] { $count } elementos no se pudieron mover y se quedaron en su sitio
+    }
+copy-title =
+    { $count ->
+        [one] Copiar { $name } a…
+       *[other] Copiar { $count } elementos a…
+    }
+move-title =
+    { $count ->
+        [one] Mover { $name } a…
+       *[other] Mover { $count } elementos a…
+    }
+picker-volume = Volumen
+picker-choose-volume = Elige un volumen
+picker-location = Carpeta de destino
+picker-folders = Carpetas
+picker-empty = No hay carpetas aquí
+picker-copy-here = Copiar aquí
+picker-move-here = Mover aquí

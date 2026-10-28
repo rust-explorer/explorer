@@ -4,13 +4,13 @@ use std::time::SystemTime;
 use cap_std::fs::Dir;
 use rustix::fs::{Mode, OFlags, RenameFlags};
 use rustix::io::Errno;
-use shared::api::ConflictPolicy;
+use shared::api::conflict::ConflictPolicy;
 
-use super::ops::fs_path;
 use super::path::STAGING_DIR;
-use super::{RelPath, Staging, StorageError, UploadId, Volume};
+use super::read::fs_path;
+use super::{RelPath, StagedId, Staging, StorageError, Volume};
 
-const KEEP_BOTH_MAX: u32 = 999;
+pub(super) const KEEP_BOTH_MAX: u32 = 999;
 
 /// `Film.mkv` → `Film (n).mkv`. A leading or trailing dot does not start an extension.
 #[must_use]
@@ -39,6 +39,14 @@ pub(super) fn prefixes(path: &RelPath) -> Vec<RelPath> {
 /// Like the read operations, paths are resolved from the volume root with symlinks followed and
 /// confined by cap-std; renames then only take a `Dir` handle and a single name on each side.
 impl Volume {
+    /// Creates one folder under an existing parent; anything already at `dir` is an error.
+    pub fn create_dir(&self, dir: &RelPath) -> Result<(), StorageError> {
+        self.refuse_reserved(dir)?;
+        self.root
+            .create_dir(fs_path(dir))
+            .map_err(|err| StorageError::from_io(dir, err))
+    }
+
     pub fn create_dir_all(&self, dir: &RelPath) -> Result<(), StorageError> {
         self.refuse_reserved(dir)?;
         for prefix in prefixes(dir) {
@@ -115,10 +123,10 @@ impl Volume {
 
     /// Moves a staged upload to `dest`, creating its parent folders, and returns the path it
     /// ended up at, which differs from `dest` when another file took that name.
-    pub fn commit_upload(
+    pub fn commit_staged(
         &self,
         staging: &Staging,
-        id: &UploadId,
+        id: &StagedId,
         dest: &RelPath,
         conflict: ConflictPolicy,
         modified: Option<SystemTime>,
@@ -141,28 +149,52 @@ impl Volume {
         file.sync_all().map_err(staged_err)?;
         drop(file);
 
+        self.place(
+            &staging.dir,
+            id.as_str(),
+            &parent_dir,
+            &parent,
+            name,
+            conflict,
+        )
+    }
+
+    /// Renames `from_name` to `to_name`, or under `Fail` and `KeepBoth` to the first free
+    /// `Name (n)` when that is taken: those never overwrite, even a target that appears meanwhile.
+    pub(super) fn place(
+        &self,
+        from_dir: &Dir,
+        from_name: &str,
+        to_dir: &Dir,
+        to_parent: &RelPath,
+        to_name: &str,
+        conflict: ConflictPolicy,
+    ) -> Result<RelPath, StorageError> {
+        let dest = to_parent.join(to_name)?;
         if conflict == ConflictPolicy::Replace {
-            if self.is_dir_at(dest)? == Some(true) {
-                return Err(StorageError::IsADirectory(dest.clone()));
+            if to_dir.symlink_metadata(to_name).is_ok()
+                && (is_dir_in(to_dir, to_name) || is_dir_in(from_dir, from_name))
+            {
+                return Err(StorageError::IsADirectory(dest));
             }
-            rustix::fs::renameat(&staging.dir, id.as_str(), &parent_dir, name)
-                .map_err(|err| rename_error(dest, err))?;
-            return Ok(dest.clone());
+            rustix::fs::renameat(from_dir, from_name, to_dir, to_name)
+                .map_err(|err| rename_error(&dest, err))?;
+            return Ok(dest);
         }
 
         for n in 0..=KEEP_BOTH_MAX {
             let candidate = if n == 0 {
-                name.to_owned()
+                to_name.to_owned()
             } else {
-                keep_both_name(name, n)
+                keep_both_name(to_name, n)
             };
-            let Ok(target) = parent.join(&candidate) else {
+            let Ok(target) = to_parent.join(&candidate) else {
                 break;
             };
             match rustix::fs::renameat_with(
-                &staging.dir,
-                id.as_str(),
-                &parent_dir,
+                from_dir,
+                from_name,
+                to_dir,
                 candidate.as_str(),
                 RenameFlags::NOREPLACE,
             ) {
@@ -172,7 +204,7 @@ impl Volume {
                             volume = self.name(),
                             path = dest.as_str(),
                             final_path = target.as_str(),
-                            "destination appeared during the upload; keeping both"
+                            "destination appeared meanwhile; keeping both"
                         );
                     }
                     return Ok(target);
@@ -181,7 +213,7 @@ impl Volume {
                 Err(err) => return Err(rename_error(&target, err)),
             }
         }
-        Err(StorageError::AlreadyExists(dest.clone()))
+        Err(StorageError::AlreadyExists(dest))
     }
 
     /// `None` when nothing (or a dangling symlink) is there.
@@ -194,13 +226,18 @@ impl Volume {
     }
 }
 
+/// Follows a symlink, like the read operations; a dangling one is not a folder.
+fn is_dir_in(dir: &Dir, name: &str) -> bool {
+    dir.metadata(name).is_ok_and(|meta| meta.is_dir())
+}
+
 /// Both sides are plain names under open `Dir` handles, so `EXDEV` here is a mount point nested
 /// in the volume, not an escape.
 fn rename_error(path: &RelPath, err: Errno) -> StorageError {
-    if err == Errno::XDEV {
-        return StorageError::CrossDevice(path.clone());
+    match err {
+        Errno::XDEV => StorageError::CrossDevice(path.clone()),
+        _ => StorageError::from_io(path, err.into()),
     }
-    StorageError::from_io(path, err.into())
 }
 
 fn staging_error(err: Errno) -> StorageError {
@@ -234,6 +271,19 @@ mod tests {
         ] {
             assert_eq!(keep_both_name(name, n), expected, "{name:?} {n}");
         }
+    }
+
+    #[test]
+    fn rename_einval_stays_an_io_error() {
+        let path = RelPath::parse("a.txt").unwrap();
+        assert!(matches!(
+            rename_error(&path, Errno::INVAL),
+            StorageError::Io { .. }
+        ));
+        assert!(matches!(
+            rename_error(&path, Errno::XDEV),
+            StorageError::CrossDevice(_)
+        ));
     }
 
     #[test]

@@ -15,12 +15,13 @@ use axum::http::{Method, Request, StatusCode, header};
 use axum::response::Response;
 use common::client::{Client, json};
 use common::fake_oidc::FakeOidc;
-use explorer_server::app::router;
-use explorer_server::storage::UploadId;
+use explorer_server::http::router;
+use explorer_server::storage::StagedId;
 use explorer_server::uploads::Uploads;
 use http_body_util::BodyExt;
 use serde_json::json;
-use shared::api::{ErrorBody, PendingUpload};
+use shared::api::error::ErrorBody;
+use shared::api::uploads::PendingUpload;
 use shared::tus::encode_metadata;
 use sqlx::SqlitePool;
 use tempfile::TempDir;
@@ -101,8 +102,8 @@ fn clone_client(client: &Client) -> Client {
     }
 }
 
-fn id_of(location: &str) -> UploadId {
-    UploadId::parse(location.rsplit('/').next().unwrap()).unwrap()
+fn id_of(location: &str) -> StagedId {
+    StagedId::parse(location.rsplit('/').next().unwrap()).unwrap()
 }
 
 fn content(len: usize) -> Vec<u8> {
@@ -1039,7 +1040,7 @@ async fn staging_is_unreachable_through_a_symlink_to_the_root() {
 
     let res = s.client.get("/api/volumes/media/entries?path=self").await;
     assert_eq!(res.status(), StatusCode::OK);
-    let listing: shared::api::Listing = json(res).await;
+    let listing: shared::api::browse::Listing = json(res).await;
     let names: Vec<_> = listing.entries.iter().map(|e| e.name.as_str()).collect();
     assert_eq!(names, ["a.txt", "self"]);
 

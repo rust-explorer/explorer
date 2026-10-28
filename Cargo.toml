@@ -10,13 +10,14 @@ repository = "https://github.com/fabienlege/explorer"
 
 [workspace.dependencies]
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
+axum-extra = { version = "0.10", default-features = false, features = ["query"] }
 http-body-util = "0.1"
 rustix = { version = "1", default-features = false, features = ["fs", "process", "std"] }
 cap-std = "4.0"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "net", "io-util", "time"] }
+tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "net", "io-util", "time", "sync"] }
 tower = { version = "0.5", default-features = false, features = ["util"] }
 tower-http = { version = "0.7", default-features = false, features = ["trace", "request-id", "util", "fs", "set-header"] }
 tracing = "0.1"

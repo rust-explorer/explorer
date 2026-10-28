@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use common::fake_oidc::{self, FakeOidc, Outage};
-use explorer_server::oidc::{Oidc, SigninError, VerifiedIdentity};
+use explorer_server::auth::oidc::{Oidc, SigninError, VerifiedIdentity};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
 

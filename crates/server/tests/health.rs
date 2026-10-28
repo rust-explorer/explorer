@@ -4,10 +4,11 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use common::get;
-use explorer_server::app::{AppState, router_with};
-use explorer_server::error::ApiError;
+use explorer_server::http::error::ApiError;
+use explorer_server::http::{AppState, router_with};
 use http_body_util::BodyExt;
-use shared::api::{ErrorBody, Health};
+use shared::api::error::ErrorBody;
+use shared::api::health::Health;
 use tower::ServiceExt;
 
 async fn app() -> (axum::Router, tempfile::TempDir) {

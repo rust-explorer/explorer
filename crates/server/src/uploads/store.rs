@@ -2,18 +2,18 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use shared::api::ConflictPolicy;
+use shared::api::conflict::ConflictPolicy;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Row as _, SqlitePool};
 
-use crate::storage::{RelPath, UploadId};
+use crate::storage::{RelPath, StagedId};
 
 /// An upload with no activity for this long is abandoned and swept.
 pub const UPLOAD_TTL: Duration = Duration::from_secs(24 * 3600);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UploadRecord {
-    pub id: UploadId,
+    pub id: StagedId,
     pub user_sub: String,
     pub volume: String,
     pub path: RelPath,
@@ -31,13 +31,13 @@ const COLUMNS: &str = "id, user_sub, volume, path, length, modified_ms, conflict
 
 pub struct Uploads {
     pool: SqlitePool,
-    locks: Arc<Mutex<HashSet<UploadId>>>,
+    locks: Arc<Mutex<HashSet<StagedId>>>,
 }
 
 /// Held while a request works on an upload; released on drop.
 pub struct UploadLock {
-    id: UploadId,
-    locks: Arc<Mutex<HashSet<UploadId>>>,
+    id: StagedId,
+    locks: Arc<Mutex<HashSet<StagedId>>>,
 }
 
 impl Drop for UploadLock {
@@ -63,7 +63,7 @@ fn record(row: &SqliteRow) -> sqlx::Result<UploadRecord> {
     let id: String = row.try_get("id")?;
     let conflict: String = row.try_get("conflict")?;
     Ok(UploadRecord {
-        id: UploadId::parse(&id).ok_or_else(|| corrupt("id"))?,
+        id: StagedId::parse(&id).ok_or_else(|| corrupt("id"))?,
         user_sub: row.try_get("user_sub")?,
         volume: row.try_get("volume")?,
         path: RelPath::parse(&path).map_err(|_| corrupt("path"))?,
@@ -108,7 +108,7 @@ impl Uploads {
     }
 
     /// Another user's upload is reported as missing.
-    pub async fn get(&self, id: &UploadId, user_sub: &str) -> sqlx::Result<Option<UploadRecord>> {
+    pub async fn get(&self, id: &StagedId, user_sub: &str) -> sqlx::Result<Option<UploadRecord>> {
         sqlx::query(&format!(
             "SELECT {COLUMNS} FROM uploads WHERE id = ? AND user_sub = ?"
         ))
@@ -135,7 +135,7 @@ impl Uploads {
         .collect()
     }
 
-    pub async fn touch(&self, id: &UploadId, now_ms: i64) -> sqlx::Result<()> {
+    pub async fn touch(&self, id: &StagedId, now_ms: i64) -> sqlx::Result<()> {
         sqlx::query("UPDATE uploads SET updated_at = ? WHERE id = ?")
             .bind(now_ms)
             .bind(id.as_str())
@@ -146,7 +146,7 @@ impl Uploads {
 
     pub async fn mark_done(
         &self,
-        id: &UploadId,
+        id: &StagedId,
         final_path: &RelPath,
         now_ms: i64,
     ) -> sqlx::Result<()> {
@@ -159,7 +159,7 @@ impl Uploads {
         Ok(())
     }
 
-    pub async fn delete(&self, id: &UploadId) -> sqlx::Result<()> {
+    pub async fn delete(&self, id: &StagedId) -> sqlx::Result<()> {
         sqlx::query("DELETE FROM uploads WHERE id = ?")
             .bind(id.as_str())
             .execute(&self.pool)
@@ -169,7 +169,7 @@ impl Uploads {
 
     /// `None` while another request holds the upload.
     #[must_use]
-    pub fn try_lock(&self, id: &UploadId) -> Option<UploadLock> {
+    pub fn try_lock(&self, id: &StagedId) -> Option<UploadLock> {
         let inserted = self
             .locks
             .lock()
@@ -193,7 +193,7 @@ impl Uploads {
         .collect()
     }
 
-    pub(super) async fn exists(&self, id: &UploadId) -> sqlx::Result<bool> {
+    pub(super) async fn exists(&self, id: &StagedId) -> sqlx::Result<bool> {
         Ok(sqlx::query("SELECT 1 FROM uploads WHERE id = ?")
             .bind(id.as_str())
             .fetch_optional(&self.pool)

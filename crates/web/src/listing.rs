@@ -1,7 +1,7 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 
-use shared::api::{Entry, EntryKind};
+use shared::api::browse::{Entry, EntryKind};
 use unicode_normalization::UnicodeNormalization;
 use unicode_normalization::char::is_combining_mark;
 
@@ -196,6 +196,20 @@ pub fn visible_range(
     start..end
 }
 
+/// The scroll offset that brings row `index` into view, or `None` when it is fully visible.
+pub fn reveal_offset(index: usize, row_height: f64, scroll_top: f64, viewport: f64) -> Option<f64> {
+    #[expect(clippy::cast_precision_loss, reason = "row counts stay far below 2^52")]
+    let top = index as f64 * row_height;
+    let bottom = top + row_height;
+    if top < scroll_top || viewport < row_height {
+        Some(top)
+    } else if bottom > scroll_top + viewport {
+        Some(bottom - viewport)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -342,6 +356,24 @@ mod tests {
         // Before the first resize event, or after an elastic overscroll.
         assert_eq!(visible_range(0.0, 0.0, 44.0, 20_000, 10), 0..10);
         assert_eq!(visible_range(-50.0, 440.0, 44.0, 20_000, 10), 0..20);
+    }
+
+    #[test]
+    fn reveal_scrolls_only_when_the_row_is_out_of_view() {
+        // Rows 10..20 are fully visible at 440px.
+        assert_eq!(reveal_offset(12, 44.0, 440.0, 440.0), None);
+        assert_eq!(reveal_offset(10, 44.0, 440.0, 440.0), None);
+        assert_eq!(reveal_offset(19, 44.0, 440.0, 440.0), None);
+        // Above: the row goes to the top; below: to the bottom.
+        assert_eq!(reveal_offset(2, 44.0, 440.0, 440.0), Some(88.0));
+        assert_eq!(
+            reveal_offset(25, 44.0, 440.0, 440.0),
+            Some(26.0 * 44.0 - 440.0)
+        );
+        // A partly hidden row counts as hidden.
+        assert_eq!(reveal_offset(9, 44.0, 430.0, 440.0), Some(396.0));
+        // Before the first resize event nothing is known about the viewport.
+        assert_eq!(reveal_offset(50, 44.0, 0.0, 0.0), Some(2200.0));
     }
 
     #[test]

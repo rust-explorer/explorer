@@ -4,16 +4,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use explorer_server::app::{AppState, router};
+use explorer_server::auth::oidc::Oidc;
+use explorer_server::auth::session;
 use explorer_server::config::Config;
 use explorer_server::db;
 use explorer_server::healthcheck;
-use explorer_server::oidc::Oidc;
-use explorer_server::session;
+use explorer_server::http::static_files::check_bundle;
+use explorer_server::http::{AppState, router};
 use explorer_server::storage::Volumes;
+use explorer_server::tasks::Tasks;
 use explorer_server::telemetry;
 use explorer_server::uploads::{self, Uploads};
-use explorer_server::web::check_bundle;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -96,7 +97,9 @@ async fn main() -> ExitCode {
         oidc: Arc::new(oidc),
         volumes: Arc::clone(&volumes),
         uploads: Arc::clone(&upload_registry),
+        tasks: Arc::new(Tasks::new()),
     };
+    tracing::info!("no background task to recover: tasks live in memory only");
     let app = match router(state).await {
         Ok(app) => app,
         Err(err) => {

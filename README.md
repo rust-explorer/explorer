@@ -4,11 +4,13 @@ Self-hosted web file manager written in Rust (Axum server, Dioxus web UI).
 
 **Status: work in progress.** Sign-in with OIDC, browsing volumes, downloading files and
 folders (as zip) and resumable uploads (files and folders, drag and drop, conflict handling)
-work. File operations (rename, move, delete and the like) are not implemented yet.
+work, and so does managing files: new folder, rename, multi-select (download several entries
+as one zip), and delete, copy and move, including between volumes, as background tasks with
+progress and cancellation. Tasks are not kept across a server restart.
 
 ## Quick start
 
-> You can browse, download and upload but not rename or delete files yet, and no image is published yet; build one
+> No image is published yet; build one
 > locally as described in [docs/development.md](docs/development.md#docker-image).
 
 You need Docker, an OIDC provider such as [PocketID](https://pocket-id.org) and a reverse

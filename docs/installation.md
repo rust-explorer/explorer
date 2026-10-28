@@ -199,11 +199,11 @@ Also keep in mind:
   moved into place when complete, so a volume needs room for the files being uploaded, and
   the folder is hidden from listings and zips. Abandoned uploads are removed after 24 hours.
   Do not delete or rename it while uploads are running.
-- Uploads are staged inside the volume, so the final move must stay on one filesystem. If a
-  folder inside a volume is a separate mount (another disk or dataset), uploads into it fail
-  with `cross_device` ("on another filesystem than its volume") and the log says the
-  destination is on another filesystem. Mount that folder as its own volume under `/data`
-  instead.
+- Uploads and copies are staged inside the volume, and a move within a volume is a rename, so
+  the final step must stay on one filesystem. If a folder inside a volume is a separate mount
+  (another disk or dataset), uploads, copies and moves into it fail with `cross_device` ("on
+  another filesystem than its volume") and the log says the destination is on another
+  filesystem. Mount that folder as its own volume under `/data` instead.
 - A read-only volume (`:ro` mount, or not writable by the container user) cannot receive
   uploads; its upload controls are disabled and the server answers `read_only_volume`.
 - Uploaded files belong to the container user and get the container's umask, like any file

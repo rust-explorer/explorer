@@ -31,7 +31,7 @@ table-label = Folder contents
 table-name = Name
 table-size = Size
 table-modified = Modified
-table-download = Download
+table-actions = Actions
 modified-yesterday = Yesterday
 download-file = Download { $name }
 download-folder = Download { $name } as a zip
@@ -60,16 +60,14 @@ error-upload_too_large = This file is too large to upload.
 error-invalid_upload = The server refused this upload.
 error-unsupported_tus_version = The server doesn't support this upload protocol version.
 error-unsupported_media_type = The server refused the format of this upload.
-error-cross_device = { $path } is on another filesystem than its volume, so the upload can't be saved there. An administrator can mount that folder as a volume of its own.
+error-cross_device = { $path } is on another filesystem than its volume, so nothing can be saved there. An administrator can mount that folder as a volume of its own.
+error-invalid_destination = { $path } can't be moved or copied there.
+error-task_not_found = This task no longer exists on the server.
 upload = Upload
 upload-open = Upload files or a folder
 upload-files = Files…
 upload-folder = Folder…
 upload-read-only = This volume is read-only, so nothing can be uploaded to it.
-uploads-title = Uploads ({ $count })
-uploads-collapse = Collapse the uploads
-uploads-expand = Expand the uploads
-uploads-close = Close the uploads
 uploads-cancel = Cancel { $name }
 uploads-progress = Upload progress
 uploads-waiting = Waiting
@@ -89,6 +87,86 @@ uploads-unreadable =
 conflict-title = { $name } already exists in { $folder }
 conflict-replace = Replace
 conflict-keep-both = Keep both
-conflict-cancel = Cancel
 conflict-apply-all = Apply to all
 upload-drop = Drop to upload to { $folder }
+new-folder = New folder
+new-folder-title = New folder
+new-folder-name = Name
+new-folder-create = Create
+cancel = Cancel
+name-error-empty = Enter a name.
+name-error-slash = A name can't contain a slash.
+name-error-dot = A name can't be . or ..
+name-error-reserved = That name is reserved.
+name-error-too-long = That name is too long (255 bytes at most).
+row-menu-open = Actions for { $name }
+action-download = Download
+action-rename = Rename
+action-move-to = Move to…
+action-copy-to = Copy to…
+action-delete = Delete
+select-all = Select all entries
+select-entry = Select { $name }
+selection-count = { $count } selected
+selection-clear = Clear selection
+rename-title = Rename { $name }
+rename-name = New name
+rename-save = Save
+activity-title =
+    { $count ->
+        [0] Activity
+        [one] Activity · 1 in progress
+       *[other] Activity · { $count } in progress
+    }
+activity-collapse = Collapse the activity panel
+activity-expand = Expand the activity panel
+activity-close = Close the activity panel
+task-deleting = Deleting { $name }
+task-copying = Copying { $name } to { $folder }
+task-moving = Moving { $name } to { $folder }
+task-cancel = Cancel { $name }
+task-progress = Task progress
+task-waiting = Waiting
+task-files = { $done } / { $total }
+task-files-done =
+    { $count ->
+        [one] 1 item
+       *[other] { $count } items
+    }
+task-done = Done
+task-cancelled = Cancelled
+delete-title =
+    { $count ->
+        [one] Delete { $name }?
+       *[other] Delete { $count } items?
+    }
+delete-warning = Folders are deleted with everything inside. This can't be undone.
+delete-confirm = Delete
+task-deciding = Already exists: waiting for your answer
+task-skipped =
+    { $count ->
+        [one] 1 item couldn't be copied and was skipped
+       *[other] { $count } items couldn't be copied and were skipped
+    }
+task-skipped-move =
+    { $count ->
+        [one] 1 item couldn't be moved and stayed in place
+       *[other] { $count } items couldn't be moved and stayed in place
+    }
+copy-title =
+    { $count ->
+        [one] Copy { $name } to…
+       *[other] Copy { $count } items to…
+    }
+move-title =
+    { $count ->
+        [one] Move { $name } to…
+       *[other] Move { $count } items to…
+    }
+picker-volume = Volume
+picker-choose-volume = Choose a volume
+picker-location = Destination folder
+picker-folders = Folders
+picker-empty = No folders here
+picker-copy-here = Copy here
+picker-move-here = Move here

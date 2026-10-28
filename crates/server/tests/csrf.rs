@@ -4,9 +4,9 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use axum::routing::post;
-use explorer_server::app::{AppState, router_with};
+use explorer_server::http::{AppState, router_with};
 use http_body_util::BodyExt;
-use shared::api::ErrorBody;
+use shared::api::error::ErrorBody;
 use tower::ServiceExt;
 
 const PUBLIC_ORIGIN: &str = "https://files.example.com";
@@ -140,13 +140,16 @@ async fn cross_site_form_post_to_logout_is_rejected() {
 }
 
 #[tokio::test]
-async fn upload_and_folder_writes_need_same_origin() {
+async fn upload_folder_and_task_writes_need_same_origin() {
     let id = "/files/uploads/0123456789abcdef0123456789abcdef";
     let targets = [
         ("POST", "/files/uploads"),
         ("PATCH", id),
         ("DELETE", id),
         ("POST", "/api/volumes/media/folders"),
+        ("POST", "/api/volumes/media/rename"),
+        ("POST", "/api/tasks"),
+        ("DELETE", "/api/tasks/0123456789abcdef0123456789abcdef"),
     ];
     for origin in [None, Some("https://evil.example")] {
         for (method, uri) in targets {

@@ -17,8 +17,9 @@ browser ──HTTPS──> reverse proxy ──HTTP──> explorer container
 
 Status: `/healthz`, the web bundle, sign-in (`/auth/*`, `/api/me`), browsing
 (`/api/volumes*`), downloads (`/files/download`, `/files/zip`) and resumable uploads
-(`/files/uploads*`, `/api/uploads`, `/api/volumes/{volume}/folders`) are implemented; file
-operations (rename, move, delete and the like) are planned.
+(`/files/uploads*`, `/api/uploads`, `/api/volumes/{volume}/folders`) are implemented, and so
+are managing files: new folder, rename, multi-select and zip of several entries, and delete,
+copy and move as background tasks (`/api/volumes/{volume}/rename`, `/api/tasks*`).
 
 ## Crates
 
@@ -26,7 +27,7 @@ operations (rename, move, delete and the like) are planned.
 |---|---|---|
 | `explorer-server` | `crates/server` | Axum server, binary `explorer`. |
 | `explorer-web` | `crates/web` | Dioxus web app (WASM), styled with Tailwind, localised (`en`, `fr`, `es`). |
-| `explorer-shared` | `crates/shared` | API types (DTOs, error body) used by both sides. |
+| `explorer-shared` | `crates/shared` | Types used by both sides: the API DTOs, one module per domain under `api/` (`auth`, `browse`, `conflict`, `error`, `health`, `tasks`, `uploads`; `conflict` holds the conflict policy that uploads, renames, copies and moves share), and the tus metadata encoding. |
 
 The web app talks to the server over a plain REST-style JSON API rather than Dioxus
 server functions, so the API stays usable by other clients.
@@ -70,7 +71,7 @@ absolute or host path. See [security.md](security.md) for how paths are confined
 | `GET /api/volumes` | The volumes: name, `read_only`, and free space (`space`, `null` when it cannot be read). |
 | `GET /api/volumes/{volume}/entries?path=` | The entries of a folder, sorted by name: `name`, `kind` (`dir`, `file` or `other`), `size` (files only), `modified_ms`. |
 | `GET`, `HEAD /files/download?volume=&path=` | One file, as an attachment. Supports a single `Range`, a strong `ETag` and `If-Range`. |
-| `GET /files/zip?volume=&path=` | A folder as a zip, streamed. `path` is required: pass it empty for the whole volume. |
+| `GET /files/zip?volume=&path=` | A folder as a zip, streamed. `path` is required: pass it empty for the whole volume. Repeat `name=` to archive only those entries of the folder (files or folders, each one a single name, as stored in the zip under that name). |
 
 All of them require a signed-in user. Failures use the JSON error shape with these codes
 (`details` carries `volume` and `path` when they concern a path):
@@ -135,7 +136,7 @@ New error codes (JSON error shape as above):
 | `invalid_upload` | 400 | Missing or malformed `Upload-Length` or `Upload-Metadata`. |
 | `unsupported_tus_version` | 412 | `Tus-Resumable` missing or not `1.0.0`. |
 | `unsupported_media_type` | 415 | `PATCH` without `application/offset+octet-stream`. |
-| `cross_device` | 500 | The destination folder is a separate mount nested in the volume, so the staged file cannot be renamed into it. |
+| `cross_device` | 500 | The destination folder is a separate mount nested in the volume, so the staged file cannot be renamed into it. A copy or a move that has to copy can hit it too. |
 
 An empty destination path (the volume root) is `invalid_path`; `is_a_directory`,
 `not_a_directory` and `permission_denied` from the table above also apply to destinations.
@@ -185,6 +186,73 @@ Logs (`info`, with `user` = the OIDC `sub`, `action`, `volume`, `path`): upload 
 each sweep that removed something. Failures log at `warn`. File contents and metadata
 values other than these fields are never logged.
 
+## Managing files
+
+Creating, renaming, deleting, copying and moving require a signed-in user and write access
+to the volume they change (a copy only needs to read its source). They apply to files and
+folders alike.
+
+| Route | Purpose |
+|---|---|
+| `POST /api/volumes/{volume}/folders` | As above; with `"exclusive": true` it creates just that folder and answers `already_exists` if the name is taken, instead of merging. A missing parent is then `path_not_found`. |
+| `POST /api/volumes/{volume}/rename` | Body `{"path", "name", "conflict"}` (`conflict` defaults to `fail`). Renames the entry at `path` to `name` in the same folder and answers `{"path"}`, the new path, which differs from the requested one under `keep_both`. Renaming to the current name is a no-op. The volume root cannot be renamed. |
+| `GET /api/tasks` | The signed-in user's tasks, oldest first. |
+| `POST /api/tasks` | Queues a task and answers 202 with its state. |
+| `DELETE /api/tasks/{id}` | Cancels a queued or running task, or forgets a finished one. Answers 204. |
+
+A task is `{"op": "delete", "source"}`, `{"op": "copy", "source", "dest_dir", "conflict"}` or
+`{"op": "move", ...}`, where `source` and `dest_dir` are `{volume, path}` locations and
+`dest_dir` is the folder the entry goes into (under its own name). One task handles one
+entry; the web app starts one per selected entry. `TaskInfo` carries the `id`, the `spec`,
+the `state` (`queued`, `running`, `done`, `failed`, `cancelled`), `files_done` and
+`files_total`, `bytes_done` and `bytes_total`, `skipped` (entries a copy leaves out, see
+[security.md](security.md#managing-files)), `final_path` (where a copy or move ended up) and,
+for a failed task, `error` in the usual JSON error shape.
+
+`POST /api/tasks` checks the task before queuing it, so what can be known to fail at once is a
+normal error and no task exists: the source is missing (a delete of a missing entry is
+`path_not_found`), the destination is not a folder, the name is taken under `fail`, `replace`
+meets a folder (as source or as existing target), or the move or copy is refused. An `already_exists` from
+a copy or move carries `details.kind` (`dir` or `file`) for the existing target, so that a
+client knows whether it may offer Replace. Whatever fails later is reported by the task as
+`failed`, with the request id of the `POST`.
+
+New error codes (JSON error shape as above):
+
+| Code | Status | Meaning |
+|---|---|---|
+| `invalid_destination` | 400 | A copy or move of a folder into itself or one of its descendants, or a move into the folder the entry is already in. `details` name the entry, on its source volume. |
+| `task_not_found` | 404 | Unknown task id, or another user's. |
+
+Existing codes also apply: `already_exists` (409), `is_a_directory` (`replace` over or of a
+folder), `not_a_directory`, `invalid_path` (a bad name, the volume root, a reserved path, a
+malformed body), `read_only_volume`, `insufficient_storage` and `cross_device`. A failure on
+the source side of a copy or move carries the source volume in `details`, one on the
+destination side the destination volume.
+
+How tasks run:
+
+- The registry is in memory (`crates/server/src/tasks`): a restart loses every task, and a
+  task that was running stops with the process. A task belongs to the `sub` that created it.
+  A finished task is listed for one hour unless dismissed.
+- At most 2 tasks run at once, across all users; the others stay `queued`. Each runs on
+  Tokio's blocking pool. A queued task is cancelled at once; a running copy, or the copy
+  phase of a move, when it next checks (between 1 MiB chunks, and between entries of a
+  folder). A running delete cannot be cancelled: it is a single removal and ends `done`, and
+  the deleting phase of a move runs to the end too.
+- Delete removes a file, a symlink (not its target) or a folder tree. It is not a trash:
+  deleted data is gone.
+- Copy streams each file through a staged file in the destination volume's staging directory
+  and renames it into place, like an upload. A folder is copied under a freshly created
+  name, never merged into an existing folder. On failure or cancellation the staged files and
+  the partly copied folder are removed. Progress is files and bytes, planned before the copy.
+- Move within a volume is one rename (no data is copied). Across volumes, or when the rename
+  hits a nested mount, it copies, then deletes each copied file from the source and the
+  folders left empty. A failed or cancelled copy leaves the source whole.
+- Logs (`info`, with `user`, `action`, `volume`, `path`, and `dest_volume` and `final_path`
+  for a transfer): a rename, a delete, a finished transfer (with `files`, `bytes` and
+  `skipped` for a copy); failures at `warn`.
+
 ## Web app
 
 Routes: `/` (opens the first volume, or says there is none), `/browse/<volume>/<path>`,
@@ -195,6 +263,23 @@ space and a read-only marker. The folder is shown as a table sorted by name, siz
 entries keeps the DOM small. Sizes use SI units (1 kB = 1000 B). Each file row links to
 `/files/download` and each folder row to `/files/zip`; these are plain links, so the
 browser handles the download and shows any failure in its own download list.
+
+Managing files: each row has a menu (Download, Rename, Move to, Copy to, Delete) and a checkbox;
+checking rows, with shift-click for a range, shows a bar to download them as a zip (one
+`name=` per entry), move, copy or delete them, and renaming is offered for one entry at a time.
+New folder is in the header. On a read-only volume only Download and Copy remain, and entries listed as `other` (symlinks the
+server does not follow) can only be renamed or deleted. Names are checked
+before they are sent (not empty, no slash, not `.` or `..`, at most 255 bytes, not the reserved
+name at a volume root). Move and Copy open a folder picker that can cross volumes and cannot
+choose a read-only one. A rename, move or copy that hits an existing name opens the same Replace, Keep
+both or Cancel prompt as uploads, with "apply to all"; Replace is only offered for a file over
+a file. Delete, Move and Copy become tasks that appear in the activity panel (with the uploads)
+with their progress, a cancel or dismiss button and, for a task that skipped entries, how many.
+The tab polls `GET /api/tasks` every second while one of its tasks is queued or running, and
+refreshes the listing and the free space when one finishes. A tab shows the tasks it started;
+on load it also lists the user's queued and running tasks once and adopts them, so a reload
+keeps showing them until they finish (an adopted task never asks about a conflict, it is past
+that step).
 
 Uploads: the header has an Upload button (a floating "+" on narrow screens) that offers
 files or a folder, and files or folders can be dropped on the folder listing. On a read-only volume
@@ -207,8 +292,8 @@ browser. The engine lives in `crates/web/src/uploads`:
   once. Before creating an upload, the client resumes a pending one (from `GET /api/uploads`)
   whose volume, path, size and modification time all match, so reloading and picking the
   same file again continues from the server's offset.
-- After a transient failure (network error, 5xx other than 507, `upload_busy`,
-  `offset_mismatch`) the item asks the server for its offset and retries after
+- After a transient failure (network error, a 5xx answer that is not an API error, such as a
+  proxy's 502, `internal`, `upload_busy`, `offset_mismatch`) the item asks the server for its offset and retries after
   `min(1 s x 2^(attempt-1), 30 s)`, until the user cancels. A `PATCH` that reports no
   progress for 120 seconds is aborted and counts as a network error. An upload the server no
   longer knows (`upload_not_found`) is recreated from the start, once. When that offset is
@@ -226,33 +311,81 @@ browser. The engine lives in `crates/web/src/uploads`:
 
 ## Server modules
 
-Implemented:
+One folder per domain under `crates/server/src`:
 
 - `config` — loads and validates the environment at startup, reporting every problem.
-- `app` — router, middleware stack, shared state.
-- `web` — static bundle serving, cache headers, security headers.
-- `error` — the JSON error type.
-- `telemetry` — `tracing` setup (pretty or JSON).
-- `healthcheck` — client used by `explorer healthcheck` for the Docker healthcheck.
-- `oidc` — provider discovery (retried at startup), authorization URL, code exchange, ID
-  token verification, groups, end-session URL.
-- `auth` — `/auth/*` handlers and the `CurrentUser` extractor.
-- `session` — cookie and SQLite-backed session layer.
 - `db` — SQLite pool for `/config/explorer.db` (WAL), with a writability check.
-- `csrf` — `Origin`/`Referer` check on state-changing requests.
-- `authz` — authorization policy; handlers pass the user, the volume and the action, so
-  finer rules can be added later.
+- `telemetry` — `tracing` setup (pretty or JSON) and log value truncation.
+- `healthcheck` — client used by `explorer healthcheck` for the Docker healthcheck.
+- `http` — the plumbing every domain shares.
+  - `mod` — shared state, middleware stack and the route tree composed from each domain's
+    routes, `/healthz` and the JSON 404 fallback.
+  - `error` — the JSON error type and the request id it carries.
+  - `request_id` — the `X-Request-Id` header, its validation.
+  - `static_files` — bundle check, SPA fallback and cache headers.
+  - `security_headers` — CSP, `X-Content-Type-Options`, `Referrer-Policy`.
+  - `access` — handler helpers: volume lookup, policy check, read-only rejection and path
+    parsing in one call, and running a blocking storage call on a volume.
+- `auth` — sign-in and access control.
+  - `routes` — `/auth/*` handlers and `GET /api/me`.
+  - `current_user` — the `CurrentUser` extractor.
+  - `session` — cookie and SQLite-backed session layer.
+  - `csrf` — `Origin`/`Referer` check on state-changing requests.
+  - `policy` — authorization policy; handlers pass the user, the volume and the action, so
+    finer rules can be added later.
+  - `oidc` — provider discovery (retried at startup), authorization URL, code exchange, ID
+    token verification, groups, end-session URL.
 - `storage` — all filesystem access; handlers never touch the filesystem directly.
   - `path` — `RelPath`, the validated relative path type.
   - `volumes` — discovery under `/data` and read-only detection.
-  - `ops` — listing, `stat`, opening files, walking a folder, free space. Blocking calls
+  - `read` — listing, `stat`, opening files, walking a folder, free space. Blocking calls
     on [cap-std](https://docs.rs/cap-std) directories, run on Tokio's blocking pool.
   - `staging` and `write` — the per-volume staging directory and its files, the upload
-    target checks, folder creation and the final rename.
-  - `error` — storage errors, mapped to API error codes in `error`.
-- `api` — `GET /api/volumes`, `GET /api/volumes/{volume}/entries`, `POST /api/volumes/{volume}/folders` and `GET /api/uploads`.
-- `access` — handler helpers: volume lookup, policy check, read-only rejection and path
-  parsing in one call, and running a blocking storage call on a volume.
-- `files` — `/files/download`, `/files/zip` and the `/files/uploads` mount.
-- `uploads` — the tus handlers (`tus`), the `uploads` table and in-memory locks (`store`),
-  and the abandoned-upload sweep (`cleanup`).
+    target checks, folder creation, and `place`, the rename into place that the rename, move
+    and upload commits share.
+  - `rename` and `delete` — renaming an entry in place, and removing a file, symlink or
+    folder tree.
+  - `transfer` — copy and move: `check` (can it be done now, no folder into itself),
+    `copy` (staged files, plan and progress), `move` (rename, or copy then delete the source).
+  - `error` — storage errors, mapped to API error codes in `http::error`.
+- `browse` — `GET /api/volumes`, `GET /api/volumes/{volume}/entries`,
+  `POST /api/volumes/{volume}/folders` and `POST /api/volumes/{volume}/rename`.
+- `downloads` — `/files/download` (with `Range`) and `/files/zip` (a folder, or named entries
+  of one).
+- `tasks` — background delete, copy and move.
+  - `routes` — `/api/tasks`: checks a task, queues it, lists, cancels or dismisses.
+  - `registry` — the in-memory tasks per user, their `Progress` and the expiry of finished
+    ones.
+  - `run` — the queue: a semaphore of 2 permits and a blocking thread per running task.
+  - `transfer` — the copy and move tasks, built on `storage`.
+- `uploads` — resumable uploads.
+  - `routes` — `GET /api/uploads`, the user's pending uploads.
+  - `tus` — the `/files/uploads` tus endpoints: `protocol` (headers, version check,
+    creation metadata), `handlers`, `staged` (the staged file) and `commit` (writing the
+    body and moving the file into place).
+  - `store` — the `uploads` table and in-memory locks.
+  - `cleanup` — the abandoned-upload sweep.
+
+## Web modules
+
+Under `crates/web/src`:
+
+- `app`, `routes`, `i18n`, `format`, `listing` — the root component, the client routes,
+  translations, size and date formatting, sorting, file types and the visible row range.
+- `api` — fetch helpers and API failures; `urls` builds the API and file URLs.
+- `tasks` — the background task list of the tab: `store` (state machine: tasks, events,
+  effects, polling), `conflict` (the existing entry a copy or move would land on),
+  `transport` (the requests).
+- `selection` (checked rows), `actions` (the row and selection actions by entry kind and
+  volume), `names` (name validation), `conflict` (the Replace, Keep both or Cancel decision
+  shared with uploads), `revision` (a counter bumped when something changed on disk, so the
+  listing and sidebar reload).
+- `uploads` — the upload engine: `plan` (what a pick or drop sends), `queue` (the state
+  machine: items, effects and events, the reducer), `controller`, `transport`, `drop`,
+  `speed`.
+- `components` — grouped by screen: `layout` (shell, sidebar, breadcrumb, user menu,
+  sign-out, activity panel), `browse` (file table and rows, row menu, selection bar, virtual
+  list, drop zone), `manage` (new folder, rename, delete and move or copy dialogs, folder
+  picker), `tasks` (task rows, conflict dialog), `uploads` (upload button, upload rows,
+  conflict dialog), `common` (icons, menu, modal, conflict prompt, notice, error panel).
+- `pages` — one component per route.
