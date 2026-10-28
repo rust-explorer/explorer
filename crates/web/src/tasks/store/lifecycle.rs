@@ -1,5 +1,4 @@
 use shared::api::browse::EntryKind;
-use shared::api::error::ErrorBody;
 use shared::api::tasks::{TaskInfo, TaskSpec, TaskState};
 
 use super::{Effect, TASK_NOT_FOUND, Task, TaskKey, TaskList};
@@ -45,6 +44,7 @@ impl TaskList {
                     finished_at_ms: None,
                     finished_before: false,
                     dismissed: false,
+                    result_dropped: false,
                     cancel_failure: None,
                 });
                 Effect::Post { key, spec }
@@ -82,6 +82,7 @@ impl TaskList {
                 finished_at_ms: None,
                 finished_before: finished_scan,
                 dismissed: finished_scan,
+                result_dropped: false,
                 cancel_failure: None,
             });
         }
@@ -139,12 +140,7 @@ impl TaskList {
                 && matches!(task.spec, TaskSpec::Usage { .. })
                 && task.state() == TaskState::Done
         }) {
-            task.lost = Some(ApiFailure::Server(ErrorBody {
-                code: TASK_NOT_FOUND.to_owned(),
-                message: String::new(),
-                details: None,
-                request_id: None,
-            }));
+            task.result_dropped = true;
         }
     }
 

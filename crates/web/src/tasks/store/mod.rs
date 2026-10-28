@@ -41,6 +41,8 @@ pub struct Task {
     finished_before: bool,
     /// Cleared from the activity panel, but still known for its result.
     dismissed: bool,
+    /// A finished scan whose result the server no longer keeps.
+    result_dropped: bool,
     /// Why the last cancel request failed.
     cancel_failure: Option<ApiFailure>,
 }
@@ -80,6 +82,10 @@ impl Task {
 
     pub(in crate::tasks) fn dismissed(&self) -> bool {
         self.dismissed
+    }
+
+    pub fn result_dropped(&self) -> bool {
+        self.result_dropped
     }
 
     pub fn cancel_failure(&self) -> Option<&ApiFailure> {

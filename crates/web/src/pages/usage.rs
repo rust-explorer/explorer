@@ -129,6 +129,9 @@ pub fn Usage(id: String, volume: Segment, path: Segments) -> Element {
         (Some(task), _) if task.is_active() => rsx! {
             Scanning { task }
         },
+        (Some(task), _) if task.result_dropped() => rsx! {
+            Stopped { title: t!("usage-unavailable-title"), message: t!("usage-unavailable-message"), source }
+        },
         (Some(task), _) if task.state() == TaskState::Cancelled => rsx! {
             Stopped { title: t!("usage-cancelled-title"), message: t!("usage-cancelled-message"), source }
         },
