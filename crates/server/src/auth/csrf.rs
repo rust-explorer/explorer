@@ -125,12 +125,12 @@ mod tests {
         );
     }
 
-    fn foreign(method: Method, fetch: &[(&'static str, &'static str)]) -> bool {
+    fn foreign(method: &Method, fetch: &[(&'static str, &'static str)]) -> bool {
         let mut headers = HeaderMap::new();
         for (name, value) in fetch {
             headers.insert(*name, HeaderValue::from_static(value));
         }
-        is_foreign(&method, &headers)
+        is_foreign(method, &headers)
     }
 
     #[test]
@@ -138,34 +138,34 @@ mod tests {
         let site = "sec-fetch-site";
         let clicked = [("sec-fetch-mode", "navigate"), ("sec-fetch-user", "?1")];
         for other in ["cross-site", "same-site", "Cross-Site"] {
-            assert!(foreign(Method::GET, &[(site, other)]), "{other}");
+            assert!(foreign(&Method::GET, &[(site, other)]), "{other}");
             assert!(
                 foreign(
-                    Method::GET,
+                    &Method::GET,
                     &[(site, other), ("sec-fetch-mode", "navigate")]
                 ),
                 "{other} without a click"
             );
             assert!(
                 foreign(
-                    Method::GET,
+                    &Method::GET,
                     &[(site, other), ("sec-fetch-mode", "no-cors"), clicked[1]]
                 ),
                 "{other} not a navigation"
             );
             assert!(
-                foreign(Method::POST, &[(site, other), clicked[0], clicked[1]]),
+                foreign(&Method::POST, &[(site, other), clicked[0], clicked[1]]),
                 "{other} form post"
             );
             assert!(
-                !foreign(Method::GET, &[(site, other), clicked[0], clicked[1]]),
+                !foreign(&Method::GET, &[(site, other), clicked[0], clicked[1]]),
                 "{other} link"
             );
         }
         for own in ["same-origin", "none"] {
-            assert!(!foreign(Method::GET, &[(site, own)]), "{own}");
+            assert!(!foreign(&Method::GET, &[(site, own)]), "{own}");
         }
-        assert!(!foreign(Method::GET, &[]));
+        assert!(!foreign(&Method::GET, &[]));
     }
 
     #[test]
