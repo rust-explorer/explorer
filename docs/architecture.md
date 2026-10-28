@@ -110,7 +110,8 @@ Nothing is left out silently. Entries are reached by their names on disk, so a n
 not UTF-8, holds a control character or lies under a path longer than 4096 bytes is
 archived too, under a safe name: invalid UTF-8 becomes `�`, control characters and `\`
 become `_`, and a name that then collides with another one in its folder gets ` (2)`. What
-cannot be archived (a sub-folder or file the server cannot read, a symlink to a folder, a
+cannot be archived (a sub-folder or file the server cannot read, a symlink to a folder
+other than one selected itself in a multi-entry download, a
 broken or escaping symlink, a FIFO, socket or device) is skipped, and the archive then ends
 with `explorer-skipped.txt` at its top (renamed if that name is taken), listing each one
 with the reason (the first 10,000, then a count); the server logs `zip left entries out`

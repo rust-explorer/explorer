@@ -133,9 +133,12 @@ Names that are not valid UTF-8 are skipped with a warning.
   as `other` (no size, no date), with a disabled row in the UI, and are never read. This
   holds even when the absolute target would happen to lie inside the volume.
 - Opening one by path gives `outside_volume` or `path_not_found`, never its content.
-- Folder downloads never descend into a symlink to a directory, which also rules out
-  cycles, and skip anything that is neither a regular file nor a directory (sockets,
-  FIFOs, devices). Symlinks to files inside the volume are included as files.
+- Folder downloads never descend into a symlink to a directory found inside the zipped
+  folder, which also rules out cycles: it is left out and listed in `explorer-skipped.txt`,
+  as is anything that is neither a regular file nor a directory (sockets, FIFOs, devices).
+  A symlink to a folder inside the volume that the user selected itself in a multi-entry
+  download is followed, that one level only. Symlinks to files inside the volume are
+  included as files.
 - Files are opened non-blocking, so a FIFO swapped in after the check cannot hang a
   request, and the type is checked again on the open file.
 
@@ -291,7 +294,9 @@ action reach outside its volume.
 - **Zip walk.** Below the zipped folder, every folder and file is opened by its name from
   its already opened parent, without following symlinks, and a folder is only entered if it
   is still the one that was listed (device and inode). Symlinks to files are resolved from
-  the volume root and confined like any path; symlinks to folders are not followed. Folders
+  the volume root and confined like any path; symlinks to folders are not followed, unless
+  the user selected the link itself in a multi-entry download (then only that link is
+  followed; links to folders below it are listed in `explorer-skipped.txt`). Folders
   more than 64 levels down don't keep a descriptor open while they are walked. At most 4
   zips stream at once, 2 per user, so one signed-in user cannot hold every slot; each stops
   when its client goes away or stops reading for 60 seconds.
