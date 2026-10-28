@@ -89,7 +89,13 @@ pub fn NewFolderDialog(
     let message = problem.read().as_ref().map(Problem::message);
 
     rsx! {
-        Modal { labelled_by: TITLE_ID, on_close: move |()| on_close.call(()), return_focus,
+        Modal { labelled_by: TITLE_ID, on_close: move |()| {
+                // Closing would drop the request's outcome: the listing would not refresh.
+                if !busy() {
+                    on_close.call(());
+                }
+            },
+            return_focus,
             form { onsubmit: submit,
                 h2 {
                     id: TITLE_ID,
@@ -111,7 +117,10 @@ pub fn NewFolderDialog(
                     value: name(),
                     aria_invalid: message.is_some(),
                     aria_describedby: if message.is_some() { ERROR_ID },
-                    oninput: move |event| name.set(event.value()),
+                    oninput: move |event| {
+                        name.set(event.value());
+                        problem.set(None);
+                    },
                 }
                 if let Some(message) = message.clone() {
                     p {
@@ -125,6 +134,7 @@ pub fn NewFolderDialog(
                     button {
                         r#type: "button",
                         class: BUTTON,
+                        disabled: busy(),
                         onclick: move |_| on_close.call(()),
                         {t!("cancel")}
                     }

@@ -41,6 +41,22 @@ struct Transferring {
     from_selection: bool,
 }
 
+/// A renamed entry whose ⋯ takes focus once a refreshed listing shows it, and the listing shown
+/// when it was asked for.
+#[derive(Clone, PartialEq)]
+struct FocusRequest {
+    name: String,
+    listed: Rc<Vec<Entry>>,
+}
+
+impl FocusRequest {
+    /// A newer listing came without the entry: it will not show up, so the request is dropped
+    /// rather than handing focus to a later entry of that name.
+    fn outlived_by(&self, entries: &Rc<Vec<Entry>>) -> bool {
+        !Rc::ptr_eq(&self.listed, entries) && !entries.iter().any(|entry| entry.name == self.name)
+    }
+}
+
 /// The entry menu and the dialogs it opens, shared by the list and the grid. The view opens
 /// menus through it and renders an [`EntryActionsLayer`] next to itself.
 #[derive(Clone, Copy, PartialEq)]
@@ -49,8 +65,7 @@ pub struct EntryActions {
     renaming: Signal<Option<Renaming>>,
     deleting: Signal<Option<Deleting>>,
     transferring: Signal<Option<Transferring>>,
-    /// A renamed entry whose ⋯ takes focus once the refreshed listing shows it.
-    focus_menu_of: Signal<Option<String>>,
+    focus_menu_of: Signal<Option<FocusRequest>>,
 }
 
 pub fn use_entry_actions() -> EntryActions {
@@ -79,7 +94,10 @@ impl EntryActions {
 
     /// The entry whose ⋯ button should take focus.
     pub fn focus_pending(self) -> Option<String> {
-        self.focus_menu_of.read().clone()
+        self.focus_menu_of
+            .read()
+            .as_ref()
+            .map(|request| request.name.clone())
     }
 
     pub fn focus_taken(mut self) {
@@ -127,7 +145,9 @@ pub fn use_retain_selection(rows: Memo<Rc<Vec<Entry>>>, mut selection: Signal<Se
     use_effect(move || {
         let rows = rows.read();
         let names: Vec<&str> = rows.iter().map(|entry| entry.name.as_str()).collect();
-        selection.write().retain(&names);
+        if selection.peek().has_unlisted(&names) {
+            selection.write().retain(&names);
+        }
     });
 }
 
@@ -197,6 +217,16 @@ pub fn EntryActionsLayer(
     let (dialog_volume, dialog_parent) = (volume.as_str().to_owned(), path.joined());
     let transfer_parent = path.clone();
     let tasks = use_tasks();
+    use_effect(move || {
+        let entries = entries.read();
+        let outlived = focus_menu_of
+            .peek()
+            .as_ref()
+            .is_some_and(|request| request.outlived_by(&entries));
+        if outlived {
+            focus_menu_of.set(None);
+        }
+    });
 
     let on_action = move |action: RowAction| {
         let Some(MenuRequest { entry, trigger, .. }) = menu.take() else {
@@ -268,7 +298,10 @@ pub fn EntryActionsLayer(
                 entries,
                 return_focus: trigger,
                 on_close: move |()| renaming.set(None),
-                on_renamed: move |name| focus_menu_of.set(Some(name)),
+                on_renamed: move |name| {
+                    let listed = entries.peek().clone();
+                    focus_menu_of.set(Some(FocusRequest { name, listed }));
+                },
             }
         }
         if let Some(Transferring { mode, entries, trigger, from_selection }) = transferring() {
@@ -302,5 +335,36 @@ pub fn EntryActionsLayer(
                 },
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn listing(names: &[&str]) -> Rc<Vec<Entry>> {
+        Rc::new(
+            names
+                .iter()
+                .map(|name| Entry {
+                    name: (*name).to_owned(),
+                    kind: EntryKind::File,
+                    size: Some(1),
+                    modified_ms: None,
+                })
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn focus_request_waits_for_a_newer_listing() {
+        let listed = listing(&["old.txt"]);
+        let request = FocusRequest {
+            name: "new.txt".to_owned(),
+            listed: listed.clone(),
+        };
+        assert!(!request.outlived_by(&listed));
+        assert!(!request.outlived_by(&listing(&["new.txt"])));
+        assert!(request.outlived_by(&listing(&["old.txt"])));
     }
 }

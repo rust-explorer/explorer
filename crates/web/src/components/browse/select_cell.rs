@@ -57,7 +57,9 @@ pub fn SelectAll(
     }));
 
     rsx! {
-        div { role, class: "flex items-center justify-center",
+        // As wide as the select column, so the box stays put when the selection bar replaces
+        // the column headers.
+        div { role, class: "flex w-6 shrink-0 items-center justify-center",
             input {
                 r#type: "checkbox",
                 class: BOX,
