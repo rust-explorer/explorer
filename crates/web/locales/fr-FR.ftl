@@ -85,3 +85,4 @@ conflict-replace = Remplacer
 conflict-keep-both = Garder les deux
 conflict-cancel = Annuler
 conflict-apply-all = Appliquer à tous
+upload-drop = Déposez pour uploader dans { $folder }

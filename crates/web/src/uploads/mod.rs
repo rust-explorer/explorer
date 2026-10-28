@@ -1,4 +1,6 @@
 mod controller;
+#[cfg(target_arch = "wasm32")]
+pub mod drop;
 mod plan;
 mod queue;
 mod speed;
