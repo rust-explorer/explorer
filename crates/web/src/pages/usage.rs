@@ -26,13 +26,18 @@ const TEXT: &str = "mt-2 text-sm text-slate-600 dark:text-slate-400";
 pub fn Usage(id: String, volume: Segment, path: Segments) -> Element {
     let mut me = use_resource(|| api::get_json::<Me>("/api/me"));
     let mut volumes = use_resource(|| api::get_json::<Vec<VolumeInfo>>("/api/volumes"));
-    let list = use_tasks().list();
+    let tasks = use_tasks();
+    let list = tasks.list();
+    let adopted = list.read().adopted();
     let task = list
         .read()
         .tasks()
         .iter()
         .find(|task| task.info.as_ref().is_some_and(|info| info.id == id))
         .cloned();
+    let dropped = task
+        .as_ref()
+        .is_some_and(|task| list.read().result_dropped(task.key));
     // The result exists once the task is done; a task this tab does not know may be done too.
     let wanted = task
         .as_ref()
@@ -98,9 +103,27 @@ pub fn Usage(id: String, volume: Segment, path: Segments) -> Element {
         .filter(|(fetched_url, _)| *fetched_url == url && ready)
         .and_then(|(_, result)| result);
 
+    // The end of a watched scan is announced once, for the folder its result opened at.
+    let mut finished_at = use_signal(|| None::<String>);
+    let found = matches!(fetched, Some(Ok(_)));
+    use_effect(use_reactive!(|found, url| {
+        if found && watched() && finished_at.peek().is_none() {
+            finished_at.set(Some(url));
+        }
+    }));
+    let known_done = task
+        .as_ref()
+        .is_some_and(|task| task.state() == TaskState::Done);
+    let gone = matches!(&fetched, Some(Err(failure)) if is_gone(failure));
+    use_effect(use_reactive!(|gone, known_done, id| {
+        if gone && known_done {
+            tasks.result_gone(&id);
+        }
+    }));
+
     let status = if active {
         t!("usage-scanning", name: folder_name(&source))
-    } else if watched() && matches!(fetched, Some(Ok(_))) {
+    } else if finished_at.read().as_deref() == Some(url.as_str()) {
         t!("usage-scan-finished")
     } else {
         String::new()
@@ -108,6 +131,9 @@ pub fn Usage(id: String, volume: Segment, path: Segments) -> Element {
     let content = match (task, fetched) {
         (Some(task), _) if task.is_active() => rsx! {
             Scanning { task }
+        },
+        (Some(_), _) if dropped => rsx! {
+            Stopped { title: t!("usage-unavailable-title"), message: t!("usage-unavailable-message"), source }
         },
         (Some(task), _) if task.state() == TaskState::Cancelled => rsx! {
             Stopped { title: t!("usage-cancelled-title"), message: t!("usage-cancelled-message"), source }
@@ -124,10 +150,11 @@ pub fn Usage(id: String, volume: Segment, path: Segments) -> Element {
             UsageHeader { id: id.clone(), view: found.clone() }
             UsageList { id: id.clone(), view: found }
         },
-        (_, Some(Err(failure))) if is_gone(&failure) => rsx! {
+        // Before the tasks from before a reload are known, a running scan looks gone.
+        (_, Some(Err(failure))) if is_gone(&failure) && adopted => rsx! {
             Stopped { title: t!("usage-unavailable-title"), message: t!("usage-unavailable-message"), source }
         },
-        (_, Some(Err(failure))) if !failure.is_unauthenticated() => rsx! {
+        (_, Some(Err(failure))) if !failure.is_unauthenticated() && !is_gone(&failure) => rsx! {
             div { class: "flex justify-center pt-6",
                 ErrorPanel { failure, on_retry: move |()| view.restart() }
             }

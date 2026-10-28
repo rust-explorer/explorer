@@ -6,8 +6,9 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::http::header::{self, HeaderMap, HeaderValue};
 use axum::response::Response;
+use shared::api::thumbnails::has_thumbnail;
 
-use super::{MAX_SOURCE_BYTES, Thumbnail, Thumbnails, cache_key, render, supported};
+use super::{MAX_SOURCE_BYTES, Thumbnail, Thumbnails, cache_key, render};
 use crate::auth::{Action, CurrentUser};
 use crate::http::AppState;
 use crate::http::access::{VolumeQuery, authorize, blocking_volume, invalid_query};
@@ -27,7 +28,7 @@ pub async fn thumbnail(
         return Err(invalid_query());
     };
     let path = authorize(&state, &user, &volume, &path, Action::Read)?;
-    if !path.file_name().is_some_and(supported) {
+    if !path.file_name().is_some_and(has_thumbnail) {
         return Err(ApiError::thumbnail_unavailable());
     }
 
@@ -40,7 +41,11 @@ pub async fn thumbnail(
         StorageError::NotFound(_) | StorageError::IsADirectory(_) => {
             ApiError::thumbnail_unavailable()
         }
-        err => ApiError::from_storage(&volume, err),
+        // A folder of unreadable images would log one warning per tile.
+        err => {
+            tracing::debug!(volume, path = path.as_str(), error = %err, "thumbnail source unreadable");
+            ApiError::from_logged_storage(&volume, err)
+        }
     })?;
     let size = meta.size.unwrap_or_default();
     if size > MAX_SOURCE_BYTES {
@@ -156,16 +161,15 @@ fn generate(thumbnails: &Thumbnails, key: &str, file: std::fs::File) -> Option<T
     Some(thumbnail)
 }
 
-/// Weak comparison (RFC 9110 section 13.1.2), as `If-None-Match` requires.
+/// Weak comparison (RFC 9110 section 13.1.2), as `If-None-Match` requires. `*` never matches:
+/// the thumbnail may not exist yet, and a 304 would leave the client with nothing to show.
 fn etag_matches(if_none_match: &str, key: &str) -> bool {
     if_none_match.split(',').map(str::trim).any(|tag| {
-        tag == "*"
-            || tag
-                .strip_prefix("W/")
-                .unwrap_or(tag)
-                .strip_prefix('"')
-                .and_then(|tag| tag.strip_suffix('"'))
-                == Some(key)
+        tag.strip_prefix("W/")
+            .unwrap_or(tag)
+            .strip_prefix('"')
+            .and_then(|tag| tag.strip_suffix('"'))
+            == Some(key)
     })
 }
 
@@ -179,7 +183,7 @@ mod tests {
         assert!(etag_matches("\"abc\"", "abc"));
         assert!(etag_matches("W/\"abc\"", "abc"));
         assert!(etag_matches("\"x\", \"abc\"", "abc"));
-        assert!(etag_matches("*", "abc"));
+        assert!(!etag_matches("*", "abc"));
         assert!(!etag_matches("\"abcd\"", "abc"));
         assert!(!etag_matches("abc", "abc"));
         assert!(!etag_matches("", "abc"));

@@ -36,7 +36,6 @@ pub fn App() -> Element {
         if let Some(href) = TAILWIND_CSS {
             document::Stylesheet { href }
         }
-        document::Meta { name: "color-scheme", content: "light dark" }
         Router::<Route> {}
         ActivityPanel {}
         UploadConflictDialog {}

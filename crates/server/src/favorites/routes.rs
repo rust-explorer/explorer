@@ -102,17 +102,21 @@ pub async fn remove(
     let Ok(Query(query)) = query else {
         return Err(invalid_query());
     };
-    state
+    // Not authorized against the volume, which may be gone: only the user's own row goes.
+    let path = RelPath::parse(&query.path)?;
+    let removed = state
         .favorites
-        .remove(&user.sub, &query.volume, &query.path)
+        .remove(&user.sub, &query.volume, path.as_str())
         .await
         .map_err(ApiError::internal)?;
-    tracing::info!(
-        user = user.sub,
-        action = "favorite_remove",
-        volume = query.volume,
-        path = query.path,
-        "favorite removed"
-    );
+    if removed {
+        tracing::info!(
+            user = user.sub,
+            action = "favorite_remove",
+            volume = query.volume,
+            path = path.as_str(),
+            "favorite removed"
+        );
+    }
     Ok(StatusCode::NO_CONTENT)
 }

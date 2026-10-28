@@ -2,15 +2,18 @@ use std::io;
 use std::time::SystemTime;
 
 use cap_std::fs::Dir;
-use rustix::fs::{Mode, OFlags, RenameFlags};
+use rustix::fs::{Mode, OFlags};
 use rustix::io::Errno;
 use shared::api::conflict::ConflictPolicy;
 
 use super::path::STAGING_DIR;
 use super::read::fs_path;
+use super::rename::rename_noreplace;
 use super::{RelPath, StagedId, Staging, StorageError, Volume};
 
 pub(super) const KEEP_BOTH_MAX: u32 = 999;
+/// A Replace whose target keeps appearing and vanishing gives up after this many tries.
+const REPLACE_ATTEMPTS: usize = 3;
 
 /// `Film.mkv` → `Film (n).mkv`. A leading or trailing dot does not start an extension.
 #[must_use]
@@ -48,22 +51,57 @@ impl Volume {
     }
 
     pub fn create_dir_all(&self, dir: &RelPath) -> Result<(), StorageError> {
+        self.create_missing_dirs(dir).map(drop)
+    }
+
+    /// Like [`Volume::create_dir_all`], returning the folders it created, outermost first. A
+    /// dangling symlink on the way is not a folder.
+    fn create_missing_dirs(&self, dir: &RelPath) -> Result<Vec<RelPath>, StorageError> {
         self.refuse_reserved(dir)?;
+        let mut created = Vec::new();
+        let not_a_dir = |prefix: RelPath| {
+            if prefix == *dir {
+                StorageError::AlreadyExists(prefix)
+            } else {
+                StorageError::NotADirectory(prefix)
+            }
+        };
         for prefix in prefixes(dir) {
-            match self.is_dir_at(&prefix)? {
-                Some(true) => {}
-                Some(false) if prefix == *dir => return Err(StorageError::AlreadyExists(prefix)),
-                Some(false) => return Err(StorageError::NotADirectory(prefix)),
-                None => match self.root.create_dir(prefix.as_str()) {
-                    Ok(()) => {}
-                    Err(err)
-                        if err.kind() == io::ErrorKind::AlreadyExists
-                            && self.is_dir_at(&prefix)? == Some(true) => {}
-                    Err(err) => return Err(StorageError::from_io(&prefix, err)),
+            let result = match self.is_dir_at(&prefix) {
+                Ok(Some(true)) => Ok(()),
+                Ok(Some(false)) => Err(not_a_dir(prefix.clone())),
+                Ok(None) => match self.root.create_dir(prefix.as_str()) {
+                    Ok(()) => {
+                        created.push(prefix.clone());
+                        Ok(())
+                    }
+                    Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+                        match self.is_dir_at(&prefix) {
+                            Ok(Some(true)) => Ok(()),
+                            Ok(_) => Err(not_a_dir(prefix.clone())),
+                            Err(err) => Err(err),
+                        }
+                    }
+                    Err(err) => Err(StorageError::from_io(&prefix, err)),
                 },
+                Err(err) => Err(err),
+            };
+            if let Err(err) = result {
+                self.remove_created_dirs(&created);
+                return Err(err);
             }
         }
-        Ok(())
+        Ok(created)
+    }
+
+    /// Removes folders a failed operation created, deepest first, as long as they are empty.
+    fn remove_created_dirs(&self, created: &[RelPath]) {
+        for dir in created.iter().rev() {
+            if let Err(err) = self.root.remove_dir(dir.as_str()) {
+                tracing::debug!(volume = self.name(), path = dir.as_str(), error = %err, "created folder left in place");
+                return;
+            }
+        }
     }
 
     /// Whether an upload to `path` would be accepted now; missing parent folders are fine.
@@ -80,7 +118,13 @@ impl Volume {
             match self.is_dir_at(&prefix)? {
                 Some(true) => {}
                 Some(false) => return Err(StorageError::NotADirectory(prefix)),
-                None => return Ok(()),
+                None => {
+                    return match self.root.symlink_metadata(prefix.as_str()) {
+                        Ok(_) => Err(StorageError::NotADirectory(prefix)),
+                        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+                        Err(err) => Err(StorageError::from_io(&prefix, err)),
+                    };
+                }
             }
         }
         match conflict {
@@ -135,28 +179,62 @@ impl Volume {
             return Err(StorageError::IsADirectory(dest.clone()));
         };
         self.refuse_reserved(dest)?;
-        self.create_dir_all(&parent)?;
+        let mut retried = false;
+        loop {
+            let created = self.create_missing_dirs(&parent)?;
+            let placed = self.place_staged(staging, id, &parent, name, conflict, modified);
+            let Err(err) = placed else {
+                return placed;
+            };
+            // A concurrent commit that failed may have removed an empty folder it created.
+            let vanished = !retried && self.parent_vanished(&parent, &err);
+            self.remove_created_dirs(&created);
+            if !vanished {
+                return Err(err);
+            }
+            retried = true;
+        }
+    }
+
+    fn parent_vanished(&self, parent: &RelPath, err: &StorageError) -> bool {
+        matches!(err, StorageError::NotFound(_)) && matches!(self.is_dir_at(parent), Ok(None))
+    }
+
+    fn place_staged(
+        &self,
+        staging: &Staging,
+        id: &StagedId,
+        parent: &RelPath,
+        name: &str,
+        conflict: ConflictPolicy,
+        modified: Option<SystemTime>,
+    ) -> Result<RelPath, StorageError> {
         let parent_dir = self
             .root
-            .open_dir(fs_path(&parent))
-            .map_err(|err| StorageError::from_io(&parent, err))?;
+            .open_dir(fs_path(parent))
+            .map_err(|err| StorageError::from_io(parent, err))?;
 
-        let file = staging.open_write(id)?;
-        let staged_err = |err| StorageError::from_io(&RelPath::root(), err);
+        let dest = parent.join(name)?;
+        let staged_err = |err| StorageError::from_io(&dest, err);
+        let file = staging.open_staged(id, &dest)?;
         if let Some(modified) = modified {
             file.set_modified(modified).map_err(staged_err)?;
         }
         file.sync_all().map_err(staged_err)?;
         drop(file);
 
-        self.place(
+        let placed = self.place(
             &staging.dir,
             id.as_str(),
             &parent_dir,
-            &parent,
+            parent,
             name,
             conflict,
-        )
+        )?;
+        if let Err(err) = sync_dir(&parent_dir) {
+            tracing::warn!(volume = self.name(), path = parent.as_str(), error = %err, "cannot sync the folder of a committed file");
+        }
+        Ok(placed)
     }
 
     /// Renames `from_name` to `to_name`, or under `Fail` and `KeepBoth` to the first free
@@ -172,14 +250,7 @@ impl Volume {
     ) -> Result<RelPath, StorageError> {
         let dest = to_parent.join(to_name)?;
         if conflict == ConflictPolicy::Replace {
-            if to_dir.symlink_metadata(to_name).is_ok()
-                && (is_dir_in(to_dir, to_name) || is_dir_in(from_dir, from_name))
-            {
-                return Err(StorageError::IsADirectory(dest));
-            }
-            rustix::fs::renameat(from_dir, from_name, to_dir, to_name)
-                .map_err(|err| rename_error(&dest, err))?;
-            return Ok(dest);
+            return replace(from_dir, from_name, to_dir, to_name, dest);
         }
 
         for n in 0..=KEEP_BOTH_MAX {
@@ -191,13 +262,7 @@ impl Volume {
             let Ok(target) = to_parent.join(&candidate) else {
                 break;
             };
-            match rustix::fs::renameat_with(
-                from_dir,
-                from_name,
-                to_dir,
-                candidate.as_str(),
-                RenameFlags::NOREPLACE,
-            ) {
+            match rename_noreplace(from_dir, from_name, to_dir, &candidate) {
                 Ok(()) => {
                     if n > 0 && conflict == ConflictPolicy::Fail {
                         tracing::info!(
@@ -224,6 +289,46 @@ impl Volume {
             Err(err) => Err(StorageError::from_io(path, err)),
         }
     }
+}
+
+/// Replaces a file in one rename. With nothing there, the rename never replaces, so that a
+/// folder created meanwhile stays.
+fn replace(
+    from_dir: &Dir,
+    from_name: &str,
+    to_dir: &Dir,
+    to_name: &str,
+    dest: RelPath,
+) -> Result<RelPath, StorageError> {
+    for _ in 0..REPLACE_ATTEMPTS {
+        match to_dir.symlink_metadata(to_name) {
+            Ok(_) => {
+                if is_dir_in(to_dir, to_name) || is_dir_in(from_dir, from_name) {
+                    return Err(StorageError::IsADirectory(dest));
+                }
+                rustix::fs::renameat(from_dir, from_name, to_dir, to_name)
+                    .map_err(|err| rename_error(&dest, err))?;
+                return Ok(dest);
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                match rename_noreplace(from_dir, from_name, to_dir, to_name) {
+                    Ok(()) => return Ok(dest),
+                    Err(Errno::EXIST) => {}
+                    Err(err) => return Err(rename_error(&dest, err)),
+                }
+            }
+            Err(err) => return Err(StorageError::from_io(&dest, err)),
+        }
+    }
+    Err(StorageError::AlreadyExists(dest))
+}
+
+/// cap-std may hold folders as `O_PATH` descriptors, which cannot be synced: reopen it first.
+fn sync_dir(dir: &Dir) -> io::Result<()> {
+    let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
+    let fd = rustix::fs::openat(dir, c".", flags, Mode::empty())?;
+    rustix::fs::fsync(fd)?;
+    Ok(())
 }
 
 /// Follows a symlink, like the read operations; a dangling one is not a folder.
@@ -284,6 +389,20 @@ mod tests {
             rename_error(&path, Errno::XDEV),
             StorageError::CrossDevice(_)
         ));
+    }
+
+    #[test]
+    fn only_a_missing_parent_counts_as_vanished() {
+        let data = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(data.path().join("media/kept")).unwrap();
+        let volumes = crate::storage::Volumes::discover(data.path()).unwrap();
+        let media = volumes.get("media").unwrap();
+        let rel = |raw| RelPath::parse(raw).unwrap();
+        let not_found = StorageError::NotFound(rel("x"));
+        assert!(media.parent_vanished(&rel("gone"), &not_found));
+        assert!(!media.parent_vanished(&rel("kept"), &not_found));
+        let denied = StorageError::PermissionDenied(rel("x"));
+        assert!(!media.parent_vanished(&rel("gone"), &denied));
     }
 
     #[test]

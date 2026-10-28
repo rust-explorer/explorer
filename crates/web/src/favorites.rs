@@ -12,12 +12,14 @@ use crate::revision::Revision;
 pub struct FavoritesStore {
     list: Signal<Option<Vec<Favorite>>>,
     failure: Signal<Option<ApiFailure>>,
+    load_failed: Signal<bool>,
 }
 
 pub fn use_favorites_provider() -> FavoritesStore {
     use_context_provider(|| FavoritesStore {
         list: Signal::new(None),
         failure: Signal::new(None),
+        load_failed: Signal::new(false),
     })
 }
 
@@ -34,6 +36,11 @@ impl FavoritesStore {
     /// The last add or remove that failed, until the next one or `clear_failure`.
     pub fn failure(&self) -> Signal<Option<ApiFailure>> {
         self.failure
+    }
+
+    /// Whether the last load of the list failed.
+    pub fn load_failed(&self) -> bool {
+        (self.load_failed)()
     }
 
     pub fn clear_failure(mut self) {
@@ -80,8 +87,15 @@ impl FavoritesStore {
     }
 
     async fn load(mut self) {
-        if let Ok(list) = api::get_json::<Vec<Favorite>>(api::FAVORITES_URL).await {
-            self.list.set(Some(list));
+        let failed = match api::get_json::<Vec<Favorite>>(api::FAVORITES_URL).await {
+            Ok(list) => {
+                self.list.set(Some(list));
+                false
+            }
+            Err(failure) => !failure.is_unauthenticated(),
+        };
+        if *self.load_failed.peek() != failed {
+            self.load_failed.set(failed);
         }
     }
 }

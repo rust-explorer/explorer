@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_i18n::{t, te};
 use shared::api::error::ErrorBody;
+use shared::api::favorites::MAX_FAVORITES;
 
 use crate::api::ApiFailure;
 use crate::routes::{Route, Segments};
@@ -27,10 +28,24 @@ pub fn error_message(failure: &ApiFailure) -> String {
     match failure {
         ApiFailure::Network => t!("load-failed"),
         ApiFailure::Http(_) => t!("error-unknown"),
+        ApiFailure::Server(body) if body.code == "favorites_full" => {
+            t!("error-favorites_full", max: MAX_FAVORITES)
+        }
         ApiFailure::Server(body) => te!(&format!("error-{}", body.code), path: detail_path(body))
             .ok()
             .or_else(|| (!body.message.is_empty()).then(|| body.message.clone()))
             .unwrap_or_else(|| t!("error-unknown")),
+    }
+}
+
+/// Like [`error_message`], worded for an upload.
+pub fn upload_error_message(failure: &ApiFailure) -> String {
+    match failure {
+        ApiFailure::Http(413) => t!("uploads-error-too-large"),
+        ApiFailure::Server(body) if body.code == "permission_denied" => {
+            t!("uploads-error-permission_denied", path: detail_path(body))
+        }
+        _ => error_message(failure),
     }
 }
 
@@ -81,14 +96,19 @@ pub fn ErrorPanel(failure: ApiFailure, on_retry: EventHandler<()>) -> Element {
 
 /// A failure in a list row: its message and the request id to report it with.
 #[component]
-pub fn FailureNote(failure: ApiFailure) -> Element {
+pub fn FailureNote(failure: ApiFailure, #[props(default)] upload: bool) -> Element {
     let reference = match &failure {
         ApiFailure::Server(body) => body.request_id.clone(),
         _ => None,
     };
+    let message = if upload {
+        upload_error_message(&failure)
+    } else {
+        error_message(&failure)
+    };
 
     rsx! {
-        p { class: "mt-0.5 text-xs text-red-700 dark:text-red-400", {error_message(&failure)} }
+        p { class: "mt-0.5 text-xs text-red-700 dark:text-red-400", {message} }
         if let Some(id) = reference {
             p { class: "font-mono text-xs text-slate-500 dark:text-slate-400",
                 {t!("error-reference", id: id)}

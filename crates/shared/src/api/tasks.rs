@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 use super::conflict::ConflictPolicy;
 use super::error::ErrorBody;
 
+/// Queued and running tasks a user may have at once; more are refused.
+pub const MAX_ACTIVE_TASKS: usize = 1000;
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Location {
     pub volume: String,

@@ -62,6 +62,7 @@ pub fn FolderPicker(
         .read()
         .as_ref()
         .map(|result| result.as_ref().err().cloned());
+    let volumes_ready = volumes_state == Some(None);
     let all_volumes: Vec<VolumeInfo> = match &*volumes.read() {
         Some(Ok(volumes)) => volumes.clone(),
         _ => Vec::new(),
@@ -90,7 +91,8 @@ pub fn FolderPicker(
                 {title}
             }
             label {
-                r#for: VOLUME_ID,
+                // The select only exists once the volumes are in.
+                r#for: if volumes_ready { VOLUME_ID },
                 class: "mt-4 block text-sm text-slate-700 dark:text-slate-300",
                 {t!("picker-volume")}
             }

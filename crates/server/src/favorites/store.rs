@@ -1,9 +1,7 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use shared::api::favorites::MAX_FAVORITES;
 use sqlx::{Row as _, SqlitePool};
-
-/// Favorites one user can have.
-pub const MAX_FAVORITES: usize = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Added {
@@ -74,13 +72,16 @@ impl Favorites {
         })
     }
 
-    pub async fn remove(&self, user: &str, volume: &str, path: &str) -> sqlx::Result<()> {
-        sqlx::query("DELETE FROM favorites WHERE user_sub = ? AND volume = ? AND path = ?")
-            .bind(user)
-            .bind(volume)
-            .bind(path)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
+    /// Whether there was such a favorite.
+    pub async fn remove(&self, user: &str, volume: &str, path: &str) -> sqlx::Result<bool> {
+        let removed =
+            sqlx::query("DELETE FROM favorites WHERE user_sub = ? AND volume = ? AND path = ?")
+                .bind(user)
+                .bind(volume)
+                .bind(path)
+                .execute(&self.pool)
+                .await?
+                .rows_affected();
+        Ok(removed > 0)
     }
 }

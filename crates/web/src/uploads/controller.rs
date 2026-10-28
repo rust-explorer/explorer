@@ -179,7 +179,7 @@ mod browser {
                     .collect();
                 let picked = picked.into_iter().map(|(_, picked)| picked).collect();
                 let mut plan = plan_batch(&volume, &base, picked, empty_dirs);
-                plan.skipped += unreadable;
+                plan.unreadable = unreadable;
                 uploads.add(plan, &pending, kept);
             });
         }
@@ -234,9 +234,12 @@ mod browser {
                         spawn_forever(delete(url));
                     }
                     Effect::WakeAt { at_ms } => {
-                        let delay = u32::try_from((at_ms - now_ms()).max(0)).unwrap_or(u32::MAX);
                         spawn_forever(async move {
-                            TimeoutFuture::new(delay).await;
+                            // A timer can fire a little before the clock reaches `at_ms`.
+                            while now_ms() < at_ms {
+                                let delay = u32::try_from(at_ms - now_ms()).unwrap_or(u32::MAX);
+                                TimeoutFuture::new(delay.max(1)).await;
+                            }
                             self.tick();
                         });
                     }

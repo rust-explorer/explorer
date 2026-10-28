@@ -1,5 +1,5 @@
 use std::fs;
-use std::os::unix::fs::symlink;
+use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
@@ -961,5 +961,39 @@ fn cancelled_cross_volume_move_keeps_the_source() {
         ["a.txt", "b.txt", "c.txt"]
     );
     assert!(!fixture.path("documents").join("F").exists());
+    assert!(fixture.staged("documents").is_empty());
+}
+
+#[test]
+fn cross_volume_move_failing_to_delete_keeps_both_copies() {
+    if rustix::process::geteuid().is_root() {
+        return;
+    }
+    let fixture = Fixture::new(|media, _| {
+        write(&media.join("F/a.txt"), b"a");
+        write(&media.join("F/b.txt"), b"b");
+    });
+    let source = fixture.path("media").join("F");
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o555)).unwrap();
+
+    let result = move_entry(
+        fixture.media(),
+        "F",
+        fixture.documents(),
+        "",
+        ConflictPolicy::Fail,
+        &Recorder::default(),
+    );
+    fs::set_permissions(&source, fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(
+        matches!(&result, Err(StorageError::Source(inner))
+            if matches!(**inner, StorageError::PermissionDenied(ref p) if p.as_str().starts_with("F/"))),
+        "{result:?}"
+    );
+    assert_eq!(names(&source), ["a.txt", "b.txt"]);
+    let documents = fixture.path("documents");
+    assert_eq!(fs::read(documents.join("F/a.txt")).unwrap(), b"a");
+    assert_eq!(fs::read(documents.join("F/b.txt")).unwrap(), b"b");
     assert!(fixture.staged("documents").is_empty());
 }

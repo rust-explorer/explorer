@@ -11,7 +11,7 @@ use super::protocol::no_content;
 use crate::http::AppState;
 use crate::http::access::blocking_volume;
 use crate::http::error::ApiError;
-use crate::storage::{RelPath, StorageError};
+use crate::storage::StorageError;
 use crate::uploads::{UploadLock, UploadRecord};
 
 /// A PATCH whose body sends nothing for this long is treated as a disconnect.
@@ -23,7 +23,7 @@ pub(super) async fn write_and_commit(
     record: UploadRecord,
     staged: (std::fs::File, u64),
     body: Body,
-    _lock: UploadLock,
+    lock: UploadLock,
 ) -> Result<Response, ApiError> {
     let (offset, too_large) = receive(staged, body, record.length)
         .await
@@ -44,6 +44,11 @@ pub(super) async fn write_and_commit(
         return Err(ApiError::upload_too_large(record.length));
     }
     if offset == record.length {
+        // A cancel that came in while the body was received wins; it removes the upload once
+        // this request lets go of it.
+        if lock.cancel_requested() {
+            return Err(ApiError::upload_not_found());
+        }
         commit(&state, &user_sub, &record).await?;
     }
     Ok(no_content(offset))
@@ -121,7 +126,7 @@ pub(super) async fn commit(
         move |vol| {
             let staging = vol
                 .existing_staging()?
-                .ok_or_else(|| StorageError::NotFound(RelPath::root()))?;
+                .ok_or_else(|| StorageError::NotFound(path.clone()))?;
             let staged = staging.len(&id)?;
             if staged != Some(length) {
                 return Err(StorageError::Io {

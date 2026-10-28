@@ -957,6 +957,35 @@ async fn delete_of_a_busy_upload_is_423() {
 }
 
 #[tokio::test]
+async fn delete_during_the_last_chunk_stops_the_commit() {
+    let mut s = setup().await;
+    let location = created(&mut s.client, "a.bin", 8, &[]).await;
+
+    let (tx, body) = channel_body();
+    let mut first_client = clone_client(&s.client);
+    let first_req = patch_request(&location, 0, body);
+    let first = tokio::spawn(async move { first_client.send(first_req).await });
+    tx.send(Ok(Bytes::from_static(b"abcdefgh"))).await.unwrap();
+    for _ in 0..200 {
+        if offset_of(&head(&mut s.client, &location).await) == 8 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let res = delete(&mut s.client, &location).await;
+    error(res, StatusCode::LOCKED, "upload_busy").await;
+
+    drop(tx);
+    let res = first.await.unwrap();
+    error(res, StatusCode::NOT_FOUND, "upload_not_found").await;
+    assert!(!s.media().join("a.bin").exists());
+    let res = delete(&mut s.client, &location).await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(staged_count(&s), 0);
+    assert!(pending(&mut s.client).await.is_empty());
+}
+
+#[tokio::test]
 async fn commit_succeeds_when_marking_it_done_fails() {
     let mut s = setup().await;
     sqlx::query(

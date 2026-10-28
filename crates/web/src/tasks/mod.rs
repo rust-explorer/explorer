@@ -76,6 +76,11 @@ impl TaskStore {
         self.run(effects);
     }
 
+    /// The server no longer has the result of the finished scan `id`.
+    pub fn result_gone(mut self, id: &str) {
+        self.list.write().result_gone(id);
+    }
+
     pub fn clear_finished(mut self) {
         let effects = self.list.write().clear_finished();
         self.run(effects);
@@ -84,10 +89,10 @@ impl TaskStore {
     #[cfg(target_arch = "wasm32")]
     fn adopt_running(mut self) {
         dioxus::core::spawn_forever(async move {
-            if let Ok(infos) = transport::list().await {
-                let effects = self.list.write().adopt(infos);
-                self.run(effects);
-            }
+            // Without the list, nothing is taken over, but pages stop waiting for it.
+            let infos = transport::list().await.unwrap_or_default();
+            let effects = self.list.write().adopt(infos);
+            self.run(effects);
         });
     }
 
@@ -134,7 +139,9 @@ impl TaskStore {
                 }
                 Effect::Delete { id } => {
                     spawn_forever(async move {
-                        let _ = transport::delete(&id).await;
+                        if let Err(failure) = transport::delete(&id).await {
+                            self.dispatch(Event::DeleteFailed { id, failure });
+                        }
                     });
                 }
                 Effect::PollAfter { ms } => {

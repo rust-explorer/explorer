@@ -28,11 +28,13 @@ sidebar-used = { $used } usados de { $total }
 favorites-title = Favoritos
 favorites-not-found = No encontrada
 favorites-remove = Quitar { $name } de favoritos
+favorites-load-failed = No se pudieron cargar los favoritos.
 favorites-add = Añadir a favoritos
 favorites-remove-current = Quitar de favoritos
 breadcrumb = Ruta de navegación
 browse-empty = Esta carpeta está vacía.
 browse-empty-hint = Suelta archivos aquí o usa Subir.
+browse-empty-hint-touch = Usa + para añadir archivos.
 read-only-notice = Solo lectura: puedes explorar, descargar y copiar desde este volumen, pero no modificarlo.
 read-only-notice-short = Volumen de solo lectura
 table-label = Contenido de la carpeta
@@ -71,8 +73,9 @@ error-unsupported_media_type = El servidor ha rechazado el formato de esta subid
 error-cross_device = { $path } está en otro sistema de archivos que su volumen, así que no se puede guardar nada ahí. Un administrador puede montar esa carpeta como un volumen propio.
 error-invalid_destination = { $path } no se puede mover ni copiar ahí.
 error-task_not_found = Esta tarea ya no existe en el servidor.
-error-favorites_full = No puedes tener más de 100 favoritos. Quita uno primero.
+error-favorites_full = No puedes tener más de { $max } favoritos. Quita uno primero.
 error-thumbnail_unavailable = No hay vista previa disponible para este archivo.
+error-too_many_tasks = Hay demasiadas tareas en espera. Inténtalo de nuevo cuando terminen algunas.
 upload = Subir
 upload-open = Subir archivos o una carpeta
 upload-files = Archivos…
@@ -94,6 +97,14 @@ uploads-unreadable =
         [one] 1 elemento no se pudo leer y se omitió.
        *[other] { $count } elementos no se pudieron leer y se omitieron.
     }
+uploads-retrying-server = El servidor no pudo aceptarla, nuevo intento en { $seconds } s
+uploads-invalid-names =
+    { $count ->
+        [one] 1 elemento tiene un nombre que no se puede usar aquí y se omitió.
+       *[other] { $count } elementos tienen nombres que no se pueden usar aquí y se omitieron.
+    }
+uploads-error-permission_denied = No tienes permiso para guardar { $path }.
+uploads-error-too-large = El servidor o un proxy delante de él rechazó esta subida por ser demasiado grande.
 conflict-title = { $name } ya existe en { $folder }
 conflict-replace = Reemplazar
 conflict-keep-both = Conservar ambos
@@ -141,6 +152,8 @@ task-moving = Moviendo { $name } a { $folder }
 task-cancel = Cancelar { $name }
 task-progress = Progreso de la tarea
 task-waiting = En espera
+task-signed-out = Sesión cerrada: vuelve a iniciar sesión para seguir esta tarea.
+task-cancel-failed = No se pudo cancelar esta tarea.
 task-files = { $done } / { $total }
 task-files-done =
     { $count ->

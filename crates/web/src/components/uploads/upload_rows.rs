@@ -5,6 +5,7 @@ use dioxus_i18n::t;
 use crate::components::common::icons::{CheckIcon, CloseIcon};
 use crate::components::common::{FailureNote, ICON_BUTTON, file_name};
 use crate::format::{format_size, format_speed, now_ms};
+use crate::i18n::attr;
 use crate::uploads::{Item, Kind, Status, use_uploads};
 
 /// Volume and path the item is uploaded to.
@@ -71,8 +72,8 @@ fn UploadRow(item: Item) -> Element {
                     button {
                         r#type: "button",
                         class: ICON_BUTTON,
-                        aria_label: t!("uploads-cancel", name: name.clone()),
-                        title: t!("uploads-cancel", name: name),
+                        aria_label: attr(t!("uploads-cancel", name: name.clone())),
+                        title: attr(t!("uploads-cancel", name: name)),
                         onclick: move |_| uploads.cancel(key),
                         CloseIcon { class: "size-3.5" }
                     }
@@ -128,11 +129,18 @@ fn UploadStatus(item: Item) -> Element {
         (Status::NeedsDecision, _) => rsx! {
             p { class: note, {t!("uploads-needs-decision")} }
         },
-        (Status::Retrying { at_ms, .. }, _) => rsx! {
-            RetryCountdown { at_ms: *at_ms }
+        (
+            Status::Retrying {
+                at_ms,
+                connection_lost,
+                ..
+            },
+            _,
+        ) => rsx! {
+            RetryCountdown { at_ms: *at_ms, connection_lost: *connection_lost }
         },
         (Status::Failed(failure), _) => rsx! {
-            FailureNote { failure: failure.clone() }
+            FailureNote { failure: failure.clone(), upload: true }
         },
         (Status::Cancelled, _) => rsx! {
             p { class: note, {t!("uploads-cancelled")} }
@@ -145,7 +153,7 @@ fn UploadStatus(item: Item) -> Element {
 }
 
 #[component]
-fn RetryCountdown(at_ms: i64) -> Element {
+fn RetryCountdown(at_ms: i64, connection_lost: bool) -> Element {
     let mut now = use_signal(now_ms);
     use_future(move || async move {
         loop {
@@ -154,11 +162,14 @@ fn RetryCountdown(at_ms: i64) -> Element {
         }
     });
     let seconds = ((at_ms - now()) + 999).div_euclid(1000).max(1);
+    let message = if connection_lost {
+        t!("uploads-retrying", seconds: seconds)
+    } else {
+        t!("uploads-retrying-server", seconds: seconds)
+    };
 
     rsx! {
-        p { class: "mt-0.5 text-xs text-amber-700 dark:text-amber-400",
-            {t!("uploads-retrying", seconds: seconds)}
-        }
+        p { class: "mt-0.5 text-xs text-amber-700 dark:text-amber-400", {message} }
     }
 }
 

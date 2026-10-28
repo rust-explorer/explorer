@@ -6,6 +6,7 @@ use shared::api::browse::Entry;
 
 use crate::actions::{RowAction, row_actions};
 use crate::components::common::{FocusTarget, Menu, MenuItem};
+use crate::i18n::attr;
 
 pub const ROW_MENU_ID: &str = "row-menu";
 
@@ -69,10 +70,16 @@ const MENU_PADDING: f64 = 10.0;
 const MARGIN: f64 = 8.0;
 const GAP: f64 = 4.0;
 
-/// The menu's top-left corner in client coordinates, kept inside a `viewport` of (width, height).
-fn menu_origin(at: MenuAt, items: usize, viewport: (f64, f64)) -> (f64, f64) {
+/// The menu's height before it can be measured.
+fn estimated_height(items: usize) -> f64 {
     #[expect(clippy::cast_precision_loss, reason = "a menu has a handful of items")]
     let height = items as f64 * ITEM_HEIGHT + MENU_PADDING;
+    height
+}
+
+/// The top-left corner of a menu `height` high in client coordinates, kept inside a `viewport`
+/// of (width, height).
+fn menu_origin(at: MenuAt, height: f64, viewport: (f64, f64)) -> (f64, f64) {
     let (x, y) = match at {
         MenuAt::Pointer { x, y } => (x, y),
         MenuAt::Below(anchor) => {
@@ -100,15 +107,22 @@ pub fn RowMenu(
     on_action: EventHandler<RowAction>,
 ) -> Element {
     let actions = row_actions(request.entry.kind, read_only);
-    let at = menu_origin(request.at, actions.len(), viewport());
+    let mut measured = use_signal(|| None::<f64>);
+    let height = measured().unwrap_or_else(|| estimated_height(actions.len()));
+    let at = menu_origin(request.at, height, viewport());
 
     rsx! {
         Menu {
             id: ROW_MENU_ID,
             class: "fixed z-20",
-            label: t!("row-menu-open", name: request.entry.name.clone()),
+            label: attr(t!("row-menu-open", name: request.entry.name.clone())),
             at,
             on_close,
+            on_mounted: move |menu: Rc<MountedData>| async move {
+                if let Ok(rect) = menu.get_client_rect().await {
+                    measured.set(Some(rect.height()));
+                }
+            },
             for action in actions {
                 MenuItem {
                     key: "{action:?}",
@@ -155,7 +169,11 @@ mod tests {
     #[test]
     fn opens_at_the_pointer() {
         assert_eq!(
-            menu_origin(MenuAt::Pointer { x: 100.0, y: 200.0 }, 2, VIEWPORT),
+            menu_origin(
+                MenuAt::Pointer { x: 100.0, y: 200.0 },
+                estimated_height(2),
+                VIEWPORT
+            ),
             (100.0, 200.0)
         );
     }
@@ -164,11 +182,19 @@ mod tests {
     fn pointer_menu_stays_in_the_viewport() {
         // Two items: 74px high.
         assert_eq!(
-            menu_origin(MenuAt::Pointer { x: 990.0, y: 790.0 }, 2, VIEWPORT),
+            menu_origin(
+                MenuAt::Pointer { x: 990.0, y: 790.0 },
+                estimated_height(2),
+                VIEWPORT
+            ),
             (1000.0 - 176.0 - 8.0, 800.0 - 74.0 - 8.0)
         );
         assert_eq!(
-            menu_origin(MenuAt::Pointer { x: -5.0, y: 0.0 }, 2, VIEWPORT),
+            menu_origin(
+                MenuAt::Pointer { x: -5.0, y: 0.0 },
+                estimated_height(2),
+                VIEWPORT
+            ),
             (8.0, 8.0)
         );
     }
@@ -182,7 +208,7 @@ mod tests {
             bottom: 132.0,
         };
         assert_eq!(
-            menu_origin(MenuAt::Below(anchor), 2, VIEWPORT),
+            menu_origin(MenuAt::Below(anchor), estimated_height(2), VIEWPORT),
             (932.0 - 176.0, 136.0)
         );
     }
@@ -196,15 +222,37 @@ mod tests {
             bottom: 782.0,
         };
         assert_eq!(
-            menu_origin(MenuAt::Below(anchor), 2, VIEWPORT),
+            menu_origin(MenuAt::Below(anchor), estimated_height(2), VIEWPORT),
             (932.0 - 176.0, 750.0 - 74.0 - 4.0)
+        );
+    }
+
+    #[test]
+    fn measured_height_decides_the_flip() {
+        let anchor = Anchor {
+            left: 900.0,
+            top: 600.0,
+            right: 932.0,
+            bottom: 632.0,
+        };
+        assert_eq!(
+            menu_origin(MenuAt::Below(anchor), estimated_height(2), VIEWPORT),
+            (932.0 - 176.0, 636.0)
+        );
+        assert_eq!(
+            menu_origin(MenuAt::Below(anchor), 200.0, VIEWPORT),
+            (932.0 - 176.0, 600.0 - 200.0 - 4.0)
         );
     }
 
     #[test]
     fn tiny_viewport_keeps_the_margin() {
         assert_eq!(
-            menu_origin(MenuAt::Pointer { x: 50.0, y: 50.0 }, 5, (100.0, 100.0)),
+            menu_origin(
+                MenuAt::Pointer { x: 50.0, y: 50.0 },
+                estimated_height(5),
+                (100.0, 100.0)
+            ),
             (8.0, 8.0)
         );
     }

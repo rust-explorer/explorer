@@ -13,7 +13,12 @@ pub enum Status {
     Queued,
     NeedsDecision,
     Uploading,
-    Retrying { attempt: u32, at_ms: i64 },
+    Retrying {
+        attempt: u32,
+        at_ms: i64,
+        /// The request never reached the server, rather than the server failing it.
+        connection_lost: bool,
+    },
     Done,
     Failed(ApiFailure),
     Cancelled,
@@ -85,6 +90,11 @@ impl Item {
             spec: spec.clone(),
             conflict: self.conflict,
         }
+    }
+
+    /// Whether the PATCH in flight carries the last bytes, so that the server commits on it.
+    pub(super) fn commits(&self) -> bool {
+        self.phase == Phase::Patching && self.size() - self.confirmed <= CHUNK_SIZE
     }
 
     pub(super) fn patch(&mut self, url: String, offset: u64) -> Effect {

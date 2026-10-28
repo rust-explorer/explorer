@@ -105,7 +105,7 @@ pub async fn create(
         }
     };
     let request_id = Some(request_id(&headers).to_owned()).filter(|id| !id.is_empty());
-    let info = state.tasks.submit(&user.sub, spec, request_id, op);
+    let info = state.tasks.submit(&user.sub, spec, request_id, op)?;
     Ok((StatusCode::ACCEPTED, Json(info)))
 }
 

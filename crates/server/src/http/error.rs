@@ -5,10 +5,13 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use serde_json::json;
 use shared::api::error::ErrorBody;
+use shared::api::favorites::MAX_FAVORITES;
+use shared::api::tasks::MAX_ACTIVE_TASKS;
 
-use crate::favorites::MAX_FAVORITES;
 use crate::http::request_id::request_id;
 use crate::storage::{InvalidPath, StorageError};
+
+const UNUSABLE_STAGED: &str = "The staged upload can't be used";
 
 #[derive(Debug)]
 pub struct ApiError {
@@ -123,6 +126,15 @@ impl ApiError {
     #[must_use]
     pub fn task_not_found() -> Self {
         Self::new(StatusCode::NOT_FOUND, "task_not_found", "Task not found")
+    }
+
+    #[must_use]
+    pub fn too_many_tasks() -> Self {
+        Self::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too_many_tasks",
+            format!("At most {MAX_ACTIVE_TASKS} tasks can wait or run at once"),
+        )
     }
 
     /// `offset` is where the upload actually stands.
@@ -268,10 +280,16 @@ impl ApiError {
             }
             // The caller picks the source volume for it, see [`ApiError::from_transfer`].
             StorageError::Source(inner) => return Self::map_storage(volume, *inner, log),
+            StorageError::InvalidUpload => return Self::invalid_upload(UNUSABLE_STAGED),
             StorageError::Cancelled => {
                 return Self::internal("a cancellation reported as an error");
             }
-            StorageError::InvalidPath(err) => return err.into(),
+            StorageError::InvalidPath(err) => {
+                if log {
+                    tracing::warn!(volume, reason = err.reason, "invalid path");
+                }
+                return err.into();
+            }
             StorageError::Io { path, source } => {
                 if !log {
                     return Self::internal_error();
@@ -391,6 +409,13 @@ mod tests {
             err.details,
             Some(json!({ "volume": "media", "path": "Mounted/a.txt" }))
         );
+    }
+
+    #[test]
+    fn odd_staged_upload_is_a_client_error() {
+        let err = ApiError::from_storage("media", StorageError::InvalidUpload);
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert_eq!(err.code, "invalid_upload");
     }
 
     #[test]

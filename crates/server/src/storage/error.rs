@@ -30,6 +30,10 @@ pub enum StorageError {
     /// its descendants, or for a move, the folder it is already in.
     #[error("invalid destination for {}", .0.as_str())]
     InvalidDestination(RelPath),
+    /// A staged upload that is not a regular file with a single link: it is never written to
+    /// or committed.
+    #[error("the staged upload is not a regular file with a single link")]
+    InvalidUpload,
     /// A copy or move noticed its task was cancelled; never an HTTP error.
     #[error("cancelled")]
     Cancelled,
@@ -45,13 +49,22 @@ pub enum StorageError {
 impl StorageError {
     pub(super) fn on_source(self) -> Self {
         match self {
-            Self::Source(_) | Self::Cancelled | Self::InvalidPath(_) => self,
+            Self::Source(_) | Self::Cancelled | Self::InvalidPath(_) | Self::InvalidUpload => self,
             other => Self::Source(Box::new(other)),
         }
     }
 
+    /// Only `Io` keeps `err`; for the others, its OS error is logged here at debug level.
     pub(super) fn from_io(path: &RelPath, err: io::Error) -> Self {
-        let path = path.clone();
+        let errno = err.raw_os_error();
+        let mapped = Self::classify(path.clone(), err);
+        if !matches!(mapped, Self::Io { .. }) {
+            tracing::debug!(path = path.as_str(), errno = ?errno, error = %mapped, "storage error");
+        }
+        mapped
+    }
+
+    fn classify(path: RelPath, err: io::Error) -> Self {
         if is_escape(&err) {
             return Self::OutsideVolume(path);
         }

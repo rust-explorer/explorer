@@ -73,7 +73,10 @@ impl Thumbnails {
             .map_or("jpg", |(extension, _)| extension);
         let suffix: u64 = rand::thread_rng().r#gen();
         let temp = self.dir.join(format!("{key}.tmp-{suffix:016x}"));
-        let written = File::create_new(&temp).and_then(|mut file| file.write_all(&thumbnail.bytes));
+        let written = File::create_new(&temp).and_then(|mut file| {
+            file.write_all(&thumbnail.bytes)?;
+            file.sync_all()
+        });
         let renamed =
             written.and_then(|()| fs::rename(&temp, self.dir.join(format!("{key}.{extension}"))));
         if renamed.is_err() {

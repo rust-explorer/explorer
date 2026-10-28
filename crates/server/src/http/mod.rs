@@ -89,7 +89,8 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
             downloads::routes()
                 .merge(thumbnails::routes())
                 .nest("/uploads", uploads::tus_routes())
-                .fallback(not_found),
+                .fallback(not_found)
+                .layer(middleware::from_fn(csrf::refuse_cross_site)),
         )
         // nest() does not match the empty tail, so the bare-slash forms need explicit routes
         .route("/api/", any(not_found))

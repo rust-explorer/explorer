@@ -49,6 +49,13 @@ task (`POST /api/tasks`, `DELETE /api/tasks/{id}`), and adding or removing a fav
 changes nothing. Uploads use same-origin `XHR` and
 `fetch`, so the browser sends an `Origin` the check accepts.
 
+Everything under `/files` (downloads, zips, thumbnails, uploads) also refuses, with 403
+`csrf_rejected`, a request the browser marks `Sec-Fetch-Site: cross-site` or `same-site`, so that
+an image or a script on another site, sibling subdomains included (other apps on the same NAS
+domain), cannot start a download or a zip with the user's cookie. A `GET` the user started by
+clicking a link (`Sec-Fetch-Mode: navigate` with `Sec-Fetch-User: ?1`), such as a download link
+in a webmail, still passes. A request without these headers passes too.
+
 ## Open redirects
 
 `/auth/login?return_to=` must be a path (leading `/`, no control characters, at most 2048
@@ -191,6 +198,9 @@ action reach outside its volume.
   until it is renamed into place.
 - **Tasks.** A task belongs to the OIDC `sub` that created it; listing, cancelling or
   dismissing another user's task is a 404 `task_not_found`, and the ids are 128 random bits.
+  A user has at most 1000 tasks queued or running; more answer 429 `too_many_tasks`. The web
+  app keeps such tasks waiting on its side and posts them as earlier ones finish, so a
+  larger selection is moved, copied or deleted in full while the tab stays open.
   Tasks are kept in memory only: a restart loses them, running ones included, and a
   delete or move interrupted that way may be half done, and a copy may leave a partial
   folder or a staged file in `.explorer-uploads` (the hourly sweep removes the staged file

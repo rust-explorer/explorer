@@ -73,7 +73,7 @@ absolute or host path. See [security.md](security.md) for how paths are confined
 | `GET /api/volumes` | The volumes: name, `read_only`, and free space (`space`, `null` when it cannot be read). |
 | `GET /api/volumes/{volume}/entries?path=` | The entries of a folder, sorted by name: `name`, `kind` (`dir`, `file` or `other`), `size` (files only), `modified_ms`. |
 | `GET`, `HEAD /files/download?volume=&path=` | One file, as an attachment. Supports a single `Range`, a strong `ETag` and `If-Range`. |
-| `GET /files/zip?volume=&path=` | A folder as a zip, streamed. `path` is required: pass it empty for the whole volume. Repeat `name=` to archive only those entries of the folder (files or folders, each one a single name, as stored in the zip under that name). |
+| `GET /files/zip?volume=&path=` | A folder as a zip, streamed. `path` is required: pass it empty for the whole volume. Repeat `name=` to archive only those entries of the folder (files or folders, each one a single name, as stored in the zip under that name; a repeated name counts once). Entries carry their modification time, in UTC in the DOS field and exactly in an extended timestamp. |
 
 All of them require a signed-in user. Failures use the JSON error shape with these codes
 (`details` carries `volume` and `path` when they concern a path):
@@ -225,6 +225,7 @@ New error codes (JSON error shape as above):
 |---|---|---|
 | `invalid_destination` | 400 | A copy or move of a folder into itself or one of its descendants, or a move into the folder the entry is already in. `details` name the entry, on its source volume. |
 | `task_not_found` | 404 | Unknown task id, or another user's. |
+| `too_many_tasks` | 429 | The user already has 1000 tasks queued or running. The web app posts the task again once some have finished. |
 
 Existing codes also apply: `already_exists` (409), `is_a_directory` (`replace` over or of a
 folder), `not_a_directory`, `invalid_path` (a bad name, the volume root, a reserved path, a
@@ -318,7 +319,10 @@ How a scan counts:
 
 - Sizes are the space allocated on disk (`st_blocks` x 512), not the apparent size, so a
   sparse or compressed file counts for what it takes.
-- A file with several hard links is counted once.
+- A file with several hard links is counted once, up to 100,000 such files per scan; beyond
+  that, each of its names counts.
+- A name that is not valid UTF-8 can't be shown: a file so named counts among `other_files`,
+  and a folder so named counts, with all it holds, into its parent's `other_files`.
 - It never crosses a filesystem boundary (a nested mount is skipped, like `du -x`) and never
   follows a symlink; symlinks and other special files count as their own small entry.
 - `.explorer-uploads` is skipped, so staged data is not counted.
@@ -328,6 +332,8 @@ How a scan counts:
   the deeper sub-folders are counted into their last listed ancestor and `collapsed` is set.
 - Folders are opened without following symlinks and checked against the inode seen when they
   were listed, so a folder swapped for a symlink meanwhile is not entered.
+- Folders waiting to be read more than 64 levels down don't keep their parent open; they are
+  reopened one name at a time from the scanned folder, so open descriptors don't grow with depth.
 
 The tree is kept in memory with the task. A user keeps at most 4 finished scans (`MAX_USAGE_TREES`)
 and one per folder: a new scan of a folder replaces the previous one, and the oldest beyond four

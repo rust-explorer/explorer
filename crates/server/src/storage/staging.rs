@@ -1,9 +1,11 @@
 use std::fmt::Write;
 use std::io::{self, Seek, SeekFrom};
+use std::os::unix::fs::MetadataExt;
 use std::time::SystemTime;
 
 use cap_std::fs::{Dir, OpenOptions, OpenOptionsExt};
 use rustix::fs::OFlags;
+use rustix::io::Errno;
 
 use super::{RelPath, StorageError};
 
@@ -46,6 +48,14 @@ fn map_err(err: io::Error) -> StorageError {
     StorageError::from_io(&RelPath::root(), err)
 }
 
+fn invalid_upload(id: &StagedId) -> StorageError {
+    tracing::warn!(
+        upload = id.as_str(),
+        "staged upload is not a regular file with a single link"
+    );
+    StorageError::InvalidUpload
+}
+
 impl Staging {
     /// Created `0o666` less the umask, like any new file: the `0700` directory keeps it private
     /// until the rename, and the uploaded file keeps that mode.
@@ -61,7 +71,7 @@ impl Staging {
     }
 
     pub fn open_append(&self, id: &StagedId) -> Result<(std::fs::File, u64), StorageError> {
-        let mut file = self.open_write(id)?;
+        let mut file = self.open_staged(id, &RelPath::root())?;
         let len = file.seek(SeekFrom::End(0)).map_err(map_err)?;
         Ok((file, len))
     }
@@ -100,13 +110,38 @@ impl Staging {
         Ok(files)
     }
 
-    pub(super) fn open_write(&self, id: &StagedId) -> Result<std::fs::File, StorageError> {
+    /// Opens a staged file for writing; anything but a regular file with a single link is
+    /// refused, so data never lands in a file reachable from elsewhere.
+    /// I/O errors are reported against `path`.
+    pub(super) fn open_staged(
+        &self,
+        id: &StagedId,
+        path: &RelPath,
+    ) -> Result<std::fs::File, StorageError> {
         let mut options = OpenOptions::new();
         options
             .write(true)
             .custom_flags(OFlags::NOFOLLOW.bits().cast_signed());
-        let file = self.dir.open_with(id.as_str(), &options).map_err(map_err)?;
-        Ok(file.into_std())
+        // A symlink fails with ELOOP, or as an escape when it points outside the folder.
+        let file = match self.dir.open_with(id.as_str(), &options) {
+            Ok(file) => file.into_std(),
+            Err(err) if err.raw_os_error() == Some(Errno::LOOP.raw_os_error()) => {
+                return Err(invalid_upload(id));
+            }
+            Err(err) => {
+                return Err(match StorageError::from_io(path, err) {
+                    StorageError::OutsideVolume(_) => invalid_upload(id),
+                    other => other,
+                });
+            }
+        };
+        let meta = file
+            .metadata()
+            .map_err(|err| StorageError::from_io(path, err))?;
+        if !meta.is_file() || meta.nlink() != 1 {
+            return Err(invalid_upload(id));
+        }
+        Ok(file)
     }
 }
 

@@ -4,6 +4,8 @@ use crate::api::browse::EntryKind;
 
 /// A search stops at this many hits.
 pub const SEARCH_LIMIT: usize = 200;
+/// Shorter queries, once trimmed, are refused.
+pub const MIN_QUERY_CHARS: usize = 2;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct SearchHit {

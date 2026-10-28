@@ -187,6 +187,123 @@ fn commit_creates_folders_sets_mtime_and_empties_staging() {
 }
 
 #[test]
+fn failed_commit_removes_the_folders_it_created() {
+    let fixture = Fixture::new(|media| fs::create_dir(media.join("kept")).unwrap());
+    let media = fixture.media();
+    let staging = media.staging().unwrap();
+    let missing = StagedId::random();
+
+    for dest in ["new/deep/a.txt", "kept/new/a.txt"] {
+        let result =
+            media.commit_staged(&staging, &missing, &rel(dest), ConflictPolicy::Fail, None);
+        assert!(
+            matches!(result, Err(StorageError::NotFound(ref p)) if *p == rel(dest)),
+            "{result:?}"
+        );
+    }
+
+    assert_eq!(names(&fixture.media_path()), [STAGING_DIR, "kept"]);
+    assert!(names(&fixture.media_path().join("kept")).is_empty());
+}
+
+#[test]
+fn dangling_symlink_on_the_way_is_refused_before_upload() {
+    let fixture = Fixture::new(|media| symlink("missing", media.join("gone")).unwrap());
+    let media = fixture.media();
+    let staging = media.staging().unwrap();
+    let id = stage(&staging, b"x");
+
+    for policy in [
+        ConflictPolicy::Fail,
+        ConflictPolicy::Replace,
+        ConflictPolicy::KeepBoth,
+    ] {
+        let check = media.check_upload_target(&rel("gone/sub/a.txt"), policy);
+        assert!(
+            matches!(check, Err(StorageError::NotADirectory(ref p)) if *p == rel("gone")),
+            "{policy:?} {check:?}"
+        );
+    }
+    let result = media.commit_staged(
+        &staging,
+        &id,
+        &rel("gone/sub/a.txt"),
+        ConflictPolicy::Fail,
+        None,
+    );
+    assert!(
+        matches!(result, Err(StorageError::NotADirectory(ref p)) if *p == rel("gone")),
+        "{result:?}"
+    );
+    assert!(!fixture.media_path().join("missing").exists());
+    assert_eq!(staging.len(&id).unwrap(), Some(1));
+}
+
+#[test]
+fn commit_refuses_a_linked_staged_file() {
+    let fixture = Fixture::new(|media| write(&media.join("target.txt"), b"target"));
+    let media = fixture.media();
+    let staging = media.staging().unwrap();
+    let staging_path = fixture.media_path().join(STAGING_DIR);
+
+    let hard = stage(&staging, b"staged");
+    fs::hard_link(
+        staging_path.join(hard.as_str()),
+        fixture.media_path().join("other"),
+    )
+    .unwrap();
+    let symbolic = StagedId::random();
+    symlink(
+        fixture.media_path().join("target.txt"),
+        staging_path.join(symbolic.as_str()),
+    )
+    .unwrap();
+
+    for (id, dest) in [(&hard, "a.txt"), (&symbolic, "b.txt")] {
+        let result = media.commit_staged(&staging, id, &rel(dest), ConflictPolicy::Replace, None);
+        assert!(
+            matches!(result, Err(StorageError::InvalidUpload)),
+            "{dest}: {result:?}"
+        );
+        assert!(!fixture.media_path().join(dest).exists(), "{dest}");
+        assert!(
+            matches!(staging.open_append(id), Err(StorageError::InvalidUpload)),
+            "{dest}"
+        );
+    }
+    assert_eq!(
+        fs::read(fixture.media_path().join("target.txt")).unwrap(),
+        b"target"
+    );
+}
+
+#[test]
+fn staging_dir_is_created_exclusively() {
+    let fixture = Fixture::new(|_| {});
+    let media = fixture.media();
+    std::thread::scope(|scope| {
+        let threads: Vec<_> = (0..8)
+            .map(|_| scope.spawn(|| media.staging().map(drop)))
+            .collect();
+        for thread in threads {
+            thread.join().unwrap().unwrap();
+        }
+    });
+    let mode = fs::symlink_metadata(fixture.media_path().join(STAGING_DIR))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o777, 0o700);
+
+    let outside = tempfile::tempdir().unwrap();
+    let fixture = Fixture::new(|media| {
+        symlink(outside.path().join("made"), media.join(STAGING_DIR)).unwrap();
+    });
+    assert!(fixture.media().staging().is_err());
+    assert!(names(outside.path()).is_empty());
+}
+
+#[test]
 fn staging_tracks_files_and_appends() {
     let fixture = Fixture::new(|_| {});
     let media = fixture.media();

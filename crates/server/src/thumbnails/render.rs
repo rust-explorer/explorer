@@ -107,8 +107,19 @@ impl<R: Read> Read for Capped<R> {
     }
 }
 
+/// The end is where reads stop: the cap, or the real end of a shorter source.
 impl<R: Seek> Seek for Capped<R> {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        let pos = match pos {
+            SeekFrom::End(offset) => {
+                let end = self.inner.seek(SeekFrom::End(0))?.min(self.limit);
+                let target = end.checked_add_signed(offset).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::InvalidInput, "seek before the start")
+                })?;
+                SeekFrom::Start(target)
+            }
+            pos => pos,
+        };
         self.position = self.inner.seek(pos)?;
         Ok(self.position)
     }
@@ -272,6 +283,27 @@ mod tests {
         assert_eq!(all.len(), 6);
         capped.seek(SeekFrom::Start(50)).unwrap();
         assert_eq!(capped.read(&mut [0; 8]).unwrap(), 0);
+    }
+
+    #[test]
+    fn seeks_from_the_end_of_the_capped_source() {
+        let mut capped = Capped {
+            inner: Cursor::new((0..100u8).collect::<Vec<_>>()),
+            position: 0,
+            limit: 10,
+        };
+        assert_eq!(capped.seek(SeekFrom::End(-4)).unwrap(), 6);
+        let mut tail = Vec::new();
+        capped.read_to_end(&mut tail).unwrap();
+        assert_eq!(tail, [6, 7, 8, 9]);
+        assert!(capped.seek(SeekFrom::End(-11)).is_err());
+
+        let mut short = Capped {
+            inner: Cursor::new(vec![1u8; 5]),
+            position: 0,
+            limit: 10,
+        };
+        assert_eq!(short.seek(SeekFrom::End(0)).unwrap(), 5);
     }
 
     #[test]

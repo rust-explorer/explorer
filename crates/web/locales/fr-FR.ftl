@@ -28,11 +28,13 @@ sidebar-used = { $used } utilisés sur { $total }
 favorites-title = Favoris
 favorites-not-found = Introuvable
 favorites-remove = Retirer { $name } des favoris
+favorites-load-failed = Les favoris n'ont pas pu être chargés.
 favorites-add = Ajouter aux favoris
 favorites-remove-current = Retirer des favoris
 breadcrumb = Fil d'Ariane
 browse-empty = Ce dossier est vide.
 browse-empty-hint = Déposez des fichiers ici ou utilisez Uploader.
+browse-empty-hint-touch = Utilisez + pour ajouter des fichiers.
 read-only-notice = Lecture seule : vous pouvez parcourir, télécharger et copier depuis ce volume, mais pas le modifier.
 read-only-notice-short = Volume en lecture seule
 table-label = Contenu du dossier
@@ -71,8 +73,9 @@ error-unsupported_media_type = Le serveur a refusé le format de cet upload.
 error-cross_device = { $path } se trouve sur un autre système de fichiers que son volume, rien ne peut donc y être enregistré. Un administrateur peut monter ce dossier comme un volume à part entière.
 error-invalid_destination = { $path } ne peut pas être déplacé ou copié à cet endroit.
 error-task_not_found = Cette tâche n'existe plus sur le serveur.
-error-favorites_full = Vous ne pouvez pas avoir plus de 100 favoris. Retirez-en un d'abord.
+error-favorites_full = Vous ne pouvez pas avoir plus de { $max } favoris. Retirez-en un d'abord.
 error-thumbnail_unavailable = Aucun aperçu n'est disponible pour ce fichier.
+error-too_many_tasks = Trop de tâches sont en attente. Réessayez quand certaines seront terminées.
 upload = Uploader
 upload-open = Uploader des fichiers ou un dossier
 upload-files = Fichiers…
@@ -94,6 +97,14 @@ uploads-unreadable =
         [one] 1 élément n'a pas pu être lu et a été ignoré.
        *[other] { $count } éléments n'ont pas pu être lus et ont été ignorés.
     }
+uploads-retrying-server = Le serveur n'a pas pu le prendre, nouvel essai dans { $seconds } s
+uploads-invalid-names =
+    { $count ->
+        [one] 1 élément a un nom inutilisable ici et a été ignoré.
+       *[other] { $count } éléments ont un nom inutilisable ici et ont été ignorés.
+    }
+uploads-error-permission_denied = Vous n'avez pas l'autorisation d'enregistrer { $path }.
+uploads-error-too-large = Le serveur ou un proxy devant lui a refusé cet upload, jugé trop volumineux.
 conflict-title = { $name } existe déjà dans { $folder }
 conflict-replace = Remplacer
 conflict-keep-both = Garder les deux
@@ -141,6 +152,8 @@ task-moving = Déplacement de { $name } vers { $folder }
 task-cancel = Annuler { $name }
 task-progress = Progression de la tâche
 task-waiting = En attente
+task-signed-out = Session terminée : reconnectez-vous pour suivre cette tâche.
+task-cancel-failed = Cette tâche n'a pas pu être annulée.
 task-files = { $done } / { $total }
 task-files-done =
     { $count ->

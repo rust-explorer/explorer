@@ -10,11 +10,11 @@ use axum::http::{Request, StatusCode, header};
 use axum::response::Response;
 use common::client::{Client, json};
 use common::fake_oidc::{FakeOidc, SUBJECT};
-use explorer_server::favorites::{Added, Favorites, MAX_FAVORITES};
+use explorer_server::favorites::{Added, Favorites};
 use explorer_server::http::router;
 use serde_json::json;
 use shared::api::error::ErrorBody;
-use shared::api::favorites::Favorite;
+use shared::api::favorites::{Favorite, MAX_FAVORITES};
 use tempfile::TempDir;
 
 const ORIGIN: &str = "https://files.example.com";
@@ -151,6 +151,33 @@ async fn add_list_remove() {
     assert_eq!(
         remove(&mut s.client, "media", "Films/2026").await.status(),
         StatusCode::NO_CONTENT
+    );
+}
+
+#[tokio::test]
+async fn remove_normalises_the_path() {
+    let mut s = setup().await;
+    fs::create_dir_all(s.data.join("media/Films/2026")).unwrap();
+    put(&mut s.client, "media", "Films/2026").await;
+
+    assert_eq!(
+        remove(&mut s.client, "media", "Films//2026/")
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(list(&mut s.client).await.is_empty());
+    error_of(
+        remove(&mut s.client, "media", "Films/../x").await,
+        StatusCode::BAD_REQUEST,
+        "invalid_path",
+    )
+    .await;
+    assert!(
+        !s.store
+            .remove(SUBJECT, "media", "Films/2026")
+            .await
+            .unwrap()
     );
 }
 

@@ -1,14 +1,15 @@
 use std::ffi::{CStr, CString};
 use std::io;
-use std::os::fd::{AsFd, OwnedFd};
+use std::os::fd::OwnedFd;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
-use rustix::fs::{AtFlags, FileType, Mode, OFlags, Stat};
+use rustix::fs::AtFlags;
 use rustix::io::Errno;
 
 use super::super::path::STAGING_DIR;
 use super::super::read::fs_path;
-use super::hard_links::{HardLink, HardLinks};
+use super::folder::{Measured, Source};
+use super::hard_links::{HardLink, HardLinks, Offered};
 use super::{USAGE_THREADS, USAGE_TOP_FILES, UsageNode};
 use crate::storage::{RelPath, StorageError, TransferProgress, Volume};
 
@@ -36,6 +37,7 @@ pub(super) fn scan(
 
     progress.add_bytes(start_stat.bytes);
     let scan = Scan {
+        start,
         dev: start_stat.dev,
         root_id: volume_root.id(),
         staging,
@@ -43,10 +45,11 @@ pub(super) fn scan(
         progress,
         state: Mutex::new(State {
             jobs: vec![Job {
-                dir: Source::Opened(start),
+                dir: Source::Start,
                 path: Vec::new(),
                 node: 0,
                 collapsed: false,
+                unnamed: false,
             }],
             busy: 0,
             cancelled: false,
@@ -85,59 +88,15 @@ pub(super) fn scan(
     Ok(state.nodes)
 }
 
-/// What a scan needs from a `stat`.
-#[derive(Clone, Copy)]
-struct Measured {
-    dev: u64,
-    ino: u64,
-    nlink: u64,
-    bytes: u64,
-    is_dir: bool,
-    is_file: bool,
-}
-
-impl Measured {
-    // The field types differ between platforms: what is a cast on one is a no-op on another.
-    #[allow(
-        clippy::unnecessary_cast,
-        clippy::cast_sign_loss,
-        clippy::cast_lossless,
-        clippy::useless_conversion
-    )]
-    fn of(stat: &Stat) -> Self {
-        let kind = FileType::from_raw_mode(stat.st_mode);
-        Self {
-            dev: stat.st_dev as u64,
-            ino: stat.st_ino as u64,
-            nlink: stat.st_nlink as u64,
-            bytes: (stat.st_blocks as u64).saturating_mul(512),
-            is_dir: kind == FileType::Directory,
-            is_file: kind == FileType::RegularFile,
-        }
-    }
-
-    fn id(self) -> (u64, u64) {
-        (self.dev, self.ino)
-    }
-}
-
-/// A folder to read: the start folder, already open, or a sub-folder to open from its parent.
-enum Source {
-    Opened(OwnedFd),
-    At {
-        parent: Arc<OwnedFd>,
-        name: CString,
-        ino: u64,
-    },
-}
-
 /// `path`: the folder's names from the scanned folder down. `collapsed`: the folder has no node
-/// of its own and counts into `node`.
+/// of its own and counts into `node`. `unnamed`: its name, or a parent's, is not UTF-8, so it
+/// counts into `node` among the other files.
 struct Job {
     dir: Source,
     path: Vec<CString>,
     node: usize,
     collapsed: bool,
+    unnamed: bool,
 }
 
 struct State {
@@ -151,6 +110,7 @@ struct State {
 }
 
 struct Scan<'a> {
+    start: OwnedFd,
     dev: u64,
     root_id: (u64, u64),
     staging: Option<(u64, u64)>,
@@ -176,10 +136,12 @@ impl Drop for Busy<'_, '_> {
     }
 }
 
-/// What reading one folder found, merged into the tree afterwards under the lock.
+/// What reading one folder found, merged into the tree afterwards under the lock. `unnamed`:
+/// the count and bytes of the files whose name is not UTF-8.
 #[derive(Default)]
 struct Read {
     files: Vec<(String, u64)>,
+    unnamed: (u64, u64),
     hard_links: Vec<(CString, Measured)>,
     subdirs: Vec<Subdir>,
     incomplete: bool,
@@ -219,7 +181,7 @@ impl Scan<'_> {
                 self.lock().cancelled = true;
                 return;
             }
-            let read = self.read(&job.dir);
+            let read = self.read(&job);
             let mut state = self.lock();
             self.merge(&mut state, &job, read);
         }
@@ -229,9 +191,9 @@ impl Scan<'_> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn read(&self, source: &Source) -> Read {
+    fn read(&self, job: &Job) -> Read {
         let mut read = Read::default();
-        let Some(dir) = self.open(source) else {
+        let Some(dir) = job.dir.open(&self.start, &job.path, self.dev) else {
             read.incomplete = true;
             self.progress.skip();
             return read;
@@ -266,20 +228,6 @@ impl Scan<'_> {
         read
     }
 
-    /// Opens a sub-folder without following symlinks, and only if it is still the folder that
-    /// was measured.
-    fn open(&self, source: &Source) -> Option<OwnedFd> {
-        let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-        let (parent, name, ino) = match source {
-            // cap-std opens folders with O_PATH on Linux, which cannot be listed: reopen it.
-            Source::Opened(fd) => return rustix::fs::openat(fd, c".", flags, Mode::empty()).ok(),
-            Source::At { parent, name, ino } => (parent, name, *ino),
-        };
-        let fd = rustix::fs::openat(parent.as_fd(), name.as_c_str(), flags, Mode::empty()).ok()?;
-        let stat = Measured::of(&rustix::fs::fstat(&fd).ok()?);
-        (stat.id() == (self.dev, ino)).then_some(fd)
-    }
-
     fn add_entry(
         &self,
         read: &mut Read,
@@ -309,69 +257,99 @@ impl Scan<'_> {
         }
         self.progress.add_file();
         self.progress.add_bytes(stat.bytes);
-        read.files.push((lossy(name), stat.bytes));
+        if let Ok(name) = name.to_str() {
+            read.files.push((name.to_owned(), stat.bytes));
+        } else {
+            read.unnamed.0 += 1;
+            read.unnamed.1 += stat.bytes;
+        }
     }
 
     fn merge(&self, state: &mut State, job: &Job, read: Read) {
         let target = job.node;
         let node = &mut state.nodes[target];
         node.incomplete |= read.incomplete;
-        node.files += read.files.len() as u64;
-        node.bytes += read.files.iter().map(|(_, bytes)| bytes).sum::<u64>();
-        if !job.collapsed {
+        let (unnamed_files, unnamed_bytes) = read.unnamed;
+        node.files += read.files.len() as u64 + unnamed_files;
+        let named_bytes = read.files.iter().map(|(_, bytes)| bytes).sum::<u64>();
+        node.bytes += named_bytes + unnamed_bytes;
+        if job.unnamed && !job.collapsed {
+            node.other_files += read.files.len() as u64 + unnamed_files;
+            node.other_bytes += named_bytes + unnamed_bytes;
+        } else if !job.collapsed {
+            node.other_files += unnamed_files;
+            node.other_bytes += unnamed_bytes;
             node.top_files.extend(read.files);
             keep_biggest(node);
         }
         for (name, stat) in read.hard_links {
             let mut path = job.path.clone();
             path.push(name);
+            let name = path
+                .last()
+                .and_then(|name| name.to_str().ok())
+                .filter(|_| !job.unnamed)
+                .map(str::to_owned);
             let link = HardLink {
-                name: lossy(path.last().expect("just pushed")),
+                name,
                 path,
                 node: target,
                 collapsed: job.collapsed,
                 bytes: stat.bytes,
             };
-            if state.hard_links.offer(stat.id(), link) {
-                self.progress.add_file();
-                self.progress.add_bytes(stat.bytes);
+            match state.hard_links.offer(stat.id(), link) {
+                Offered::New => {}
+                Offered::Seen => continue,
+                // Too many to track: counted where seen, maybe more than once.
+                Offered::Full(link) => link.credit(&mut state.nodes),
             }
+            self.progress.add_file();
+            self.progress.add_bytes(stat.bytes);
         }
         for subdir in read.subdirs {
             self.progress.add_bytes(subdir.stat.bytes);
-            let name = lossy(&subdir.name);
+            let name = subdir.name.to_str().ok().map(str::to_owned);
             let mut path = job.path.clone();
             path.push(subdir.name.clone());
-            let dir = Source::At {
-                parent: subdir.parent,
-                name: subdir.name,
-                ino: subdir.stat.ino,
-            };
-            let job = if state.nodes.len() < self.max_dirs {
-                let index = state.nodes.len();
-                state.nodes.push(UsageNode {
-                    name,
-                    parent: target,
-                    bytes: subdir.stat.bytes,
-                    ..UsageNode::default()
-                });
-                state.nodes[target].children.push(index);
-                Job {
-                    dir,
-                    path,
-                    node: index,
-                    collapsed: false,
+            let dir = Source::sub(subdir.parent, subdir.name, subdir.stat.ino, path.len());
+            let unnamed = job.unnamed || name.is_none();
+            let job = match name {
+                Some(name)
+                    if !job.unnamed && !job.collapsed && state.nodes.len() < self.max_dirs =>
+                {
+                    let index = state.nodes.len();
+                    state.nodes.push(UsageNode {
+                        name,
+                        parent: target,
+                        bytes: subdir.stat.bytes,
+                        ..UsageNode::default()
+                    });
+                    state.nodes[target].children.push(index);
+                    Job {
+                        dir,
+                        path,
+                        node: index,
+                        collapsed: false,
+                        unnamed: false,
+                    }
                 }
-            } else {
-                let node = &mut state.nodes[target];
-                node.bytes += subdir.stat.bytes;
-                node.dirs += 1;
-                node.collapsed = true;
-                Job {
-                    dir,
-                    path,
-                    node: target,
-                    collapsed: true,
+                _ => {
+                    let collapsed = job.collapsed || !unnamed;
+                    let node = &mut state.nodes[target];
+                    node.bytes += subdir.stat.bytes;
+                    node.dirs += 1;
+                    if collapsed {
+                        node.collapsed = true;
+                    } else {
+                        node.other_bytes += subdir.stat.bytes;
+                    }
+                    Job {
+                        dir,
+                        path,
+                        node: target,
+                        collapsed,
+                        unnamed,
+                    }
                 }
             };
             state.jobs.push(job);
@@ -390,8 +368,4 @@ pub(super) fn keep_biggest(node: &mut UsageNode) {
         node.other_files += 1;
         node.other_bytes += bytes;
     }
-}
-
-pub(super) fn lossy(name: &CStr) -> String {
-    String::from_utf8_lossy(name.to_bytes()).into_owned()
 }

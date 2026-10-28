@@ -35,18 +35,24 @@ impl Volume {
         let needle = needle.to_lowercase();
         let mut hits = Vec::new();
         let mut pending = VecDeque::from([RelPath::root()]);
+        let go_on = || !cancel.load(Ordering::Relaxed) && Instant::now() < deadline;
         while let Some(dir) = pending.pop_front() {
-            if cancel.load(Ordering::Relaxed) {
-                return Err(StorageError::Cancelled);
-            }
-            if Instant::now() >= deadline {
-                return Ok(SearchOutcome {
-                    hits,
-                    truncated: true,
-                });
-            }
-            let entries = match self.entries(&dir) {
+            let listed = if go_on() {
+                self.entries_while(&dir, &go_on)
+            } else {
+                Err(StorageError::Cancelled)
+            };
+            let entries = match listed {
                 Ok(entries) => entries,
+                Err(StorageError::Cancelled) if cancel.load(Ordering::Relaxed) => {
+                    return Err(StorageError::Cancelled);
+                }
+                Err(StorageError::Cancelled) => {
+                    return Ok(SearchOutcome {
+                        hits,
+                        truncated: true,
+                    });
+                }
                 Err(err) if dir.is_root() => return Err(err),
                 Err(err) => {
                     tracing::debug!(volume = self.name(), dir = dir.as_str(), error = %err, "search skips an unreadable folder");
@@ -82,5 +88,46 @@ impl Volume {
             hits,
             truncated: false,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::time::Duration;
+
+    use super::*;
+    use crate::storage::Volumes;
+
+    #[test]
+    fn listing_stops_inside_a_folder() {
+        let data = tempfile::tempdir().unwrap();
+        let media = data.path().join("media");
+        std::fs::create_dir(&media).unwrap();
+        for i in 0..50 {
+            std::fs::write(media.join(format!("f{i}")), "").unwrap();
+        }
+        let volumes = Volumes::discover(data.path()).unwrap();
+        let volume = volumes.get("media").unwrap();
+
+        let asked = Cell::new(0);
+        let result = volume
+            .entries_while(&RelPath::root(), &|| {
+                asked.set(asked.get() + 1);
+                asked.get() <= 10
+            })
+            .map(drop);
+        assert!(matches!(result, Err(StorageError::Cancelled)), "{result:?}");
+        assert_eq!(asked.get(), 11);
+
+        let cancel = AtomicBool::new(true);
+        let later = Instant::now() + Duration::from_secs(60);
+        let result = volume.search("f", 10, later, &cancel);
+        assert!(matches!(result, Err(StorageError::Cancelled)), "{result:?}");
+        let past = Instant::now();
+        let outcome = volume
+            .search("f", 10, past, &AtomicBool::new(false))
+            .unwrap();
+        assert!(outcome.truncated && outcome.hits.is_empty());
     }
 }

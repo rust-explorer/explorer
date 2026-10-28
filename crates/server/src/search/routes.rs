@@ -7,9 +7,9 @@ use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
 use serde::Deserialize;
 use shared::api::browse::EntryKind;
-use shared::api::search::{SearchHit, SearchResults};
+use shared::api::search::{MIN_QUERY_CHARS, SearchHit, SearchResults};
 
-use super::{MIN_QUERY_CHARS, SEARCH_TIMEOUT};
+use super::SEARCH_TIMEOUT;
 use crate::auth::{Action, CurrentUser};
 use crate::browse::epoch_millis;
 use crate::http::AppState;
@@ -92,4 +92,18 @@ pub async fn search(
         hits,
         truncated: outcome.truncated,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dropping_the_guard_cancels_the_walk() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let guard = CancelOnDrop(Arc::clone(&cancel));
+        assert!(!cancel.load(Ordering::Relaxed));
+        drop(guard);
+        assert!(cancel.load(Ordering::Relaxed));
+    }
 }

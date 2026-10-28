@@ -58,12 +58,7 @@ pub fn move_entry(
     plan: Option<&TransferPlan>,
     progress: &dyn TransferProgress,
 ) -> Result<MoveOutcome, StorageError> {
-    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
-        return Err(InvalidPath {
-            reason: "the volume root can't be moved",
-        }
-        .into());
-    };
+    let (parent, name) = split(path)?;
     source
         .refuse_reserved(path)
         .map_err(StorageError::on_source)?;

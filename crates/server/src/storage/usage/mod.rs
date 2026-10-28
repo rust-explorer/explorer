@@ -1,3 +1,4 @@
+mod folder;
 mod hard_links;
 mod scan;
 
@@ -11,6 +12,8 @@ pub const USAGE_THREADS: usize = 4;
 pub const USAGE_MAX_DIRS: usize = 1_000_000;
 pub const USAGE_TOP_FILES: usize = 20;
 pub const USAGE_VIEW_LIMIT: usize = 200;
+/// Hard-linked files a scan tracks to count them once; past this, each name counts.
+pub const USAGE_MAX_HARD_LINKS: usize = 100_000;
 
 /// The result of a scan: one node per folder, the root first and every folder after its parent.
 #[derive(Debug)]
