@@ -17,6 +17,7 @@ use explorer_server::tasks::Tasks;
 use serde_json::json;
 use shared::api::error::ErrorBody;
 use shared::api::tasks::{Location, TaskInfo, TaskSpec, TaskState};
+use shared::api::usage::{UsageKind, UsageView};
 use tempfile::TempDir;
 
 const ORIGIN: &str = "https://files.example.com";
@@ -560,4 +561,183 @@ async fn move_from_read_only_volume_is_403() {
     assert!(s.data.join("media/b.txt").is_file());
     assert!(!s.data.join("media/a.txt").exists());
     assert!(list(&mut s.client).await.is_empty());
+}
+
+fn usage_spec(volume: &str, path: &str) -> serde_json::Value {
+    json!({"op": "usage", "source": {"volume": volume, "path": path}})
+}
+
+async fn usage_task(client: &mut Client, volume: &str, path: &str) -> TaskInfo {
+    let res = post_task(client, usage_spec(volume, path)).await;
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+    let info: TaskInfo = json(res).await;
+    assert_eq!(
+        info.spec,
+        TaskSpec::Usage {
+            source: Location {
+                volume: volume.to_owned(),
+                path: path.to_owned(),
+            }
+        }
+    );
+    info
+}
+
+#[tokio::test]
+async fn usage_task_runs_and_is_browsable() {
+    let mut s = setup().await;
+    let media = s.data.join("media");
+    fs::create_dir_all(media.join("Films/2026")).unwrap();
+    fs::write(media.join("Films/a.mkv"), vec![1u8; 20_000]).unwrap();
+    fs::write(media.join("Films/2026/b.mkv"), vec![1u8; 5_000]).unwrap();
+
+    let info = usage_task(&mut s.client, "media", "").await;
+    let done = finished(&mut s.client, &info.id).await;
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    assert_eq!((done.files_done, done.files_total), (2, None));
+    assert_eq!(done.bytes_total, None);
+
+    let res = s.client.get(&format!("/api/tasks/{}/usage", info.id)).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let root: UsageView = json(res).await;
+    assert_eq!(
+        (root.volume.as_str(), root.root.as_str(), root.path.as_str()),
+        ("media", "", "")
+    );
+    assert_eq!((root.files, root.dirs), (2, 2));
+    assert!(root.scanned_at_ms > 0 && !root.incomplete && !root.collapsed);
+    assert_eq!(root.items.len(), 1);
+    assert_eq!(
+        (root.items[0].name.as_str(), root.items[0].kind),
+        ("Films", UsageKind::Dir)
+    );
+    assert_eq!(root.items[0].bytes + allocated(&media), root.bytes);
+    assert_eq!(done.bytes_done, root.bytes);
+
+    let res = s
+        .client
+        .get(&format!("/api/tasks/{}/usage?path=Films", info.id))
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let films: UsageView = json(res).await;
+    assert_eq!((films.root.as_str(), films.path.as_str()), ("", "Films"));
+    let names: Vec<(&str, UsageKind)> = films
+        .items
+        .iter()
+        .map(|item| (item.name.as_str(), item.kind))
+        .collect();
+    assert_eq!(
+        names,
+        [("a.mkv", UsageKind::File), ("2026", UsageKind::Dir)]
+    );
+
+    for path in ["Films/a.mkv", "nope"] {
+        let res = s
+            .client
+            .get(&format!("/api/tasks/{}/usage?path={path}", info.id))
+            .await;
+        error_of(res, StatusCode::NOT_FOUND, "path_not_found").await;
+    }
+}
+
+fn allocated(path: &Path) -> u64 {
+    use std::os::unix::fs::MetadataExt as _;
+    fs::symlink_metadata(path).unwrap().blocks() * 512
+}
+
+#[tokio::test]
+async fn usage_of_a_file_is_400() {
+    let mut s = setup().await;
+    fs::write(s.data.join("media/a.txt"), b"a").unwrap();
+    let res = post_task(&mut s.client, usage_spec("media", "a.txt")).await;
+    error_of(res, StatusCode::BAD_REQUEST, "not_a_directory").await;
+    let res = post_task(&mut s.client, usage_spec("media", "nope")).await;
+    error_of(res, StatusCode::NOT_FOUND, "path_not_found").await;
+    assert!(list(&mut s.client).await.is_empty());
+}
+
+#[tokio::test]
+async fn usage_on_read_only_volume_is_allowed() {
+    if rustix::process::geteuid().is_root() {
+        return;
+    }
+    let mut s = setup_with(None, |data| {
+        fs::write(data.join("documents/a.txt"), b"a").unwrap();
+        fs::set_permissions(data.join("documents"), fs::Permissions::from_mode(0o555)).unwrap();
+    })
+    .await;
+    let info = usage_task(&mut s.client, "documents", "").await;
+    let done = finished(&mut s.client, &info.id).await;
+    fs::set_permissions(s.data.join("documents"), fs::Permissions::from_mode(0o755)).unwrap();
+    assert_eq!(done.state, TaskState::Done, "{:?}", done.error);
+    assert_eq!(done.files_done, 1);
+}
+
+#[tokio::test]
+async fn usage_of_another_users_task_is_404() {
+    let mut s = setup().await;
+    fs::create_dir(s.data.join("media/F")).unwrap();
+    let info = usage_task(&mut s.client, "media", "F").await;
+    finished(&mut s.client, &info.id).await;
+    let uri = format!("/api/tasks/{}/usage", info.id);
+    assert_eq!(s.client.get(&uri).await.status(), StatusCode::OK);
+
+    s.fake.claims(json!({ "sub": "other-user" }));
+    let mut other = Client::signed_in(s.app.clone(), &s.fake).await;
+    error_of(
+        other.get(&uri).await,
+        StatusCode::NOT_FOUND,
+        "task_not_found",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn usage_before_done_is_404() {
+    let mut s = setup_with(Some(0), |_| {}).await;
+    let info = usage_task(&mut s.client, "media", "").await;
+    error_of(
+        s.client.get(&format!("/api/tasks/{}/usage", info.id)).await,
+        StatusCode::NOT_FOUND,
+        "task_not_found",
+    )
+    .await;
+
+    let mut s = setup().await;
+    fs::write(s.data.join("media/a.txt"), b"a").unwrap();
+    let deleted = started(&mut s.client, "media", "a.txt").await;
+    finished(&mut s.client, &deleted.id).await;
+    for id in [deleted.id.as_str(), "0123456789abcdef0123456789abcdef"] {
+        error_of(
+            s.client.get(&format!("/api/tasks/{id}/usage")).await,
+            StatusCode::NOT_FOUND,
+            "task_not_found",
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn rescanning_a_folder_drops_the_older_tree() {
+    let mut s = setup().await;
+    fs::create_dir(s.data.join("media/F")).unwrap();
+    let first = usage_task(&mut s.client, "media", "F").await;
+    finished(&mut s.client, &first.id).await;
+    let second = usage_task(&mut s.client, "media", "F").await;
+    finished(&mut s.client, &second.id).await;
+
+    error_of(
+        s.client
+            .get(&format!("/api/tasks/{}/usage", first.id))
+            .await,
+        StatusCode::NOT_FOUND,
+        "task_not_found",
+    )
+    .await;
+    let res = s
+        .client
+        .get(&format!("/api/tasks/{}/usage", second.id))
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(list(&mut s.client).await.len(), 2);
 }

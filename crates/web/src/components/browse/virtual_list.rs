@@ -8,13 +8,15 @@ use crate::listing::{reveal_offset, visible_range};
 const OVERSCAN: usize = 10;
 
 /// A scroll container that only renders the rows near its viewport, between two spacers.
-/// It scrolls row `reveal` into view whenever that changes.
+/// It scrolls row `reveal` into view whenever that changes, and reports its content width to
+/// `on_width` when it changes.
 #[component]
 pub fn VirtualList(
     total: usize,
     row_height: f64,
     row: Callback<usize, Element>,
     #[props(default)] reveal: Option<usize>,
+    #[props(default)] on_width: EventHandler<f64>,
     #[props(extends = GlobalAttributes, extends = div)] attributes: Vec<Attribute>,
 ) -> Element {
     let mut scroll_top = use_signal(|| 0.0);
@@ -57,6 +59,7 @@ pub fn VirtualList(
             onresize: move |event| {
                 if let Ok(size) = event.data().get_content_box_size() {
                     viewport.set(size.height);
+                    on_width.call(size.width);
                 }
             },
             ..attributes,

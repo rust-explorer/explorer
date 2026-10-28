@@ -42,7 +42,7 @@ pub fn ConflictPrompt(
                     input {
                         id: apply_all_id.clone(),
                         r#type: "checkbox",
-                        class: "size-4 rounded border-slate-300 text-indigo-600",
+                        class: "size-4 rounded border-slate-300 text-indigo-600 dark:border-slate-600 dark:bg-slate-800",
                         checked: apply_to_all(),
                         onchange: move |event| apply_to_all.set(event.checked()),
                     }

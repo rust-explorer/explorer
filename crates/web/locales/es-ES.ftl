@@ -25,8 +25,16 @@ sidebar-read-only = Solo lectura
 sidebar-free = { $volume } · { $available } libres
 sidebar-used-label = Espacio usado
 sidebar-used = { $used } usados de { $total }
+favorites-title = Favoritos
+favorites-not-found = No encontrada
+favorites-remove = Quitar { $name } de favoritos
+favorites-add = Añadir a favoritos
+favorites-remove-current = Quitar de favoritos
 breadcrumb = Ruta de navegación
 browse-empty = Esta carpeta está vacía.
+browse-empty-hint = Suelta archivos aquí o usa Subir.
+read-only-notice = Solo lectura: puedes explorar, descargar y copiar desde este volumen, pero no modificarlo.
+read-only-notice-short = Volumen de solo lectura
 table-label = Contenido de la carpeta
 table-name = Nombre
 table-size = Tamaño
@@ -63,6 +71,8 @@ error-unsupported_media_type = El servidor ha rechazado el formato de esta subid
 error-cross_device = { $path } está en otro sistema de archivos que su volumen, así que no se puede guardar nada ahí. Un administrador puede montar esa carpeta como un volumen propio.
 error-invalid_destination = { $path } no se puede mover ni copiar ahí.
 error-task_not_found = Esta tarea ya no existe en el servidor.
+error-favorites_full = No puedes tener más de 100 favoritos. Quita uno primero.
+error-thumbnail_unavailable = No hay vista previa disponible para este archivo.
 upload = Subir
 upload-open = Subir archivos o una carpeta
 upload-files = Archivos…
@@ -169,8 +179,76 @@ move-title =
     }
 picker-volume = Volumen
 picker-choose-volume = Elige un volumen
+picker-volume-read-only = { $name } (solo lectura)
 picker-location = Carpeta de destino
 picker-folders = Carpetas
 picker-empty = No hay carpetas aquí
 picker-copy-here = Copiar aquí
 picker-move-here = Mover aquí
+refresh = Actualizar
+view-mode = Vista
+view-list = Vista de lista
+view-grid = Vista de cuadrícula
+grid-folder = Carpeta
+grid-count =
+    { $count ->
+        [one] 1 elemento
+       *[other] { $count } elementos
+    }
+search-placeholder = Buscar en { $volume }
+search-open = Buscar
+search-close = Cerrar la búsqueda
+search-searching = Buscando…
+search-results =
+    { $count ->
+        [one] 1 resultado para «{ $query }» en { $volume }
+       *[other] { $count } resultados para «{ $query }» en { $volume }
+    }
+search-empty = Ningún resultado para «{ $query }» en { $volume }
+search-truncated = Se muestran los { $count } primeros, afina la búsqueda.
+search-timed-out = La búsqueda tardó demasiado; puede que falten resultados.
+action-analyze-usage = Analizar espacio
+action-calculate-size = Calcular tamaño
+analyze-usage = Analizar espacio
+folder-size-calculated = Calculado a las { $time }
+folder-size-computing = Calculando el tamaño…
+task-analysing = Analizando { $name }
+task-analysing-counts =
+    { $count ->
+        [one] Analizando { $name } — { $files } archivo, { $size }
+       *[other] Analizando { $name } — { $files } archivos, { $size }
+    }
+task-view = Ver
+task-view-usage = Ver el espacio que ocupa { $name }
+usage-breadcrumb = Carpetas analizadas
+usage-items = Contenido
+usage-empty = Esta carpeta está vacía.
+usage-files =
+    { $count ->
+        [one] { $files } archivo
+       *[other] { $files } archivos
+    }
+usage-folders =
+    { $count ->
+        [one] { $folders } carpeta
+       *[other] { $folders } carpetas
+    }
+usage-other-files =
+    { $count ->
+        [one] { $files } archivo más
+       *[other] { $files } archivos más
+    }
+usage-percent = { $percent } %
+usage-percent-small = < 1 %
+usage-scanned-at = Analizado a las { $time }
+usage-scan-again = Volver a analizar
+usage-open-in-explorer = Abrir en el explorador
+usage-incomplete = Algunos elementos no se pudieron leer
+usage-collapsed = Demasiadas carpetas: las subcarpetas de esta se cuentan, pero no se listan
+usage-scanning = Analizando { $name }…
+usage-cancelled-title = Análisis cancelado
+usage-cancelled-message = Este análisis se detuvo antes de terminar.
+usage-unavailable-title = Este análisis ya no está disponible
+usage-unavailable-message = Los resultados solo se conservan un tiempo tras el análisis. Vuelve a analizar la carpeta para ver qué ocupa su espacio.
+usage-failed-title = El análisis ha fallado
+usage-scan-finished = Análisis terminado

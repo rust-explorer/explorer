@@ -200,7 +200,7 @@ pub async fn rename(
     }))
 }
 
-fn epoch_millis(time: SystemTime) -> Option<i64> {
+pub(crate) fn epoch_millis(time: SystemTime) -> Option<i64> {
     match time.duration_since(UNIX_EPOCH) {
         Ok(after) => i64::try_from(after.as_millis()).ok(),
         Err(before) => i64::try_from(before.duration().as_millis())

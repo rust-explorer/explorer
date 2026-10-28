@@ -71,7 +71,7 @@ pub fn change_locale(mut i18n: I18n, locale: LanguageIdentifier) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn local_storage() -> Option<web_sys::Storage> {
+pub(crate) fn local_storage() -> Option<web_sys::Storage> {
     web_sys::window()?.local_storage().ok().flatten()
 }
 

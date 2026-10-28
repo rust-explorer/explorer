@@ -28,7 +28,7 @@ pub fn ActivityPanel() -> Element {
     };
     let (task_count, active_task_count) = {
         let list = list.read();
-        (list.tasks().len(), list.active_count())
+        (list.shown().count(), list.active_count())
     };
     if upload_count == 0 && skipped == 0 && task_count == 0 {
         return rsx! {};

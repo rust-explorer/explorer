@@ -40,9 +40,9 @@ pub enum WalkItem {
     },
 }
 
-struct Entry {
-    meta: EntryMeta,
-    path: Option<RelPath>,
+pub(super) struct Entry {
+    pub(super) meta: EntryMeta,
+    pub(super) path: Option<RelPath>,
 }
 
 /// A directory or file by device and inode, whatever path or symlink leads to it.
@@ -260,7 +260,7 @@ impl Volume {
         path.file_name().unwrap_or(self.name()).to_owned()
     }
 
-    fn entries(&self, dir: &RelPath) -> Result<Vec<Entry>, StorageError> {
+    pub(super) fn entries(&self, dir: &RelPath) -> Result<Vec<Entry>, StorageError> {
         let map_err = |err| StorageError::from_io(dir, err);
         let handle = self.root.open_dir(fs_path(dir)).map_err(map_err)?;
         let reserved = self.reserved()?;
@@ -315,7 +315,7 @@ impl Volume {
         }
     }
 
-    fn is_real_dir(&self, path: &RelPath) -> bool {
+    pub(super) fn is_real_dir(&self, path: &RelPath) -> bool {
         self.root
             .symlink_metadata(path.as_str())
             .is_ok_and(|meta| meta.is_dir())

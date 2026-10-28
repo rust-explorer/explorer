@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use dioxus::prelude::*;
 use dioxus_i18n::t;
 use shared::api::browse::Entry;
@@ -29,6 +31,36 @@ pub struct Anchor {
     pub top: f64,
     pub right: f64,
     pub bottom: f64,
+}
+
+/// Where the menu of a ⋯ `button` opens: under it, or where `event` clicked when it can't be
+/// measured.
+pub async fn below_button(button: Option<Rc<MountedData>>, event: &MouseEvent) -> MenuAt {
+    let point = event.client_coordinates();
+    let fallback = MenuAt::Pointer {
+        x: point.x,
+        y: point.y,
+    };
+    let Some(button) = button else {
+        return fallback;
+    };
+    button.get_client_rect().await.map_or(fallback, |rect| {
+        MenuAt::Below(Anchor {
+            left: rect.min_x(),
+            top: rect.min_y(),
+            right: rect.max_x(),
+            bottom: rect.max_y(),
+        })
+    })
+}
+
+/// A right click opens the menu at the pointer.
+pub fn at_pointer(event: &MouseEvent) -> MenuAt {
+    let point = event.client_coordinates();
+    MenuAt::Pointer {
+        x: point.x,
+        y: point.y,
+    }
 }
 
 const MENU_WIDTH: f64 = 176.0;
@@ -95,6 +127,8 @@ pub fn action_label(action: RowAction) -> String {
         RowAction::Rename => t!("action-rename"),
         RowAction::MoveTo => t!("action-move-to"),
         RowAction::CopyTo => t!("action-copy-to"),
+        RowAction::AnalyzeUsage => t!("action-analyze-usage"),
+        RowAction::CalculateSize => t!("action-calculate-size"),
         RowAction::Delete => t!("action-delete"),
     }
 }

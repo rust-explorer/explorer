@@ -25,8 +25,16 @@ sidebar-read-only = Read-only
 sidebar-free = { $volume } · { $available } free
 sidebar-used-label = Used space
 sidebar-used = { $used } used of { $total }
+favorites-title = Favorites
+favorites-not-found = Not found
+favorites-remove = Remove { $name } from favorites
+favorites-add = Add to favorites
+favorites-remove-current = Remove from favorites
 breadcrumb = Breadcrumb
 browse-empty = This folder is empty.
+browse-empty-hint = Drop files here or use Upload.
+read-only-notice = Read-only: you can browse, download and copy from this volume, not change it.
+read-only-notice-short = Read-only volume
 table-label = Folder contents
 table-name = Name
 table-size = Size
@@ -63,6 +71,8 @@ error-unsupported_media_type = The server refused the format of this upload.
 error-cross_device = { $path } is on another filesystem than its volume, so nothing can be saved there. An administrator can mount that folder as a volume of its own.
 error-invalid_destination = { $path } can't be moved or copied there.
 error-task_not_found = This task no longer exists on the server.
+error-favorites_full = You can't have more than 100 favorites. Remove one first.
+error-thumbnail_unavailable = No preview is available for this file.
 upload = Upload
 upload-open = Upload files or a folder
 upload-files = Files…
@@ -165,8 +175,76 @@ move-title =
     }
 picker-volume = Volume
 picker-choose-volume = Choose a volume
+picker-volume-read-only = { $name } (read-only)
 picker-location = Destination folder
 picker-folders = Folders
 picker-empty = No folders here
 picker-copy-here = Copy here
 picker-move-here = Move here
+refresh = Refresh
+view-mode = View
+view-list = List view
+view-grid = Grid view
+grid-folder = Folder
+grid-count =
+    { $count ->
+        [one] 1 item
+       *[other] { $count } items
+    }
+search-placeholder = Search in { $volume }
+search-open = Search
+search-close = Close search
+search-searching = Searching…
+search-results =
+    { $count ->
+        [one] 1 result for “{ $query }” in { $volume }
+       *[other] { $count } results for “{ $query }” in { $volume }
+    }
+search-empty = No result for “{ $query }” in { $volume }
+search-truncated = Showing the first { $count }, refine your search.
+search-timed-out = The search took too long; results may be incomplete.
+action-analyze-usage = Analyse space
+action-calculate-size = Calculate size
+analyze-usage = Analyse space
+folder-size-calculated = Calculated at { $time }
+folder-size-computing = Calculating size…
+task-analysing = Analysing { $name }
+task-analysing-counts =
+    { $count ->
+        [one] Analysing { $name } — { $files } file, { $size }
+       *[other] Analysing { $name } — { $files } files, { $size }
+    }
+task-view = View
+task-view-usage = View the space used by { $name }
+usage-breadcrumb = Scanned folders
+usage-items = Contents
+usage-empty = This folder is empty.
+usage-files =
+    { $count ->
+        [one] { $files } file
+       *[other] { $files } files
+    }
+usage-folders =
+    { $count ->
+        [one] { $folders } folder
+       *[other] { $folders } folders
+    }
+usage-other-files =
+    { $count ->
+        [one] { $files } other file
+       *[other] { $files } other files
+    }
+usage-percent = { $percent }%
+usage-percent-small = <1%
+usage-scanned-at = Scanned at { $time }
+usage-scan-again = Scan again
+usage-open-in-explorer = Open in explorer
+usage-incomplete = Some items could not be read
+usage-collapsed = Too many folders: sub-folders of this one are counted but not listed
+usage-scanning = Analysing { $name }…
+usage-cancelled-title = Scan cancelled
+usage-cancelled-message = This scan was stopped before it finished.
+usage-unavailable-title = This scan is no longer available
+usage-unavailable-message = Results are only kept for a while after a scan. Scan the folder again to see what takes up its space.
+usage-failed-title = The scan failed
+usage-scan-finished = Scan finished

@@ -8,7 +8,8 @@ use shared::api::error::ErrorBody;
 use shared::api::tasks::{TaskInfo, TaskSpec, TaskState};
 use tokio::sync::Semaphore;
 
-use super::{FINISHED_TTL, MAX_RUNNING};
+use super::{FINISHED_TTL, MAX_RUNNING, MAX_USAGE_TREES};
+use crate::storage::UsageTree;
 
 const ID_LEN: usize = 32;
 
@@ -22,6 +23,7 @@ pub struct Progress {
     files_total: OnceLock<u64>,
     bytes_total: OnceLock<u64>,
     final_path: OnceLock<String>,
+    usage: Mutex<Option<UsageTree>>,
 }
 
 impl Progress {
@@ -52,6 +54,11 @@ impl Progress {
 
     pub fn set_final_path(&self, path: String) {
         let _ = self.final_path.set(path);
+    }
+
+    /// A usage scan's result, which the task keeps once done.
+    pub fn set_usage(&self, tree: UsageTree) {
+        *self.usage.lock().unwrap_or_else(PoisonError::into_inner) = Some(tree);
     }
 
     /// Files and bytes done, and entries skipped, so far.
@@ -106,6 +113,7 @@ struct Entry {
     progress: Arc<Progress>,
     error: Option<ErrorBody>,
     finished_at: Option<Instant>,
+    usage: Option<Arc<UsageTree>>,
 }
 
 impl Entry {
@@ -135,6 +143,44 @@ impl Entry {
 struct Entries {
     by_id: HashMap<String, Entry>,
     next_seq: u64,
+}
+
+impl Entries {
+    /// After task `id` stored a usage tree: drops its user's other trees of the same folder,
+    /// then the oldest others beyond [`MAX_USAGE_TREES`] in all.
+    fn keep_usage(&mut self, id: &str) {
+        let Some(kept) = self.by_id.get(id) else {
+            return;
+        };
+        let (user, source) = (kept.user.clone(), kept.spec.source().clone());
+        let mut trees: Vec<(u64, &mut Entry)> = self
+            .by_id
+            .iter_mut()
+            .filter(|(_, entry)| entry.user == user && entry.usage.is_some())
+            .filter(|(other, _)| other.as_str() != id)
+            .filter_map(|(_, entry)| {
+                if entry.spec.source() == &source {
+                    entry.usage = None;
+                    None
+                } else {
+                    Some((entry.seq, entry))
+                }
+            })
+            .collect();
+        trees.sort_by_key(|(seq, _)| std::cmp::Reverse(*seq));
+        for (_, entry) in trees.into_iter().skip(MAX_USAGE_TREES - 1) {
+            entry.usage = None;
+        }
+    }
+
+    /// Forgets tasks finished more than [`FINISHED_TTL`] before `now`.
+    fn prune(&mut self, now: Instant) {
+        self.by_id.retain(|_, entry| {
+            entry
+                .finished_at
+                .is_none_or(|at| now.saturating_duration_since(at) <= FINISHED_TTL)
+        });
+    }
 }
 
 /// What [`Tasks::cancel_or_dismiss`] did.
@@ -180,11 +226,7 @@ impl Tasks {
     /// [`FINISHED_TTL`] before.
     fn list_at(&self, user: &str, now: Instant) -> Vec<TaskInfo> {
         let mut entries = self.lock();
-        entries.by_id.retain(|_, entry| {
-            entry
-                .finished_at
-                .is_none_or(|at| now.saturating_duration_since(at) <= FINISHED_TTL)
-        });
+        entries.prune(now);
         let mut mine: Vec<(&String, &Entry)> = entries
             .by_id
             .iter()
@@ -192,6 +234,21 @@ impl Tasks {
             .collect();
         mine.sort_by_key(|(_, entry)| entry.seq);
         mine.into_iter().map(|(id, entry)| entry.info(id)).collect()
+    }
+
+    /// The volume and tree of a finished usage scan of `user`.
+    pub fn usage(&self, user: &str, id: &str) -> Option<(String, Arc<UsageTree>)> {
+        let mut entries = self.lock();
+        entries.prune(Instant::now());
+        let entry = entries
+            .by_id
+            .get(id)
+            .filter(|entry| entry.user == user && entry.state == TaskState::Done)?;
+        let TaskSpec::Usage { source } = &entry.spec else {
+            return None;
+        };
+        let tree = entry.usage.as_ref()?;
+        Some((source.volume.clone(), Arc::clone(tree)))
     }
 
     /// Cancels a queued or running task, or forgets a finished one; `None` when `id` is unknown
@@ -231,6 +288,7 @@ impl Tasks {
             progress: Arc::default(),
             error: None,
             finished_at: None,
+            usage: None,
         };
         let info = entry.info(&id);
         entries.by_id.insert(id.clone(), entry);
@@ -253,6 +311,12 @@ impl Tasks {
         let Some(entry) = entries.by_id.get_mut(id) else {
             return;
         };
+        let tree = entry
+            .progress
+            .usage
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
         let state = match outcome {
             Outcome::Done => TaskState::Done,
             Outcome::Cancelled => TaskState::Cancelled,
@@ -262,6 +326,10 @@ impl Tasks {
             }
         };
         entry.finish(state, Instant::now());
+        if let Some(tree) = tree.filter(|_| state == TaskState::Done) {
+            entry.usage = Some(Arc::new(tree));
+            entries.keep_usage(id);
+        }
     }
 
     fn lock(&self) -> MutexGuard<'_, Entries> {
@@ -387,6 +455,78 @@ mod tests {
         assert_eq!((info.bytes_done, info.bytes_total), (40, Some(100)));
         assert_eq!(info.skipped, 1);
         assert_eq!(info.final_path.as_deref(), Some("b/a"));
+    }
+
+    fn usage_spec(path: &str) -> TaskSpec {
+        TaskSpec::Usage {
+            source: Location {
+                volume: "media".to_owned(),
+                path: path.to_owned(),
+            },
+        }
+    }
+
+    /// Runs a usage task of `user` on `path` to `outcome`, with a tree of an empty folder.
+    fn scanned(tasks: &Tasks, user: &str, spec: TaskSpec, outcome: Outcome) -> String {
+        let data = tempfile::tempdir().unwrap();
+        std::fs::create_dir(data.path().join("media")).unwrap();
+        let volumes = crate::storage::Volumes::discover(data.path()).unwrap();
+        let media = volumes.get("media").unwrap();
+        let tree = crate::storage::usage(
+            media,
+            &crate::storage::RelPath::root(),
+            &Progress::default(),
+        )
+        .unwrap();
+        let (id, _) = tasks.insert(user, spec);
+        let progress = tasks.start(&id).unwrap();
+        progress.set_usage(tree);
+        assert!(tasks.usage(user, &id).is_none());
+        tasks.finish(&id, outcome);
+        id
+    }
+
+    #[test]
+    fn usage_is_kept_for_its_done_task_only() {
+        let tasks = Tasks::new();
+        let id = scanned(&tasks, "ada", usage_spec(""), Outcome::Done);
+        let (volume, tree) = tasks.usage("ada", &id).unwrap();
+        assert_eq!(volume, "media");
+        assert!(tree.root().is_root());
+        assert!(tasks.usage("bob", &id).is_none());
+
+        let delete = scanned(&tasks, "ada", spec("a"), Outcome::Done);
+        assert!(tasks.usage("ada", &delete).is_none());
+        let cancelled = scanned(&tasks, "ada", usage_spec("b"), Outcome::Cancelled);
+        assert!(tasks.usage("ada", &cancelled).is_none());
+    }
+
+    #[test]
+    fn usage_keeps_one_tree_per_folder() {
+        let tasks = Tasks::new();
+        let first = scanned(&tasks, "ada", usage_spec("Films"), Outcome::Done);
+        let other_folder = scanned(&tasks, "ada", usage_spec("Music"), Outcome::Done);
+        let other_user = scanned(&tasks, "bob", usage_spec("Films"), Outcome::Done);
+        let second = scanned(&tasks, "ada", usage_spec("Films"), Outcome::Done);
+
+        assert!(tasks.usage("ada", &first).is_none());
+        assert!(tasks.usage("ada", &second).is_some());
+        assert!(tasks.usage("ada", &other_folder).is_some());
+        assert!(tasks.usage("bob", &other_user).is_some());
+        assert_eq!(tasks.list("ada").len(), 3);
+    }
+
+    #[test]
+    fn usage_keeps_the_newest_trees_of_a_user() {
+        let tasks = Tasks::new();
+        let ids: Vec<String> = (0..=MAX_USAGE_TREES)
+            .map(|i| scanned(&tasks, "ada", usage_spec(&format!("f{i}")), Outcome::Done))
+            .collect();
+        let bob = scanned(&tasks, "bob", usage_spec("f0"), Outcome::Done);
+
+        assert!(tasks.usage("ada", &ids[0]).is_none());
+        assert!(ids[1..].iter().all(|id| tasks.usage("ada", id).is_some()));
+        assert!(tasks.usage("bob", &bob).is_some());
     }
 
     #[test]

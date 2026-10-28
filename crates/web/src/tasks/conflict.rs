@@ -40,7 +40,7 @@ impl Conflict {
 pub(super) fn policy_of(spec: &TaskSpec) -> Option<ConflictPolicy> {
     match spec {
         TaskSpec::Copy { conflict, .. } | TaskSpec::Move { conflict, .. } => Some(*conflict),
-        TaskSpec::Delete { .. } => None,
+        TaskSpec::Delete { .. } | TaskSpec::Usage { .. } => None,
     }
 }
 

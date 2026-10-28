@@ -5,7 +5,7 @@ use dioxus_i18n::prelude::i18n;
 use dioxus_i18n::t;
 use shared::api::browse::{Entry, EntryKind};
 
-use super::row_menu::{Anchor, MenuAt, MenuRequest, ROW_MENU_ID};
+use super::row_menu::{MenuAt, MenuRequest, ROW_MENU_ID, at_pointer, below_button};
 use super::select_cell::SelectCell;
 use crate::api;
 use crate::components::common::FocusTarget;
@@ -13,6 +13,7 @@ use crate::components::common::icons::{
     ArchiveIcon, AudioIcon, DocumentIcon, DownloadIcon, FileIcon, FolderIcon, ImageIcon, MoreIcon,
     VideoIcon,
 };
+use crate::components::usage::FolderSizeLabel;
 use crate::format::{format_modified, format_size};
 use crate::listing::{FileType, file_type};
 use crate::routes::{Route, Segment, Segments};
@@ -86,35 +87,15 @@ pub fn FileRow(
         move |event: MouseEvent| {
             if has_menu {
                 event.prevent_default();
-                let point = event.client_coordinates();
-                open_at(MenuAt::Pointer {
-                    x: point.x,
-                    y: point.y,
-                });
+                open_at(at_pointer(&event));
             }
         }
     };
     let on_more = move |event: MouseEvent| {
-        let point = event.client_coordinates();
-        let fallback = MenuAt::Pointer {
-            x: point.x,
-            y: point.y,
-        };
         let open_at = open_at.clone();
         let button = more();
         spawn(async move {
-            let at = match button {
-                Some(button) => button.get_client_rect().await.map_or(fallback, |rect| {
-                    MenuAt::Below(Anchor {
-                        left: rect.min_x(),
-                        top: rect.min_y(),
-                        right: rect.max_x(),
-                        bottom: rect.max_y(),
-                    })
-                }),
-                None => fallback,
-            };
-            open_at(at);
+            open_at(below_button(button, &event).await);
         });
     };
 
@@ -122,7 +103,17 @@ pub fn FileRow(
         EntryIcon { kind: entry.kind, name: entry.name.clone() }
         span { class: "flex min-w-0 flex-col",
             span { class: "truncate", {entry.name.clone()} }
-            if !details.is_empty() {
+            if entry.kind == EntryKind::Dir {
+                span { class: "truncate text-xs md:hidden {MUTED}",
+                    FolderSizeLabel {
+                        volume: volume.as_str().to_owned(),
+                        path: child.joined(),
+                        unknown: "",
+                        separator: !details.is_empty(),
+                    }
+                    {details}
+                }
+            } else if !details.is_empty() {
                 span { class: "truncate text-xs md:hidden {MUTED}", {details} }
             }
         }
@@ -169,7 +160,13 @@ pub fn FileRow(
                     },
                 }
             }
-            div { role: "cell", class: "hidden truncate md:block {MUTED}", {size.unwrap_or_else(|| "—".to_owned())} }
+            div { role: "cell", class: "hidden truncate md:block {MUTED}",
+                if entry.kind == EntryKind::Dir {
+                    FolderSizeLabel { volume: volume.as_str().to_owned(), path: child.joined() }
+                } else {
+                    {size.unwrap_or_else(|| "—".to_owned())}
+                }
+            }
             div { role: "cell", class: "hidden truncate md:block {MUTED}", {modified.unwrap_or_else(|| "—".to_owned())} }
             div { role: "cell", class: "flex justify-end gap-1 pr-1",
                 if let Some(href) = download_href(volume.as_str(), &child, entry.kind) {
@@ -203,24 +200,29 @@ pub fn FileRow(
     }
 }
 
+/// The icon of an entry's kind or file type; `size` is a Tailwind size class.
 #[component]
-fn EntryIcon(kind: EntryKind, name: String) -> Element {
-    const CLASS: &str = "size-5 shrink-0";
-    const FILE: &str = "size-5 shrink-0 text-slate-400 dark:text-slate-500";
+pub fn EntryIcon(
+    kind: EntryKind,
+    name: String,
+    #[props(default = "size-5")] size: &'static str,
+) -> Element {
+    let class = format!("{size} shrink-0");
+    let file = format!("{size} shrink-0 text-slate-400 dark:text-slate-500");
     match kind {
         EntryKind::Dir => rsx! {
-            FolderIcon { class: "{CLASS} text-indigo-500 dark:text-indigo-400" }
+            FolderIcon { class: "{class} text-indigo-500 dark:text-indigo-400" }
         },
         EntryKind::Other => rsx! {
-            FileIcon { class: CLASS }
+            FileIcon { class }
         },
         EntryKind::File => match file_type(&name) {
-            FileType::Video => rsx! { VideoIcon { class: FILE } },
-            FileType::Image => rsx! { ImageIcon { class: FILE } },
-            FileType::Audio => rsx! { AudioIcon { class: FILE } },
-            FileType::Archive => rsx! { ArchiveIcon { class: FILE } },
-            FileType::Document => rsx! { DocumentIcon { class: FILE } },
-            FileType::Other => rsx! { FileIcon { class: FILE } },
+            FileType::Video => rsx! { VideoIcon { class: file } },
+            FileType::Image => rsx! { ImageIcon { class: file } },
+            FileType::Audio => rsx! { AudioIcon { class: file } },
+            FileType::Archive => rsx! { ArchiveIcon { class: file } },
+            FileType::Document => rsx! { DocumentIcon { class: file } },
+            FileType::Other => rsx! { FileIcon { class: file } },
         },
     }
 }

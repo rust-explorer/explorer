@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use shared::api::browse::EntryKind;
 use shared::api::conflict::ConflictPolicy;
 use shared::api::error::ErrorBody;
-use shared::api::tasks::{TaskInfo, TaskSpec, TaskState};
+use shared::api::tasks::{Location, TaskInfo, TaskSpec, TaskState};
 
 use super::conflict::{Conflict, policy_of, with_policy};
 use crate::api::ApiFailure;
@@ -31,6 +31,12 @@ pub struct Task {
     source_kind: Option<EntryKind>,
     /// The destination exists: the task waits for the user's decision.
     conflict: Option<Conflict>,
+    /// Its page opens at this folder once the server gives it an id.
+    pub(super) open_at: Option<String>,
+    /// When this tab saw it finish.
+    finished_at_ms: Option<i64>,
+    /// Cleared from the activity panel, but still known for its result.
+    dismissed: bool,
 }
 
 impl Task {
@@ -66,8 +72,12 @@ impl Task {
         })
     }
 
+    pub fn finished_at_ms(&self) -> Option<i64> {
+        self.finished_at_ms
+    }
+
     /// The server's id, while the server has the task.
-    fn server_id(&self) -> Option<&str> {
+    pub fn server_id(&self) -> Option<&str> {
         self.info
             .as_ref()
             .filter(|_| self.lost.is_none())
@@ -85,6 +95,8 @@ pub enum Effect {
     PollAfter { ms: u32 },
     /// Something changed on disk: listings reload.
     Refresh,
+    /// Shows the result page of the usage task `id`, at the folder `at`.
+    Open { id: String, at: Location },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -112,6 +124,11 @@ pub struct TaskList {
 impl TaskList {
     pub fn tasks(&self) -> &[Task] {
         &self.tasks
+    }
+
+    /// The tasks the activity panel lists.
+    pub fn shown(&self) -> impl Iterator<Item = &Task> {
+        self.tasks.iter().filter(|task| !task.dismissed)
     }
 
     pub fn active_count(&self) -> usize {
@@ -142,7 +159,7 @@ impl TaskList {
         )
     }
 
-    fn start_batch(&mut self, specs: Vec<(TaskSpec, Option<EntryKind>)>) -> Vec<Effect> {
+    pub(super) fn start_batch(&mut self, specs: Vec<(TaskSpec, Option<EntryKind>)>) -> Vec<Effect> {
         let batch = self.next_batch;
         self.next_batch += 1;
         specs
@@ -159,6 +176,9 @@ impl TaskList {
                     batch,
                     source_kind,
                     conflict: None,
+                    open_at: None,
+                    finished_at_ms: None,
+                    dismissed: false,
                 });
                 Effect::Post { key, spec }
             })
@@ -166,14 +186,17 @@ impl TaskList {
     }
 
     /// Takes over the queued and running tasks the server has for this user, such as those an
-    /// earlier page started before a reload.
+    /// earlier page started before a reload. Finished scans are taken too, for their result,
+    /// but stay out of the panel like the other finished tasks.
     pub fn adopt(&mut self, infos: Vec<TaskInfo>) -> Vec<Effect> {
         for info in infos {
             let known = self
                 .tasks
                 .iter()
                 .any(|task| task.server_id() == Some(info.id.as_str()));
-            if known || !info.state.is_active() {
+            let finished_scan =
+                matches!(info.spec, TaskSpec::Usage { .. }) && info.state == TaskState::Done;
+            if known || !(info.state.is_active() || finished_scan) {
                 continue;
             }
             let (key, batch) = (TaskKey(self.next_key), self.next_batch);
@@ -188,6 +211,9 @@ impl TaskList {
                 batch,
                 source_kind: None,
                 conflict: None,
+                open_at: None,
+                finished_at_ms: None,
+                dismissed: finished_scan,
             });
         }
         let mut effects = Vec::new();
@@ -237,7 +263,16 @@ impl TaskList {
                             id: info.id.clone(),
                         });
                     }
-                    let finished = !info.state.is_active();
+                    if let Some(path) = task.open_at.take() {
+                        effects.push(Effect::Open {
+                            id: info.id.clone(),
+                            at: Location {
+                                volume: task.spec.source().volume.clone(),
+                                path,
+                            },
+                        });
+                    }
+                    let finished = !info.state.is_active() && changes_files(&task.spec);
                     task.info = Some(*info);
                     if finished {
                         effects.push(Effect::Refresh);
@@ -278,11 +313,16 @@ impl TaskList {
         Vec::new()
     }
 
-    /// Forgets the finished tasks, here and on the server.
+    /// Forgets the finished tasks, here and on the server. A finished scan only leaves the
+    /// panel: its result stays on the server, which drops old ones by itself.
     pub fn clear_finished(&mut self) -> Vec<Effect> {
         let mut effects = Vec::new();
-        self.tasks.retain(|task| {
+        self.tasks.retain_mut(|task| {
             if task.is_active() {
+                return true;
+            }
+            if matches!(task.spec, TaskSpec::Usage { .. }) && task.state() == TaskState::Done {
+                task.dismissed = true;
                 return true;
             }
             if let Some(id) = task.server_id() {
@@ -293,7 +333,16 @@ impl TaskList {
         effects
     }
 
-    /// Applies a poll; true when a task finished.
+    /// Notes `now_ms` as the finish time of the tasks that just finished.
+    pub fn stamp_finished(&mut self, now_ms: i64) {
+        for task in &mut self.tasks {
+            if !task.is_active() && task.finished_at_ms.is_none() {
+                task.finished_at_ms = Some(now_ms);
+            }
+        }
+    }
+
+    /// Applies a poll; true when a task that changes files finished.
     fn update(&mut self, infos: &[TaskInfo]) -> bool {
         let mut finished = false;
         for task in &mut self.tasks {
@@ -301,7 +350,7 @@ impl TaskList {
                 continue;
             };
             if let Some(info) = infos.iter().find(|info| info.id == current.id) {
-                finished |= !info.state.is_active();
+                finished |= !info.state.is_active() && changes_files(&task.spec);
                 task.info = Some(info.clone());
             } else if self.polled.contains(&current.id) {
                 // Lost with a server restart.
@@ -311,7 +360,7 @@ impl TaskList {
                     details: None,
                     request_id: None,
                 }));
-                finished = true;
+                finished |= changes_files(&task.spec);
             }
         }
         finished
@@ -378,7 +427,11 @@ impl TaskList {
         }
     }
 
-    fn task_mut(&mut self, key: TaskKey) -> Option<&mut Task> {
+    pub(super) fn tasks_mut(&mut self) -> &mut Vec<Task> {
+        &mut self.tasks
+    }
+
+    pub(super) fn task_mut(&mut self, key: TaskKey) -> Option<&mut Task> {
         self.tasks.iter_mut().find(|task| task.key == key)
     }
 }
@@ -386,6 +439,11 @@ impl TaskList {
 /// Replace only suits a file over a file.
 fn suits(task: &Task, decision: Decision) -> bool {
     decision != Decision::Replace || task.allows_replace()
+}
+
+/// A space usage scan only reads: the listing need not reload when it ends.
+fn changes_files(spec: &TaskSpec) -> bool {
+    !matches!(spec, TaskSpec::Usage { .. })
 }
 
 #[cfg(test)]

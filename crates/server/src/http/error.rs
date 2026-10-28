@@ -6,6 +6,7 @@ use axum::response::{IntoResponse, Response};
 use serde_json::json;
 use shared::api::error::ErrorBody;
 
+use crate::favorites::MAX_FAVORITES;
 use crate::http::request_id::request_id;
 use crate::storage::{InvalidPath, StorageError};
 
@@ -98,6 +99,24 @@ impl ApiError {
             StatusCode::NOT_FOUND,
             "upload_not_found",
             "Upload not found",
+        )
+    }
+
+    #[must_use]
+    pub fn favorites_full() -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            "favorites_full",
+            format!("Favorites are limited to {MAX_FAVORITES}"),
+        )
+    }
+
+    #[must_use]
+    pub fn thumbnail_unavailable() -> Self {
+        Self::new(
+            StatusCode::NOT_FOUND,
+            "thumbnail_unavailable",
+            "No thumbnail for this file",
         )
     }
 

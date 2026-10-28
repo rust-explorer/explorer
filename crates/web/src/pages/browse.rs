@@ -7,15 +7,21 @@ use shared::api::browse::{Listing, VolumeInfo};
 
 use crate::api;
 use crate::components::{
-    Breadcrumb, DropZone, ErrorPanel, FileTable, NewFolderButton, Shell, Sidebar, UploadButton,
+    AnalyzeButton, Breadcrumb, DropZone, ErrorPanel, FileGrid, FileTable, NewFolderButton,
+    ReadOnlyNotice, RefreshButton, SearchField, SearchResults, Shell, Sidebar, UploadButton,
+    ViewToggle,
 };
+use crate::favorites::use_favorites_sync;
 use crate::revision::Revision;
 use crate::routes::{Segment, Segments};
+use crate::search::{SearchQuery, effective_query};
 use crate::selection::Selection;
+use crate::view_mode::ViewMode;
 
 #[component]
 pub fn Browse(volume: Segment, path: Segments) -> Element {
     let Revision(revision) = use_context();
+    use_favorites_sync();
     let mut me = use_resource(|| api::get_json::<Me>("/api/me"));
     let mut volumes = use_resource(move || {
         revision();
@@ -31,10 +37,19 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
     }));
 
     let mut selection = use_signal(Selection::default);
+    let SearchQuery(mut query) = use_context();
+    let view_mode = use_context::<Signal<ViewMode>>();
     use_effect(use_reactive!(|url| {
         let _ = url;
         selection.write().clear();
+        query.set(String::new());
     }));
+    // The results replace the listing: a selection there would act on rows out of sight.
+    use_effect(move || {
+        if effective_query(&query.read()).is_some() && !selection.peek().is_empty() {
+            selection.write().clear();
+        }
+    });
 
     let user = match me.read().clone() {
         Some(Ok(user)) => user,
@@ -57,12 +72,24 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
         .and_then(|volumes| volumes.as_ref().ok())
         .and_then(|volumes| volumes.iter().find(|info| info.name == volume.as_str()))
         .map(|info| info.read_only);
+    let busy = !matches!(*listing.state().read(), UseResourceState::Ready);
     let actions = read_only.map(|read_only| {
         rsx! {
+            RefreshButton { busy }
+            ViewToggle {}
+            AnalyzeButton {
+                volume: volume.as_str().to_owned(),
+                path: path.joined(),
+                class: "hidden md:inline-flex",
+            }
             NewFolderButton { volume: volume.as_str().to_owned(), path: path.joined(), read_only }
             UploadButton { volume: volume.as_str().to_owned(), path: path.joined(), read_only }
         }
     });
+
+    let search = rsx! {
+        SearchField { key: "{url}", volume: volume.as_str().to_owned() }
+    };
 
     let sidebar = match volumes.read().clone() {
         Some(Ok(volumes)) => rsx! {
@@ -84,7 +111,23 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
 
     let ready = *listing.state().read() == UseResourceState::Ready;
     let current = current_result(listing.read().as_ref(), &url, ready);
+    let searching = effective_query(&query.read()).map(ToOwned::to_owned);
     let content = match current {
+        _ if searching.is_some() => rsx! {
+            SearchResults {
+                volume: volume.as_str().to_owned(),
+                query: searching.clone().unwrap_or_default(),
+            }
+        },
+        Some(Ok(entries)) if view_mode() == ViewMode::Grid => rsx! {
+            FileGrid {
+                volume: volume.clone(),
+                path: path.clone(),
+                entries,
+                read_only: read_only.unwrap_or(true),
+                selection,
+            }
+        },
         Some(Ok(entries)) => rsx! {
             FileTable {
                 volume: volume.clone(),
@@ -105,9 +148,12 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
     };
 
     rsx! {
-        Shell { user, sidebar, actions,
+        Shell { user, sidebar, actions, search,
             DropZone { volume: volume.as_str().to_owned(), path: path.joined(), read_only,
                 Breadcrumb { volume: volume.clone(), path: path.clone() }
+                if read_only == Some(true) {
+                    ReadOnlyNotice {}
+                }
                 {content}
             }
         }

@@ -21,8 +21,25 @@ pub fn entries_url(volume: &str, path: &str) -> String {
     )
 }
 
+pub fn search_url(volume: &str, query: &str) -> String {
+    format!(
+        "/api/volumes/{}/search?q={}",
+        encode_component(volume),
+        encode_component(query)
+    )
+}
+
 pub fn download_url(volume: &str, path: &str) -> String {
     files_url("download", volume, path)
+}
+
+/// `v` changes with the file, so the browser does not keep showing an outdated preview.
+pub fn thumbnail_url(volume: &str, path: &str, modified_ms: Option<i64>) -> String {
+    let mut url = files_url("thumbnail", volume, path);
+    if let Some(ms) = modified_ms {
+        let _ = write!(url, "&v={ms}");
+    }
+    url
 }
 
 pub fn zip_url(volume: &str, path: &str) -> String {
@@ -53,11 +70,30 @@ pub fn rename_url(volume: &str) -> String {
     format!("/api/volumes/{}/rename", encode_component(volume))
 }
 
+pub const FAVORITES_URL: &str = "/api/favorites";
+
+pub fn favorite_url(volume: &str, path: &str) -> String {
+    format!(
+        "{FAVORITES_URL}?volume={}&path={}",
+        encode_component(volume),
+        encode_component(path)
+    )
+}
+
 pub const TASKS_URL: &str = "/api/tasks";
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn task_url(id: &str) -> String {
     format!("{TASKS_URL}/{}", encode_component(id))
+}
+
+/// One folder of a finished usage scan.
+pub fn usage_url(id: &str, path: &str) -> String {
+    format!(
+        "{TASKS_URL}/{}/usage?path={}",
+        encode_component(id),
+        encode_component(path)
+    )
 }
 
 fn files_url(action: &str, volume: &str, path: &str) -> String {
@@ -98,7 +134,27 @@ mod tests {
             zip_selection_url("media", "Films/é", &["a b", "c&d"]),
             "/files/zip?volume=media&path=Films%2F%C3%A9&name=a%20b&name=c%26d"
         );
+        assert_eq!(
+            search_url("my media", "a b&c é"),
+            "/api/volumes/my%20media/search?q=a%20b%26c%20%C3%A9"
+        );
+        assert_eq!(
+            thumbnail_url("my media", "Photos/é #.jpg", Some(1_700_000_000_123)),
+            "/files/thumbnail?volume=my%20media&path=Photos%2F%C3%A9%20%23.jpg&v=1700000000123"
+        );
+        assert_eq!(
+            thumbnail_url("media", "a.png", None),
+            "/files/thumbnail?volume=media&path=a.png"
+        );
         assert_eq!(rename_url("my files"), "/api/volumes/my%20files/rename");
         assert_eq!(task_url("0a/b"), "/api/tasks/0a%2Fb");
+        assert_eq!(
+            usage_url("0a", "Films/é #?"),
+            "/api/tasks/0a/usage?path=Films%2F%C3%A9%20%23%3F"
+        );
+        assert_eq!(
+            favorite_url("my files", "é/x"),
+            "/api/favorites?volume=my%20files&path=%C3%A9%2Fx"
+        );
     }
 }

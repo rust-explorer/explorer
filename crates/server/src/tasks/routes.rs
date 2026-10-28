@@ -9,6 +9,7 @@ use shared::api::tasks::{Location, TaskInfo, TaskSpec};
 
 use super::registry::Stopped;
 use super::transfer::{TransferKind, TransferTask};
+use super::usage;
 use super::{Progress, TaskError};
 use crate::auth::{Action, CurrentUser};
 use crate::http::AppState;
@@ -92,6 +93,15 @@ pub async fn create(
                 *conflict,
             )
             .await?
+        }
+        TaskSpec::Usage { source } => {
+            let path = usage::check(&state, &user, &source.volume, &source.path).await?;
+            Box::new(usage::op(
+                Arc::clone(&state.volumes),
+                user.sub.clone(),
+                source.volume.clone(),
+                path,
+            ))
         }
     };
     let request_id = Some(request_id(&headers).to_owned()).filter(|id| !id.is_empty());

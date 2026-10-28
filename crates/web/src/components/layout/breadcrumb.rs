@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 use dioxus_i18n::t;
 
+use crate::components::favorites::FavoriteToggle;
+use crate::components::usage::AnalyzeButton;
 use crate::routes::{Route, Segment, Segments};
 
 const LINK_CLASS: &str =
@@ -12,33 +14,42 @@ pub fn Breadcrumb(volume: Segment, path: Segments) -> Element {
     let names = path.names();
 
     rsx! {
-        nav { aria_label: t!("breadcrumb"),
-            ol { class: "flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm text-slate-500 dark:text-slate-400",
-                li { class: "flex min-w-0 items-center",
-                    if names.is_empty() {
-                        span { class: CURRENT_CLASS, aria_current: "page", {volume.as_str()} }
-                    } else {
-                        Link {
-                            to: Route::Browse { volume: volume.clone(), path: Segments::default() },
-                            class: LINK_CLASS,
-                            {volume.as_str()}
-                        }
-                    }
-                }
-                for (index, name) in names.iter().enumerate() {
-                    li { key: "{index}", class: "flex min-w-0 items-center gap-x-1.5",
-                        span { aria_hidden: "true", "›" }
-                        if index + 1 == names.len() {
-                            span { class: CURRENT_CLASS, aria_current: "page", {name.clone()} }
+        div { class: "flex flex-wrap items-center gap-x-2",
+            nav { class: "min-w-0 flex-1", aria_label: t!("breadcrumb"),
+                ol { class: "flex min-w-0 flex-wrap items-center gap-x-1.5 text-sm text-slate-500 dark:text-slate-400",
+                    li { class: "flex min-w-0 items-center",
+                        if names.is_empty() {
+                            span { class: CURRENT_CLASS, aria_current: "page", {volume.as_str()} }
                         } else {
                             Link {
-                                to: Route::Browse { volume: volume.clone(), path: path.prefix(index + 1) },
+                                to: Route::Browse { volume: volume.clone(), path: Segments::default() },
                                 class: LINK_CLASS,
-                                {name.clone()}
+                                {volume.as_str()}
+                            }
+                        }
+                    }
+                    for (index, name) in names.iter().enumerate() {
+                        li { key: "{index}", class: "flex min-w-0 items-center gap-x-1.5",
+                            span { aria_hidden: "true", "›" }
+                            if index + 1 == names.len() {
+                                span { class: CURRENT_CLASS, aria_current: "page", {name.clone()} }
+                            } else {
+                                Link {
+                                    to: Route::Browse { volume: volume.clone(), path: path.prefix(index + 1) },
+                                    class: LINK_CLASS,
+                                    {name.clone()}
+                                }
                             }
                         }
                     }
                 }
+            }
+            FavoriteToggle { volume: volume.as_str().to_owned(), path: path.joined() }
+            // The header has no room for it on phones.
+            AnalyzeButton {
+                volume: volume.as_str().to_owned(),
+                path: path.joined(),
+                class: "inline-flex md:hidden",
             }
         }
     }

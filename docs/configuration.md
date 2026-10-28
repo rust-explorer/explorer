@@ -37,7 +37,7 @@ expires after this much inactivity. Values above 400 days are capped at 400 days
 | Path | Purpose |
 |---|---|
 | `/data` | Each real directory mounted under `/data` is a volume, named after its mount point. Read at startup. |
-| `/config` | Explorer's state: sessions and upload records in `explorer.db` (SQLite). Must be writable by the container user; startup checks this and exits with a clear message otherwise. |
+| `/config` | Explorer's state: sessions, upload records and favorites in `explorer.db` (SQLite), and the thumbnail cache. Must be writable by the container user; startup checks this and exits with a clear message otherwise. |
 | `/usr/share/explorer/web` | Web bundle, shipped in the image. |
 
 The server listens on `0.0.0.0:8080`. These are fixed in the image.
@@ -53,6 +53,16 @@ for volumes.
 | `EXPLORER_DATA_DIR` | `/data` |
 | `EXPLORER_CONFIG_DIR` | `/config` |
 | `EXPLORER_WEB_DIR` | `/usr/share/explorer/web` |
+
+## Thumbnail cache
+
+Thumbnails of images are cached as files in `/config/cache/thumbnails`, created at startup
+(a failure to create it stops the server). Nothing needs configuring. A thumbnail is
+rendered on first request, which is why a large folder of photos fills the grid a few at a
+time on the first visit. A cached file is touched when it is read after more than 7 days;
+the server removes the files not used for 30 days at startup and then once a day, so the
+cache stops growing with deleted or renamed images. It is only a cache: deleting the folder
+is safe and the thumbnails are rebuilt on demand.
 
 ## Container user
 

@@ -1,10 +1,22 @@
 mod drop_zone;
+mod empty_folder;
+mod entry_actions;
+mod file_grid;
 mod file_row;
 mod file_table;
+mod file_tile;
+mod read_only_notice;
+mod refresh_button;
 mod row_menu;
 mod select_cell;
 mod selection_bar;
+mod view_toggle;
 mod virtual_list;
 
 pub use drop_zone::DropZone;
+pub use file_grid::FileGrid;
+pub use file_row::EntryIcon;
 pub use file_table::FileTable;
+pub use read_only_notice::ReadOnlyNotice;
+pub use refresh_button::RefreshButton;
+pub use view_toggle::ViewToggle;

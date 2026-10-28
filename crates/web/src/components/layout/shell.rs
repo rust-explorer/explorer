@@ -12,12 +12,13 @@ const SIDEBAR_ID: &str = "sidebar";
 
 /// Page frame shared by every route; the user menu appears once the session is known.
 /// With a `sidebar`, the page becomes sidebar plus content, and the sidebar is a drawer below `md`.
-/// `actions` sit in the header, before the user menu.
+/// `search` and `actions` sit in the header, before the user menu.
 #[component]
 pub fn Shell(
     user: Option<Me>,
     sidebar: Option<Element>,
     actions: Option<Element>,
+    search: Option<Element>,
     children: Element,
 ) -> Element {
     let mut drawer_open = use_signal(|| false);
@@ -78,7 +79,7 @@ pub fn Shell(
         div { class: "flex {frame_height} flex-col bg-slate-50 text-gray-800 dark:bg-slate-950 dark:text-slate-200",
             header {
                 inert: if drawer_open() { "true" },
-                class: "flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-900",
+                class: "relative flex h-12 shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-900",
                 if has_sidebar {
                     button {
                         r#type: "button",
@@ -93,7 +94,10 @@ pub fn Shell(
                 }
                 span { class: "inline-block size-3 rounded-sm bg-indigo-600 dark:bg-indigo-400" }
                 span { class: "font-bold text-gray-900 dark:text-white", {t!("app-name")} }
-                div { class: "ml-auto flex items-center gap-3",
+                div { class: "ml-auto flex items-center gap-1 sm:gap-3",
+                    if let Some(search) = search {
+                        {search}
+                    }
                     if let Some(actions) = actions {
                         {actions}
                     }

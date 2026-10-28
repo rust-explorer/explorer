@@ -1,3 +1,17 @@
 @import "tailwindcss";
 
 @source "./src";
+
+:root {
+  color-scheme: light dark;
+}
+
+dialog::backdrop {
+  background-color: rgb(15 23 42 / 0.4);
+}
+
+@media (prefers-color-scheme: dark) {
+  dialog::backdrop {
+    background-color: rgb(0 0 0 / 0.6);
+  }
+}

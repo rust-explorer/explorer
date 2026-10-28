@@ -28,15 +28,20 @@ pub enum TaskSpec {
         #[serde(default)]
         conflict: ConflictPolicy,
     },
+    /// Measures the space a folder takes, sub-folder by sub-folder.
+    Usage {
+        source: Location,
+    },
 }
 
 impl TaskSpec {
     #[must_use]
     pub fn source(&self) -> &Location {
         match self {
-            Self::Delete { source } | Self::Copy { source, .. } | Self::Move { source, .. } => {
-                source
-            }
+            Self::Delete { source }
+            | Self::Copy { source, .. }
+            | Self::Move { source, .. }
+            | Self::Usage { source } => source,
         }
     }
 }
@@ -118,6 +123,12 @@ mod tests {
             "conflict": "keep_both",
         }))
         .unwrap();
+        let usage: TaskSpec = serde_json::from_value(json!({
+            "op": "usage",
+            "source": {"volume": "media", "path": "Films"},
+        }))
+        .unwrap();
+        assert_eq!(usage.source(), &location("media", "Films"));
         assert!(matches!(
             moved,
             TaskSpec::Move {

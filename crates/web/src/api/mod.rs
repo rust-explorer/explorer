@@ -5,12 +5,12 @@ use shared::api::error::ErrorBody;
 
 mod urls;
 
+pub use urls::{
+    FAVORITES_URL, download_url, encode_component, entries_url, favorite_url, folders_url,
+    rename_url, search_url, thumbnail_url, upload_url, usage_url, zip_selection_url, zip_url,
+};
 #[cfg_attr(not(target_arch = "wasm32"), allow(unused_imports))]
 pub use urls::{TASKS_URL, task_url};
-pub use urls::{
-    download_url, encode_component, entries_url, folders_url, rename_url, upload_url,
-    zip_selection_url, zip_url,
-};
 
 const UNAUTHENTICATED: &str = "unauthenticated";
 
@@ -48,6 +48,40 @@ pub async fn get_json<T: DeserializeOwned>(path: &str) -> Result<T, ApiFailure> 
     send(gloo_net::http::Request::get(path)).await
 }
 
+/// Like [`get_json`]; aborting through `signal` makes it fail with [`ApiFailure::Network`].
+#[cfg(target_arch = "wasm32")]
+pub async fn get_json_abortable<T: DeserializeOwned>(
+    path: &str,
+    signal: &AbortSignal,
+) -> Result<T, ApiFailure> {
+    send(gloo_net::http::Request::get(path).abort_signal(Some(signal))).await
+}
+
+/// Aborts the requests made with its signal when dropped.
+#[cfg(target_arch = "wasm32")]
+pub struct AbortGuard(web_sys::AbortController);
+
+#[cfg(target_arch = "wasm32")]
+pub use web_sys::AbortSignal;
+
+#[cfg(target_arch = "wasm32")]
+impl AbortGuard {
+    pub fn new() -> Self {
+        Self(web_sys::AbortController::new().expect("AbortController is available"))
+    }
+
+    pub fn signal(&self) -> AbortSignal {
+        self.0.signal()
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Drop for AbortGuard {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 pub async fn post_json<T: DeserializeOwned>(path: &str) -> Result<T, ApiFailure> {
     send(gloo_net::http::Request::post(path)).await
@@ -59,12 +93,44 @@ pub async fn post_json_body<B: Serialize, T: DeserializeOwned>(
     path: &str,
     body: &B,
 ) -> Result<T, ApiFailure> {
-    let request = gloo_net::http::Request::post(path)
+    send_json_body(gloo_net::http::Request::post(path), body).await
+}
+
+/// Like [`post_json_body`], with PUT.
+#[cfg(target_arch = "wasm32")]
+pub async fn put_json_body<B: Serialize, T: DeserializeOwned>(
+    path: &str,
+    body: &B,
+) -> Result<T, ApiFailure> {
+    send_json_body(gloo_net::http::Request::put(path), body).await
+}
+
+/// DELETEs `path`; an empty success response (204) reads as `null`, so `()` works.
+#[cfg(target_arch = "wasm32")]
+pub async fn delete_json<T: DeserializeOwned>(path: &str) -> Result<T, ApiFailure> {
+    let request = gloo_net::http::Request::delete(path)
+        .credentials(web_sys::RequestCredentials::SameOrigin)
+        .header("accept", "application/json");
+    read_json(request.send().await.map_err(|_| ApiFailure::Network)?).await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn send_json_body<B: Serialize, T: DeserializeOwned>(
+    request: gloo_net::http::RequestBuilder,
+    body: &B,
+) -> Result<T, ApiFailure> {
+    let request = request
         .credentials(web_sys::RequestCredentials::SameOrigin)
         .header("accept", "application/json")
         .json(body)
         .map_err(|_| ApiFailure::Network)?;
-    let response = request.send().await.map_err(|_| ApiFailure::Network)?;
+    read_json(request.send().await.map_err(|_| ApiFailure::Network)?).await
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn read_json<T: DeserializeOwned>(
+    response: gloo_net::http::Response,
+) -> Result<T, ApiFailure> {
     let text = response.text().await.unwrap_or_default();
     if !response.ok() {
         return Err(failure(response.status(), &text));
@@ -127,6 +193,32 @@ pub fn get_json<T: DeserializeOwned>(_: &str) -> std::future::Ready<Result<T, Ap
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+pub struct AbortSignal;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub struct AbortGuard;
+
+#[cfg(not(target_arch = "wasm32"))]
+impl AbortGuard {
+    pub fn new() -> Self {
+        Self
+    }
+
+    #[expect(clippy::unused_self, reason = "mirrors the wasm guard")]
+    pub fn signal(&self) -> AbortSignal {
+        AbortSignal
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn get_json_abortable<T: DeserializeOwned>(
+    _: &str,
+    _: &AbortSignal,
+) -> std::future::Ready<Result<T, ApiFailure>> {
+    std::future::ready(Err(ApiFailure::Network))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn post_json<T: DeserializeOwned>(_: &str) -> std::future::Ready<Result<T, ApiFailure>> {
     std::future::ready(Err(ApiFailure::Network))
 }
@@ -136,6 +228,19 @@ pub fn post_json_body<B: Serialize, T: DeserializeOwned>(
     _: &str,
     _: &B,
 ) -> std::future::Ready<Result<T, ApiFailure>> {
+    std::future::ready(Err(ApiFailure::Network))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn put_json_body<B: Serialize, T: DeserializeOwned>(
+    _: &str,
+    _: &B,
+) -> std::future::Ready<Result<T, ApiFailure>> {
+    std::future::ready(Err(ApiFailure::Network))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn delete_json<T: DeserializeOwned>(_: &str) -> std::future::Ready<Result<T, ApiFailure>> {
     std::future::ready(Err(ApiFailure::Network))
 }
 

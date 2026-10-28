@@ -217,3 +217,82 @@ pub fn TrashIcon(#[props(default = "size-4".to_owned())] class: String) -> Eleme
         }
     }
 }
+
+#[component]
+pub fn RefreshIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M20 11a8 8 0 0 0-14.9-3M4 5v3h3M4 13a8 8 0 0 0 14.9 3M20 19v-3h-3" }
+        }
+    }
+}
+
+#[component]
+pub fn StarIcon(
+    #[props(default = "size-5".to_owned())] class: String,
+    #[props(default)] filled: bool,
+) -> Element {
+    let fill = if filled { "currentColor" } else { "none" };
+    rsx! {
+        Icon { class,
+            path {
+                fill,
+                d: "m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z",
+            }
+        }
+    }
+}
+
+#[component]
+pub fn SearchIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M10.5 18a7.5 7.5 0 1 0 0-15 7.5 7.5 0 0 0 0 15ZM16 16l5 5" }
+        }
+    }
+}
+
+#[component]
+pub fn ArrowLeftIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M19 12H5M11 6l-6 6 6 6" }
+        }
+    }
+}
+
+#[component]
+pub fn ListIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" }
+        }
+    }
+}
+
+#[component]
+pub fn GridIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" }
+        }
+    }
+}
+
+#[component]
+pub fn ChartIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M21 12a9 9 0 1 1-9-9v9zM15 3.5A9 9 0 0 1 20.5 9H15z" }
+        }
+    }
+}
+
+#[component]
+pub fn WarningIcon(#[props(default = "size-4".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M12 4 2.5 20h19zM12 10v4M12 17h.01" }
+        }
+    }
+}

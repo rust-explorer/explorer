@@ -1,7 +1,7 @@
 # Security
 
 This page describes what Explorer protects against as of the browsing, download,
-upload and file management milestone. To report a vulnerability, follow [SECURITY.md](../SECURITY.md); do not open a
+upload, file management and polish (favorites, search, thumbnails, space usage) milestone. To report a vulnerability, follow [SECURITY.md](../SECURITY.md); do not open a
 public issue.
 
 ## Scope
@@ -45,7 +45,7 @@ Login is a harmless `GET` that only starts a sign-in; the callback is protected 
 
 This covers every write: creating, appending to and cancelling an upload (`POST`, `PATCH`,
 `DELETE` under `/files/uploads`), creating a folder, renaming, and creating or cancelling a
-task (`POST /api/tasks`, `DELETE /api/tasks/{id}`). The zip of several entries is a `GET` and
+task (`POST /api/tasks`, `DELETE /api/tasks/{id}`), and adding or removing a favorite (`PUT`, `DELETE /api/favorites`). The zip of several entries is a `GET` and
 changes nothing. Uploads use same-origin `XHR` and
 `fetch`, so the browser sends an `Origin` the check accepts.
 
@@ -208,6 +208,60 @@ action reach outside its volume.
   cancelled or dismissed task is logged at `info` with the user's `sub`, `action` (`cancel`
   or `dismiss`) and the task id. File contents are never logged.
 
+## Favorites, search, thumbnails and space usage
+
+These features only read. They go through the same `(volume, path)` parsing and cap-std
+confinement as everything else, work on read-only volumes, and check read access to the
+volume on every request.
+
+- **Favorites** belong to the OIDC `sub` that created them: the list, add and remove routes only
+  see the caller's rows, and the limit of 100 is per user. A favorite is a bookmark, not a
+  grant: opening it is an ordinary listing, so it needs read access then, and a path that
+  has become a symlink escape is still refused. The path is validated and must be an existing
+  folder when it is added.
+- **Search** is confined to the volume it is called on. It lists the entries of each folder
+  without opening anything, never descends into a symlinked folder (so no cycle and no
+  escape), never matches an entry listed as `other` (absolute, broken or escaping symlinks,
+  sockets, FIFOs, devices) and skips `.explorer-uploads`. A query needs 2 characters, the
+  walk is capped at 200 hits and 20 seconds and stops when the client goes away, so one
+  request cannot keep a thread for long. The query is only logged at `debug`.
+- **Space usage** walks a folder with directory file descriptors opened with `O_NOFOLLOW`
+  and checks each folder's device and inode again when it opens it, so a folder swapped for a
+  symlink during the scan is not entered. It never follows a symlink, never crosses to another
+  filesystem, and skips `.explorer-uploads`. It reads metadata only, never file contents. A
+  folder it cannot read marks the result `incomplete` instead of failing. A scan is a task, so it
+  belongs to the `sub` that started it, shares the limit of 2 running tasks, and its result
+  (at most 4 per user, one per folder) lives in memory only; reading it checks access to the
+  scanned folder again. The totals show how much space a folder takes, which every signed-in
+  user could already compute by listing it.
+
+### Thumbnails
+
+An image is user-controlled input fed to a decoder, so thumbnails are made defensively and
+never serve the original:
+
+- **Re-encoded.** The response is a fresh JPEG or PNG made from the decoded pixels, at most
+  320 px on a side; metadata (EXIF, ICC, comments) is not copied. It is served inline, as an
+  `<img>` source, which is why it is not a download.
+- **Limits.** Only `jpg`, `jpeg`, `png`, `gif` and `webp` names are tried, and the content must
+  actually be one of those formats (a renamed file is refused). A source over 64 MiB is
+  refused, and at most 64 MiB are read even if the file grows meanwhile. The decoder is given
+  limits of 16,384 px per side and 512 MiB of allocation, and an image whose decoded size
+  exceeds that is refused. Anything refused or undecodable is 404 `thumbnail_unavailable`
+  and logged at `debug`.
+- **Concurrency.** At most 2 decodes run at once across all users, each on the blocking pool.
+  The permit stays with the work when the request is cancelled, so scrolling through a large
+  grid cannot start more decodes than that.
+- **Headers.** `Content-Type` is the format that was written (`image/jpeg` or `image/png`),
+  with `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`, like downloads.
+  `Cache-Control: private, max-age=604800` keeps it out of shared caches; the strong `ETag`
+  is derived from the volume, path, size and modification time.
+- **Cache.** Thumbnails are files under `/config/cache/thumbnails`, named by a hash that
+  includes the volume, path, size, modification time and a rendering version; they hold no
+  user name or path. They are not access-controlled by themselves: every request checks read
+  access to the source first, then looks the thumbnail up. Entries untouched for 30 days
+  are swept.
+
 ## Downloads
 
 User files are never rendered by the browser in the app's origin. Every download (file and
@@ -238,7 +292,7 @@ Every app response carries a CSP of `default-src 'self'; script-src 'self' 'wasm
 style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none';
 base-uri 'self'; form-action 'self'`, plus `X-Content-Type-Options` and `Referrer-Policy`.
 Download and zip responses replace that CSP with `Content-Security-Policy: sandbox` (see
-[Downloads](#downloads)).
+[Downloads](#downloads)); thumbnails send the sandbox policy too (see [Thumbnails](#thumbnails)). `img-src` allows `'self'`, so grid tiles load.
 Sign-in did not loosen it. The provider is reached by top-level redirects only.
 
 ## Secrets and logs

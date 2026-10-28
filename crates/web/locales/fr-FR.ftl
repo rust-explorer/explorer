@@ -25,8 +25,16 @@ sidebar-read-only = Lecture seule
 sidebar-free = { $volume } · { $available } libres
 sidebar-used-label = Espace utilisé
 sidebar-used = { $used } utilisés sur { $total }
+favorites-title = Favoris
+favorites-not-found = Introuvable
+favorites-remove = Retirer { $name } des favoris
+favorites-add = Ajouter aux favoris
+favorites-remove-current = Retirer des favoris
 breadcrumb = Fil d'Ariane
 browse-empty = Ce dossier est vide.
+browse-empty-hint = Déposez des fichiers ici ou utilisez Uploader.
+read-only-notice = Lecture seule : vous pouvez parcourir, télécharger et copier depuis ce volume, mais pas le modifier.
+read-only-notice-short = Volume en lecture seule
 table-label = Contenu du dossier
 table-name = Nom
 table-size = Taille
@@ -63,6 +71,8 @@ error-unsupported_media_type = Le serveur a refusé le format de cet upload.
 error-cross_device = { $path } se trouve sur un autre système de fichiers que son volume, rien ne peut donc y être enregistré. Un administrateur peut monter ce dossier comme un volume à part entière.
 error-invalid_destination = { $path } ne peut pas être déplacé ou copié à cet endroit.
 error-task_not_found = Cette tâche n'existe plus sur le serveur.
+error-favorites_full = Vous ne pouvez pas avoir plus de 100 favoris. Retirez-en un d'abord.
+error-thumbnail_unavailable = Aucun aperçu n'est disponible pour ce fichier.
 upload = Uploader
 upload-open = Uploader des fichiers ou un dossier
 upload-files = Fichiers…
@@ -169,8 +179,76 @@ move-title =
     }
 picker-volume = Volume
 picker-choose-volume = Choisissez un volume
+picker-volume-read-only = { $name } (lecture seule)
 picker-location = Dossier de destination
 picker-folders = Dossiers
 picker-empty = Aucun dossier ici
 picker-copy-here = Copier ici
 picker-move-here = Déplacer ici
+refresh = Actualiser
+view-mode = Affichage
+view-list = Affichage en liste
+view-grid = Affichage en grille
+grid-folder = Dossier
+grid-count =
+    { $count ->
+        [one] { $count } élément
+       *[other] { $count } éléments
+    }
+search-placeholder = Rechercher dans { $volume }
+search-open = Rechercher
+search-close = Fermer la recherche
+search-searching = Recherche en cours…
+search-results =
+    { $count ->
+        [one] 1 résultat pour « { $query } » dans { $volume }
+       *[other] { $count } résultats pour « { $query } » dans { $volume }
+    }
+search-empty = Aucun résultat pour « { $query } » dans { $volume }
+search-truncated = Affichage des { $count } premiers, affinez votre recherche.
+search-timed-out = La recherche a pris trop de temps ; les résultats peuvent être incomplets.
+action-analyze-usage = Analyser l’espace
+action-calculate-size = Calculer la taille
+analyze-usage = Analyser l’espace
+folder-size-calculated = Calculée à { $time }
+folder-size-computing = Calcul de la taille…
+task-analysing = Analyse de { $name }
+task-analysing-counts =
+    { $count ->
+        [one] Analyse de { $name } — { $files } fichier, { $size }
+       *[other] Analyse de { $name } — { $files } fichiers, { $size }
+    }
+task-view = Voir
+task-view-usage = Voir l’espace occupé par { $name }
+usage-breadcrumb = Dossiers analysés
+usage-items = Contenu
+usage-empty = Ce dossier est vide.
+usage-files =
+    { $count ->
+        [one] { $files } fichier
+       *[other] { $files } fichiers
+    }
+usage-folders =
+    { $count ->
+        [one] { $folders } dossier
+       *[other] { $folders } dossiers
+    }
+usage-other-files =
+    { $count ->
+        [one] { $files } autre fichier
+       *[other] { $files } autres fichiers
+    }
+usage-percent = { $percent } %
+usage-percent-small = < 1 %
+usage-scanned-at = Analysé à { $time }
+usage-scan-again = Analyser à nouveau
+usage-open-in-explorer = Ouvrir dans l’explorateur
+usage-incomplete = Certains éléments n’ont pas pu être lus
+usage-collapsed = Trop de dossiers : les sous-dossiers de celui-ci sont comptés mais pas listés
+usage-scanning = Analyse de { $name }…
+usage-cancelled-title = Analyse annulée
+usage-cancelled-message = Cette analyse a été arrêtée avant la fin.
+usage-unavailable-title = Cette analyse n’est plus disponible
+usage-unavailable-message = Les résultats ne sont conservés qu’un temps après l’analyse. Analysez à nouveau le dossier pour voir ce qui occupe son espace.
+usage-failed-title = L’analyse a échoué
+usage-scan-finished = Analyse terminée

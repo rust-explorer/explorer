@@ -11,35 +11,44 @@ const BOX: &str = "size-4 cursor-pointer rounded border-slate-300 accent-indigo-
 /// A row's checkbox; a shift-click asks for a range instead of a toggle.
 #[component]
 pub fn SelectCell(name: String, checked: bool, on_select: EventHandler<bool>) -> Element {
+    rsx! {
+        div { role: "cell", class: "flex items-center justify-center self-stretch",
+            SelectBox { name, checked, on_select }
+        }
+    }
+}
+
+/// An entry's checkbox, as in [`SelectCell`].
+#[component]
+pub fn SelectBox(name: String, checked: bool, on_select: EventHandler<bool>) -> Element {
     let mut input = use_signal(|| None::<Rc<MountedData>>);
 
     rsx! {
-        div { role: "cell", class: "flex items-center justify-center self-stretch",
-            input {
-                r#type: "checkbox",
-                class: BOX,
-                aria_label: t!("select-entry", name: name.clone()),
-                checked,
-                onmounted: move |event| input.set(Some(event.data())),
-                onclick: move |event: MouseEvent| {
-                    if let Some(input) = input() {
-                        show_state(&input, checked, false);
-                    }
-                    on_select.call(event.modifiers().shift());
-                },
-            }
+        input {
+            r#type: "checkbox",
+            class: BOX,
+            aria_label: t!("select-entry", name: name.clone()),
+            checked,
+            onmounted: move |event| input.set(Some(event.data())),
+            onclick: move |event: MouseEvent| {
+                if let Some(input) = input() {
+                    show_state(&input, checked, false);
+                }
+                on_select.call(event.modifiers().shift());
+            },
         }
     }
 }
 
 /// The header checkbox: everything, nothing, or partly (`indeterminate`). `input` holds the box,
-/// for dialogs that hand focus back to it.
+/// for dialogs that hand focus back to it. Outside a table, `role` is `none`.
 #[component]
 pub fn SelectAll(
     mut input: Signal<Option<Rc<MountedData>>>,
     checked: bool,
     partial: bool,
     on_toggle: EventHandler<()>,
+    #[props(default = "columnheader")] role: &'static str,
 ) -> Element {
     use_effect(use_reactive!(|checked, partial| {
         if let Some(input) = input() {
@@ -48,7 +57,7 @@ pub fn SelectAll(
     }));
 
     rsx! {
-        div { role: "columnheader", class: "flex items-center justify-center",
+        div { role, class: "flex items-center justify-center",
             input {
                 r#type: "checkbox",
                 class: BOX,

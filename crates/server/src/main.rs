@@ -8,12 +8,14 @@ use explorer_server::auth::oidc::Oidc;
 use explorer_server::auth::session;
 use explorer_server::config::Config;
 use explorer_server::db;
+use explorer_server::favorites::Favorites;
 use explorer_server::healthcheck;
 use explorer_server::http::static_files::check_bundle;
 use explorer_server::http::{AppState, router};
 use explorer_server::storage::Volumes;
 use explorer_server::tasks::Tasks;
 use explorer_server::telemetry;
+use explorer_server::thumbnails::{self, Thumbnails};
 use explorer_server::uploads::{self, Uploads};
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
@@ -89,6 +91,14 @@ async fn main() -> ExitCode {
         }
     };
 
+    let thumbnail_cache = match Thumbnails::new(config.config_dir.join(thumbnails::CACHE_DIR)) {
+        Ok(cache) => Arc::new(cache),
+        Err(err) => {
+            tracing::error!(error = %err, "thumbnail cache unavailable");
+            return ExitCode::from(2);
+        }
+    };
+
     let volumes = Arc::new(volumes);
     let upload_registry = Arc::new(Uploads::new(pool.clone()));
     let state = AppState {
@@ -98,6 +108,8 @@ async fn main() -> ExitCode {
         volumes: Arc::clone(&volumes),
         uploads: Arc::clone(&upload_registry),
         tasks: Arc::new(Tasks::new()),
+        favorites: Arc::new(Favorites::new(pool.clone())),
+        thumbnails: Arc::clone(&thumbnail_cache),
     };
     tracing::info!("no background task to recover: tasks live in memory only");
     let app = match router(state).await {
@@ -109,6 +121,7 @@ async fn main() -> ExitCode {
     };
     let _cleanup = session::spawn_expired_cleanup(pool);
     let _sweeper = uploads::spawn_sweeper(upload_registry, volumes);
+    let _thumbnail_sweeper = thumbnails::spawn_sweeper(thumbnail_cache);
 
     match serve(app).await {
         Ok(()) => ExitCode::SUCCESS,

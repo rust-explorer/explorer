@@ -6,7 +6,9 @@ Self-hosted web file manager written in Rust (Axum server, Dioxus web UI).
 folders (as zip) and resumable uploads (files and folders, drag and drop, conflict handling)
 work, and so does managing files: new folder, rename, multi-select (download several entries
 as one zip), and delete, copy and move, including between volumes, as background tasks with
-progress and cancellation. Tasks are not kept across a server restart.
+progress and cancellation. Tasks are not kept across a server restart. Also: refresh,
+favorite folders, search by name, a grid view with image thumbnails, a space usage screen
+(what takes the room in a folder) and dark mode.
 
 ## Quick start
 
