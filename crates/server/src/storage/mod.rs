@@ -11,7 +11,7 @@ mod volumes;
 mod write;
 
 pub use error::StorageError;
-pub use path::{InvalidPath, RelPath, STAGING_DIR};
+pub use path::{InvalidPath, RelPath, STAGING_DIR, is_staging_name};
 pub use read::{EntryKind, EntryMeta, Space, WalkItem};
 pub use search::{SEARCH_LIMIT, SearchHit, SearchOutcome};
 pub use staging::{StagedId, Staging};

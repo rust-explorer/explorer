@@ -1,8 +1,10 @@
 const MAX_PATH_LEN: usize = 4096;
 pub(super) const MAX_COMPONENT_LEN: usize = 255;
 
-/// Where uploads are staged, at each volume root; no `RelPath` can start with it.
-pub const STAGING_DIR: &str = ".explorer-uploads";
+/// Where uploads are staged, at each volume root; no `RelPath` can start with it, whatever its
+/// case.
+pub const STAGING_DIR: &str = shared::names::RESERVED_NAME;
+pub use shared::names::is_reserved_name as is_staging_name;
 
 /// A volume-relative path whose components are all plain names: no `.`, `..`, NUL or control characters.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,7 +44,10 @@ impl RelPath {
             }
             components.push(component);
         }
-        if components.first() == Some(&STAGING_DIR) {
+        if components
+            .first()
+            .is_some_and(|first| is_staging_name(first))
+        {
             return Err(invalid("reserved name"));
         }
         Ok(Self(components.join("/")))
@@ -173,6 +178,9 @@ mod tests {
             ".explorer-uploads",
             ".explorer-uploads/x",
             "/.explorer-uploads",
+            ".EXPLORER-UPLOADS",
+            ".Explorer-Uploads/x",
+            ".explorer-uploadſ",
         ] {
             assert!(RelPath::parse(raw).is_err(), "{raw:?}");
         }
@@ -185,6 +193,8 @@ mod tests {
             "a/.explorer-uploads",
             ".explorer-uploads2",
             "x/.explorer-uploads/y",
+            ".explorer-upload",
+            "a/.EXPLORER-UPLOADS",
         ] {
             assert!(RelPath::parse(raw).is_ok(), "{raw:?}");
         }

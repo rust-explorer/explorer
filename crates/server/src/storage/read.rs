@@ -5,7 +5,7 @@ use cap_std::fs::{Metadata, MetadataExt as _, OpenOptions, OpenOptionsExt};
 use rustix::fs::OFlags;
 
 use super::error::is_escape;
-use super::path::STAGING_DIR;
+use super::path::{STAGING_DIR, is_staging_name};
 use super::write::prefixes;
 use super::{RelPath, StorageError, Volume};
 
@@ -64,7 +64,7 @@ struct Reserved {
 
 impl Reserved {
     fn hides(&self, parent: Identity, name: &str, entry: Option<Identity>) -> bool {
-        (parent == self.root && name == STAGING_DIR) || (entry.is_some() && entry == self.staging)
+        (parent == self.root && is_staging_name(name)) || (entry.is_some() && entry == self.staging)
     }
 }
 

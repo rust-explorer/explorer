@@ -6,7 +6,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use rustix::fs::AtFlags;
 use rustix::io::Errno;
 
-use super::super::path::STAGING_DIR;
+use super::super::path::{STAGING_DIR, is_staging_name};
 use super::super::read::fs_path;
 use super::folder::{Measured, Source};
 use super::hard_links::{HardLink, HardLinks, Offered};
@@ -236,7 +236,7 @@ impl Scan<'_> {
         name: &CStr,
         stat: Measured,
     ) {
-        if (dir_id == self.root_id && name.to_bytes() == STAGING_DIR.as_bytes())
+        if (dir_id == self.root_id && name.to_str().is_ok_and(is_staging_name))
             || Some(stat.id()) == self.staging
         {
             return;

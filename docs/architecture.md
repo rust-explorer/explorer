@@ -153,7 +153,7 @@ How an upload is stored:
    created on first upload with mode `0700`, the file with `0666` less the umask, both owned
    by the container user; the final file keeps that mode, like any file the container
    creates. The offset reported to the client is the staged file's length, so it is right
-   after a crash. `.explorer-uploads` is rejected as the first component of any client path
+   after a crash. `.explorer-uploads`, in any letter case, is rejected as the first component of any client path
    (`invalid_path`, reason `reserved name`). It is also recognised by device and inode, so
    it is neither listed, zipped, read nor written through a symlink to the volume root or
    to the directory itself (`path_not_found`).
