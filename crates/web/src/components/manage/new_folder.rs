@@ -35,6 +35,7 @@ pub fn NewFolderButton(volume: String, path: String, read_only: bool) -> Element
 }
 
 /// Asks for a name and creates that folder inside `path`; the dialog stays open on an error.
+/// The folder is the one shown when the dialog opened, even if the browser navigates meanwhile.
 #[component]
 pub fn NewFolderDialog(
     volume: String,
@@ -42,6 +43,7 @@ pub fn NewFolderDialog(
     on_close: EventHandler<()>,
     #[props(default)] return_focus: Option<FocusTarget>,
 ) -> Element {
+    let (volume, path) = use_hook(move || (volume, path));
     let Revision(mut revision) = use_context();
     let mut name = use_signal(String::new);
     let mut problem = use_signal(|| None::<Problem>);
