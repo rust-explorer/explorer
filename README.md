@@ -12,8 +12,9 @@ favorite folders, search by name, a grid view with image thumbnails, a space usa
 
 ## Quick start
 
-> No image is published yet; build one
-> locally as described in [docs/development.md](docs/development.md#docker-image).
+> Images are published to `ghcr.io/fabienlege/explorer` from the first release (v1.0.0) on.
+> Before it, build one locally as described in
+> [docs/development.md](docs/development.md#docker-image) and set `image:` to its tag.
 
 You need Docker, an OIDC provider such as [PocketID](https://pocket-id.org) and a reverse
 proxy terminating TLS.

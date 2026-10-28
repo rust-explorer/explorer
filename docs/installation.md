@@ -1,7 +1,7 @@
 # Installation
 
-> **Status: work in progress.** Sign-in, browsing, downloads and uploads work; file
-> operations (rename, move, delete) arrive in a later milestone.
+> **Status: work in progress.** Sign-in, browsing, downloads, uploads and file operations
+> (new folder, rename, copy, move, delete) work.
 
 Explorer ships as a single Docker image (`linux/amd64`). You need:
 
@@ -99,6 +99,9 @@ Every variable is described in [configuration.md](configuration.md). To keep the
 
 Edit `docker-compose.yml`:
 
+- `image:` — a release version (`ghcr.io/fabienlege/explorer:1.0.0`). `latest` follows the
+  newest stable release; pre-releases (`1.1.0-rc1`) are only published under their own
+  version. To upgrade, change the version and run `docker compose up -d`.
 - `user:` — the UID:GID from step 2.
 - `volumes:` — every directory mounted under `/data` becomes a volume in Explorer, named
   after its mount point. Only mounted directories are reachable. For example, to mount
