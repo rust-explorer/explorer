@@ -1520,9 +1520,11 @@ dependencies = [
  "explorer-shared",
  "fluent-syntax",
  "gloo-net",
+ "js-sys",
  "serde",
  "serde_json",
  "unic-langid",
+ "unicode-normalization",
  "web-sys",
 ]
 

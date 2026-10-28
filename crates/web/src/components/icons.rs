@@ -63,3 +63,82 @@ pub fn FileIcon(#[props(default = "size-5".to_owned())] class: String) -> Elemen
         }
     }
 }
+
+#[component]
+pub fn VideoIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            rect { x: "3", y: "5", width: "18", height: "14", rx: "2" }
+            path { d: "m10 9 5 3-5 3z" }
+        }
+    }
+}
+
+#[component]
+pub fn ImageIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            rect { x: "3", y: "4", width: "18", height: "16", rx: "2" }
+            circle { cx: "9", cy: "10", r: "1.5" }
+            path { d: "m21 16-4.5-4.5L7 20" }
+        }
+    }
+}
+
+#[component]
+pub fn AudioIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M9 18V6l11-2v12" }
+            circle { cx: "6", cy: "18", r: "3" }
+            circle { cx: "17", cy: "16", r: "3" }
+        }
+    }
+}
+
+#[component]
+pub fn ArchiveIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            rect { x: "3", y: "4", width: "18", height: "5", rx: "1" }
+            path { d: "M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4" }
+        }
+    }
+}
+
+#[component]
+pub fn DocumentIcon(#[props(default = "size-5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" }
+            path { d: "M14 3v5h5M9 13h6M9 17h6" }
+        }
+    }
+}
+
+#[component]
+pub fn DownloadIcon(#[props(default = "size-4".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M12 4v11m0 0-4-4m4 4 4-4M5 20h14" }
+        }
+    }
+}
+
+#[component]
+pub fn ArrowUpIcon(#[props(default = "size-3.5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M12 19V5m0 0-6 6m6-6 6 6" }
+        }
+    }
+}
+
+#[component]
+pub fn ArrowDownIcon(#[props(default = "size-3.5".to_owned())] class: String) -> Element {
+    rsx! {
+        Icon { class,
+            path { d: "M12 5v14m0 0-6-6m6 6 6-6" }
+        }
+    }
+}

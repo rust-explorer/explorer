@@ -16,9 +16,11 @@ dioxus-i18n = { workspace = true }
 explorer-shared = { workspace = true }
 serde = { workspace = true }
 unic-langid = { workspace = true }
+unicode-normalization = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-net = { workspace = true }
+js-sys = { workspace = true }
 web-sys = { workspace = true, features = ["Document", "Element", "Location", "Navigator", "Storage", "Window"] }
 
 [dev-dependencies]
