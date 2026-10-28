@@ -1,6 +1,7 @@
 use std::fmt::Write as _;
 use std::fs::{self, File};
 use std::io::{self, ErrorKind, Write as _};
+use std::os::unix::fs::DirBuilderExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -24,7 +25,10 @@ pub struct Thumbnails {
 impl Thumbnails {
     /// Creates `dir` when missing.
     pub fn new(dir: PathBuf) -> io::Result<Self> {
-        fs::create_dir_all(&dir)?;
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(&dir)?;
         Ok(Self {
             dir,
             permits: Arc::new(Semaphore::new(THUMB_CONCURRENCY)),
@@ -163,6 +167,20 @@ mod tests {
         Thumbnail {
             bytes: vec![byte; 4],
             content_type: "image/png",
+        }
+    }
+
+    #[test]
+    fn created_folders_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        Thumbnails::new(dir.path().join("cache/thumbnails")).unwrap();
+        for sub in ["cache", "cache/thumbnails"] {
+            let mode = fs::metadata(dir.path().join(sub))
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o700, "{sub}");
         }
     }
 

@@ -63,3 +63,33 @@ async fn open_fails_clearly_on_read_only_database_file() {
     assert!(message.contains("owner uid"), "{message}");
     assert!(message.contains("check the volume mount"), "{message}");
 }
+
+fn mode(path: &std::path::Path) -> u32 {
+    std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+}
+
+#[tokio::test]
+async fn database_files_are_owner_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let pool = db::open(dir.path()).await.unwrap();
+    sqlx::query("CREATE TABLE probe (a)")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    for name in ["explorer.db", "explorer.db-wal", "explorer.db-shm"] {
+        assert_eq!(mode(&dir.path().join(name)), 0o600, "{name}");
+    }
+}
+
+#[tokio::test]
+async fn existing_database_is_made_owner_only() {
+    let dir = tempfile::tempdir().unwrap();
+    drop(db::open(dir.path()).await.unwrap());
+    let file = dir.path().join("explorer.db");
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    db::open(dir.path()).await.unwrap();
+
+    assert_eq!(mode(&file), 0o600);
+}

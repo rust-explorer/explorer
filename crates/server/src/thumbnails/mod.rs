@@ -2,6 +2,9 @@ mod cache;
 mod render;
 mod routes;
 
+use std::io;
+use std::os::unix::fs::PermissionsExt as _;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -46,4 +49,45 @@ pub fn spawn_sweeper(thumbnails: Arc<Thumbnails>) -> JoinHandle<()> {
             }
         }
     })
+}
+
+/// Opens the cache under `config_dir`, creating its folders owner-only, and tightens the ones an
+/// earlier version created with the default mode.
+pub fn open_cache(config_dir: &Path) -> io::Result<Thumbnails> {
+    let cache = Thumbnails::new(config_dir.join(CACHE_DIR))?;
+    let mut dir = config_dir.to_owned();
+    for name in Path::new(CACHE_DIR) {
+        dir.push(name);
+        let mode = std::fs::metadata(&dir)?.permissions().mode() & 0o777;
+        if mode != 0o700
+            && let Err(err) = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+        {
+            tracing::warn!(path = %dir.display(), error = %err, "cannot make the thumbnail cache owner-only");
+        }
+    }
+    Ok(cache)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mode(path: &Path) -> u32 {
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    fn cache_folders_become_owner_only() {
+        let config = tempfile::tempdir().unwrap();
+        let thumbs = config.path().join(CACHE_DIR);
+        std::fs::create_dir_all(&thumbs).unwrap();
+        for dir in [config.path().join("cache"), thumbs.clone()] {
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        open_cache(config.path()).unwrap();
+
+        assert_eq!(mode(&config.path().join("cache")), 0o700);
+        assert_eq!(mode(&thumbs), 0o700);
+    }
 }

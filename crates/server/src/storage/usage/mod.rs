@@ -9,8 +9,11 @@ use shared::api::usage::{UsageItem, UsageKind};
 use super::{RelPath, StorageError, TransferProgress, Volume};
 
 pub const USAGE_THREADS: usize = 4;
-pub const USAGE_MAX_DIRS: usize = 1_000_000;
+pub const USAGE_MAX_DIRS: usize = 200_000;
 pub const USAGE_TOP_FILES: usize = 20;
+/// File names a tree keeps in all, as the biggest files of its folders; once reached, further
+/// folders count their files as `other_files` only.
+pub const USAGE_MAX_NAMED_FILES: usize = 200_000;
 pub const USAGE_VIEW_LIMIT: usize = 200;
 /// Hard-linked files a scan tracks to count them once; past this, each name counts.
 pub const USAGE_MAX_HARD_LINKS: usize = 100_000;
@@ -157,18 +160,38 @@ pub fn usage(
     path: &RelPath,
     progress: &(dyn TransferProgress + Sync),
 ) -> Result<UsageTree, StorageError> {
-    usage_with_max_dirs(volume, path, progress, USAGE_MAX_DIRS)
+    usage_with_limits(volume, path, progress, UsageLimits::default())
 }
 
-/// Like [`usage`], with at most `max_dirs` folders listed; the others are counted in their
-/// parent, which becomes collapsed.
-pub fn usage_with_max_dirs(
+/// What a tree may hold, which bounds its memory.
+#[derive(Debug, Clone, Copy)]
+pub struct UsageLimits {
+    /// Folders beyond this are counted in their parent, which becomes collapsed.
+    pub max_dirs: usize,
+    pub max_named_files: usize,
+}
+
+impl Default for UsageLimits {
+    fn default() -> Self {
+        Self {
+            max_dirs: USAGE_MAX_DIRS,
+            max_named_files: USAGE_MAX_NAMED_FILES,
+        }
+    }
+}
+
+/// Like [`usage`], within `limits`.
+pub fn usage_with_limits(
     volume: &Volume,
     path: &RelPath,
     progress: &(dyn TransferProgress + Sync),
-    max_dirs: usize,
+    limits: UsageLimits,
 ) -> Result<UsageTree, StorageError> {
-    let mut nodes = scan::scan(volume, path, progress, max_dirs.max(1))?;
+    let limits = UsageLimits {
+        max_dirs: limits.max_dirs.max(1),
+        ..limits
+    };
+    let mut nodes = scan::scan(volume, path, progress, limits)?;
     for index in (1..nodes.len()).rev() {
         let child = &nodes[index];
         let (parent, bytes, files, dirs, incomplete) = (

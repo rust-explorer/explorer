@@ -1,4 +1,6 @@
+use std::fs::File;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use axum::body::Body;
 use axum::extract::rejection::QueryRejection;
@@ -13,7 +15,7 @@ use crate::auth::{Action, CurrentUser};
 use crate::http::AppState;
 use crate::http::access::{VolumeQuery, authorize, blocking_volume, invalid_query};
 use crate::http::error::ApiError;
-use crate::storage::StorageError;
+use crate::storage::{EntryKind, RelPath, StorageError, Volumes};
 
 const CACHE_CONTROL: &str = "private, max-age=604800";
 
@@ -32,21 +34,17 @@ pub async fn thumbnail(
         return Err(ApiError::thumbnail_unavailable());
     }
 
-    let (file, meta) = blocking_volume(&state.volumes, &volume, {
+    // Only a stat: the source is opened once a render permit is granted, so requests queued
+    // behind the permits hold no descriptor.
+    let meta = blocking_volume(&state.volumes, &volume, {
         let path = path.clone();
-        move |vol| vol.open_file(&path)
+        move |vol| vol.stat(&path)
     })
     .await?
-    .map_err(|err| match err {
-        StorageError::NotFound(_) | StorageError::IsADirectory(_) => {
-            ApiError::thumbnail_unavailable()
-        }
-        // A folder of unreadable images would log one warning per tile.
-        err => {
-            tracing::debug!(volume, path = path.as_str(), error = %err, "thumbnail source unreadable");
-            ApiError::from_logged_storage(&volume, err)
-        }
-    })?;
+    .map_err(|err| unreadable(&volume, &path, err))?;
+    if meta.kind != EntryKind::File {
+        return Err(ApiError::thumbnail_unavailable());
+    }
     let size = meta.size.unwrap_or_default();
     if size > MAX_SOURCE_BYTES {
         return Err(ApiError::thumbnail_unavailable());
@@ -77,9 +75,19 @@ pub async fn thumbnail(
         thumbnail
     } else {
         let thumbnails = Arc::clone(&state.thumbnails);
-        bounded(&state.thumbnails, move || generate(&thumbnails, &key, file))
-            .await?
-            .ok_or_else(ApiError::thumbnail_unavailable)?
+        let source = Source {
+            volumes: Arc::clone(&state.volumes),
+            volume: volume.clone(),
+            path: path.clone(),
+            size,
+            modified: meta.modified,
+        };
+        bounded(&state.thumbnails, move || {
+            generate(&thumbnails, &key, &source)
+        })
+        .await?
+        .map_err(|err| unreadable(&volume, &path, err))?
+        .ok_or_else(ApiError::thumbnail_unavailable)?
     };
     tracing::debug!(
         user = user.sub,
@@ -103,6 +111,18 @@ pub async fn thumbnail(
         HeaderValue::from_static("sandbox"),
     );
     Ok(res)
+}
+
+/// A source that is gone has no thumbnail; one that can't be read is refused like a download.
+fn unreadable(volume: &str, path: &RelPath, err: StorageError) -> ApiError {
+    match err {
+        StorageError::NotFound(_) => ApiError::thumbnail_unavailable(),
+        // A folder of unreadable images would log one warning per tile.
+        err => {
+            tracing::debug!(volume, path = path.as_str(), error = %err, "thumbnail source unreadable");
+            ApiError::from_logged_storage(volume, err)
+        }
+    }
 }
 
 fn cache_headers(headers: &mut HeaderMap, etag: HeaderValue) {
@@ -142,23 +162,55 @@ async fn bounded<T: Send + 'static>(
     .map_err(ApiError::internal)
 }
 
-/// Renders and caches the thumbnail, unless a concurrent request already did. `None` when the
-/// file can't be decoded.
-fn generate(thumbnails: &Thumbnails, key: &str, file: std::fs::File) -> Option<Thumbnail> {
-    if let Ok(Some(thumbnail)) = thumbnails.cached(key) {
-        return Some(thumbnail);
+/// The file a thumbnail is asked for, as it was when its cache key was made.
+struct Source {
+    volumes: Arc<Volumes>,
+    volume: String,
+    path: RelPath,
+    size: u64,
+    modified: Option<SystemTime>,
+}
+
+impl Source {
+    /// `None` if the file is gone or changed since the key was made.
+    fn open(&self) -> Result<Option<File>, StorageError> {
+        let Some(volume) = self.volumes.get(&self.volume) else {
+            return Ok(None);
+        };
+        match volume.open_file(&self.path) {
+            Ok((file, meta)) if meta.size == Some(self.size) && meta.modified == self.modified => {
+                Ok(Some(file))
+            }
+            Ok(_) | Err(StorageError::NotFound(_)) => Ok(None),
+            Err(err) => Err(err),
+        }
     }
+}
+
+/// Renders and caches the thumbnail, unless a concurrent request already did. `None` when the
+/// file is gone, changed or can't be decoded; an error when it can't be opened.
+fn generate(
+    thumbnails: &Thumbnails,
+    key: &str,
+    source: &Source,
+) -> Result<Option<Thumbnail>, StorageError> {
+    if let Ok(Some(thumbnail)) = thumbnails.cached(key) {
+        return Ok(Some(thumbnail));
+    }
+    let Some(file) = source.open()? else {
+        return Ok(None);
+    };
     let thumbnail = match render(file) {
         Ok(thumbnail) => thumbnail,
         Err(err) => {
             tracing::debug!(error = %err, "no thumbnail");
-            return None;
+            return Ok(None);
         }
     };
     if let Err(err) = thumbnails.store(key, &thumbnail) {
         tracing::warn!(error = %err, "cannot cache a thumbnail");
     }
-    Some(thumbnail)
+    Ok(Some(thumbnail))
 }
 
 /// Weak comparison (RFC 9110 section 13.1.2), as `If-None-Match` requires. `*` never matches:

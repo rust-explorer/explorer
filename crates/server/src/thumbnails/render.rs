@@ -36,20 +36,26 @@ pub fn render(file: File) -> Result<Thumbnail, RenderError> {
 }
 
 fn render_capped(file: File, max_bytes: u64) -> Result<Thumbnail, RenderError> {
-    let source = Capped {
+    let mut source = BufReader::new(Capped {
         inner: file,
         position: 0,
         limit: max_bytes,
-    };
-    let mut reader = ImageReader::new(BufReader::new(source)).with_guessed_format()?;
-    if !reader.format().is_some_and(|format| {
+    });
+    let source_len = source.seek(SeekFrom::End(0))?;
+    source.rewind()?;
+    let reader = ImageReader::new(source).with_guessed_format()?;
+    let Some(format) = reader.format().filter(|format| {
         matches!(
             format,
             ImageFormat::Jpeg | ImageFormat::Png | ImageFormat::Gif | ImageFormat::WebP
         )
-    }) {
+    }) else {
         return Err(RenderError::UnknownFormat);
-    }
+    };
+    let mut source = reader.into_inner();
+    let progressive = format == ImageFormat::Jpeg && is_progressive_jpeg(&mut source)?;
+    source.rewind()?;
+    let mut reader = ImageReader::with_format(source, format);
     let mut limits = Limits::default();
     limits.max_image_width = Some(MAX_PIXELS_SIDE);
     limits.max_image_height = Some(MAX_PIXELS_SIDE);
@@ -57,7 +63,7 @@ fn render_capped(file: File, max_bytes: u64) -> Result<Thumbnail, RenderError> {
     reader.limits(limits);
 
     let mut decoder = reader.into_decoder()?;
-    if decoder.total_bytes() > MAX_DECODE_ALLOC {
+    if decode_cost(format, progressive, decoder.total_bytes(), source_len) > MAX_DECODE_ALLOC {
         return Err(RenderError::TooLarge);
     }
     // A broken EXIF block only costs the orientation.
@@ -88,6 +94,55 @@ fn render_capped(file: File, max_bytes: u64) -> Result<Thumbnail, RenderError> {
             content_type: "image/jpeg",
         })
     }
+}
+
+/// The memory a decode takes at its peak, as measured: the source, read whole, plus the decoded
+/// image times what the decoder keeps besides. A progressive JPEG keeps the coefficients of
+/// every component until its last scan (up to twice the output), WebP its YUV planes or ARGB
+/// words, GIF a frame besides the canvas. The image crate's `max_alloc` does not count these.
+fn decode_cost(format: ImageFormat, progressive: bool, decoded: u64, source: u64) -> u64 {
+    let factor = match format {
+        ImageFormat::Jpeg if progressive => 3,
+        ImageFormat::WebP => 3,
+        ImageFormat::Gif => 2,
+        _ => 1,
+    };
+    decoded.saturating_mul(factor).saturating_add(source)
+}
+
+/// Whether the first frame header (SOF) of a JPEG is progressive. Reaching the scan data first,
+/// or a header that can't be followed, counts as progressive: the costlier guess.
+fn is_progressive_jpeg(reader: &mut (impl Read + Seek)) -> io::Result<bool> {
+    if (byte(reader)?, byte(reader)?) != (0xFF, 0xD8) {
+        return Ok(true);
+    }
+    loop {
+        if byte(reader)? != 0xFF {
+            return Ok(true);
+        }
+        let mut marker = byte(reader)?;
+        while marker == 0xFF {
+            marker = byte(reader)?;
+        }
+        match marker {
+            0xC2 | 0xC6 | 0xCA | 0xCE | 0xDA => return Ok(true),
+            0xC0 | 0xC1 | 0xC3 | 0xC5 | 0xC7 | 0xC9 | 0xCB | 0xCD | 0xCF => return Ok(false),
+            0x01 | 0xD0..=0xD7 => {}
+            _ => {
+                let length = u16::from_be_bytes([byte(reader)?, byte(reader)?]);
+                if length < 2 {
+                    return Ok(true);
+                }
+                reader.seek(SeekFrom::Current(i64::from(length) - 2))?;
+            }
+        }
+    }
+}
+
+fn byte(reader: &mut impl Read) -> io::Result<u8> {
+    let mut byte = [0];
+    reader.read_exact(&mut byte)?;
+    Ok(byte[0])
 }
 
 /// A seekable reader that ends at `limit`, as `Read::take` would if it could seek.
@@ -265,6 +320,69 @@ mod tests {
             matches!(&err, RenderError::Image(image::ImageError::Limits(_))),
             "{err:?}"
         );
+    }
+
+    /// `source` with its baseline frame header turned progressive and claiming `width` x
+    /// `height`: the header is all a decoder reads before the cost is checked.
+    fn as_progressive(source: &[u8], width: u16, height: u16) -> Vec<u8> {
+        let mut bytes = source.to_vec();
+        let sof = bytes.windows(2).position(|w| w == [0xFF, 0xC0]).unwrap();
+        bytes[sof + 1] = 0xC2;
+        bytes[sof + 5..sof + 7].copy_from_slice(&height.to_be_bytes());
+        bytes[sof + 7..sof + 9].copy_from_slice(&width.to_be_bytes());
+        bytes
+    }
+
+    #[test]
+    fn progressive_jpeg_is_counted_at_its_real_cost() {
+        // 536,838,144 decoded bytes, within 512 MiB, but a progressive decode keeps about twice
+        // that again in coefficients.
+        let bytes = as_progressive(&jpeg(16, 16), 16_384, 10_922);
+        let started = Instant::now();
+        let err = render(file_with(&bytes)).unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(matches!(err, RenderError::TooLarge), "{err:?}");
+    }
+
+    #[test]
+    fn finds_whether_a_jpeg_is_progressive() {
+        let progressive = |bytes: &[u8]| is_progressive_jpeg(&mut Cursor::new(bytes)).unwrap();
+        let source = jpeg(40, 20);
+        assert!(!progressive(&source));
+        let mut with_exif = source[..2].to_vec();
+        with_exif.extend_from_slice(&exif_orientation_6());
+        with_exif.extend_from_slice(&source[2..]);
+        assert!(!progressive(&with_exif));
+        assert!(progressive(&as_progressive(&source, 40, 20)));
+        assert!(progressive(b"\xFF\xD8\xFF\xE0\x00\x01"));
+        assert!(progressive(b"\xFF\xD8\x00"));
+        assert!(is_progressive_jpeg(&mut Cursor::new(b"\xFF\xD8\xFF\xE0\x00\x10")).is_err());
+    }
+
+    #[test]
+    fn decode_cost_counts_what_the_decoders_keep() {
+        let mib = 1024 * 1024;
+        assert_eq!(
+            decode_cost(ImageFormat::Png, false, 100 * mib, 0),
+            100 * mib
+        );
+        assert_eq!(
+            decode_cost(ImageFormat::Jpeg, false, 100 * mib, mib),
+            101 * mib
+        );
+        assert_eq!(
+            decode_cost(ImageFormat::Jpeg, true, 100 * mib, mib),
+            301 * mib
+        );
+        assert_eq!(
+            decode_cost(ImageFormat::WebP, false, 100 * mib, 0),
+            300 * mib
+        );
+        assert_eq!(
+            decode_cost(ImageFormat::Gif, false, 100 * mib, 0),
+            200 * mib
+        );
+        assert_eq!(decode_cost(ImageFormat::Png, false, u64::MAX, 1), u64::MAX);
     }
 
     #[test]

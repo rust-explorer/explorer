@@ -77,7 +77,7 @@ cargo test --workspace
 Or run everything in one command:
 
 ```sh
-cargo xtask ci              # the checks above, `dx build --release`, clippy for wasm32, then `docker build -t explorer:ci .`
+cargo xtask ci              # the checks above, `cargo audit`, `dx build --release`, clippy for wasm32, then `docker build -t explorer:ci .`
 cargo xtask ci --no-docker  # skip the Docker build
 ```
 
@@ -87,10 +87,16 @@ skipped with a notice if `dx` is not installed, except when `CI=true`, where a m
 `wasm32` target, because it generates `tailwind.css`; the host-target checks above do not
 need it.
 
+`cargo audit` (`cargo binstall cargo-audit`) checks `Cargo.lock` against the RustSec
+advisory database. It is skipped with a notice if not installed, except when `CI=true`.
+Offline, it falls back to the last fetched copy of the database. Advisories that cannot
+affect Explorer are ignored in `.cargo/audit.toml`, each with its reason.
+
 ## CI
 
 GitHub Actions run the same checks (`cargo xtask ci --no-docker`) on pull requests and
-pushes to `main`, and `release.yml` publishes `ghcr.io/fabienlege/explorer` on `v*` tags.
+pushes to `main`, `audit.yml` runs `cargo audit` every Monday (new advisories appear
+without any code change), and `release.yml` publishes `ghcr.io/fabienlege/explorer` on `v*` tags.
 
 - CI is informative. No required status checks are configured; run `cargo xtask ci`
   locally before opening a pull request.
@@ -108,3 +114,10 @@ docker run --rm -p 8080:8080 --env-file .env.example explorer:dev
 
 The image is built for `linux/amd64` only. On another architecture the build runs under
 emulation and is slow.
+
+The build downloads nothing unverified. Base images are pinned by digest (Dependabot
+proposes updates monthly). `dx`, and the tools it would otherwise fetch at build time
+(`wasm-bindgen`, `wasm-opt`, `tailwindcss`, `esbuild`), are downloaded in the `web` stage
+and checked against SHA-256 sums written in the `Dockerfile`; `dx` runs with
+`NO_DOWNLOADS=1`. When Cargo.lock moves `wasm-bindgen` or dx is upgraded, update the
+versions and sums there (GitHub shows each release asset's SHA-256).

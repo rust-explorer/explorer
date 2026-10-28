@@ -1,9 +1,12 @@
+use std::rc::Rc;
+
 use dioxus::prelude::*;
 use dioxus_i18n::t;
 use shared::api::browse::{Entry, EntryKind, Listing, VolumeInfo};
 
 use super::form::{BUTTON, PRIMARY};
 use crate::api::{self, ApiFailure};
+use crate::components::VirtualList;
 use crate::components::common::icons::FolderIcon;
 use crate::components::common::{FocusTarget, Modal, error_message};
 use crate::listing::{Sort, sorted};
@@ -13,7 +16,9 @@ const TITLE_ID: &str = "folder-picker-title";
 const VOLUME_ID: &str = "folder-picker-volume";
 const CRUMB: &str = "truncate rounded hover:text-indigo-600 hover:underline focus-visible:outline-2 focus-visible:outline-indigo-600 dark:hover:text-indigo-400";
 const CURRENT: &str = "truncate font-semibold text-gray-900 dark:text-white";
-const FOLDER: &str = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent dark:text-slate-200 dark:hover:bg-slate-800 dark:disabled:text-slate-600";
+const FOLDER: &str = "flex w-full items-center gap-2 h-full rounded-md px-2 text-left text-sm text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-transparent dark:text-slate-200 dark:hover:bg-slate-800 dark:disabled:text-slate-600";
+/// The fixed height of a folder row, for the virtual list.
+const FOLDER_HEIGHT: f64 = 32.0;
 const STATUS: &str = "text-sm text-slate-500 dark:text-slate-400";
 const SELECT: &str = "mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 dark:border-slate-700 dark:bg-slate-950 dark:text-white";
 
@@ -165,33 +170,44 @@ pub fn FolderPicker(
                     }
                 }
             }
-            div { class: "mt-2 h-56 overflow-y-auto rounded-md border border-slate-200 p-1 dark:border-slate-800",
+            div { class: "mt-2 flex h-56 flex-col rounded-md border border-slate-200 p-1 dark:border-slate-800",
                 {match folders {
                     Some(Ok(folders)) if folders.is_empty() => rsx! {
                         p { class: "p-2 {STATUS}", {t!("picker-empty")} }
                     },
-                    Some(Ok(folders)) => rsx! {
-                        ul { aria_label: t!("picker-folders"),
-                            for name in folders {
-                                li { key: "{name}",
-                                    button {
-                                        r#type: "button",
-                                        class: FOLDER,
-                                        disabled: blocked_here(&current.path.child(&name).joined()),
-                                        onclick: {
-                                            let name = name.clone();
-                                            move |_| {
-                                                let child = shown.read().path.child(&name);
-                                                shown.write().path = child;
+                    Some(Ok(folders)) => {
+                        let total = folders.len();
+                        let folders = Rc::new(folders);
+                        let blocked_volume = blocked_volume.clone();
+                        let blocked = blocked.clone();
+                        let current = current.clone();
+                        rsx! {
+                            VirtualList {
+                                role: "list",
+                                aria_label: t!("picker-folders"),
+                                class: "min-h-0 flex-1 overflow-y-auto",
+                                total,
+                                row_height: FOLDER_HEIGHT,
+                                row: move |index: usize| {
+                                    let name = folders[index].clone();
+                                    let child = current.path.child(&name);
+                                    let disabled = is_blocked(&current.volume, &child.joined(), &blocked_volume, &blocked);
+                                    rsx! {
+                                        div { role: "listitem", height: "{FOLDER_HEIGHT}px",
+                                            button {
+                                                r#type: "button",
+                                                class: FOLDER,
+                                                disabled,
+                                                onclick: move |_| shown.write().path = child.clone(),
+                                                FolderIcon { class: "size-4 shrink-0 text-indigo-500" }
+                                                span { class: "truncate", {name} }
                                             }
-                                        },
-                                        FolderIcon { class: "size-4 shrink-0 text-indigo-500" }
-                                        span { class: "truncate", {name.clone()} }
+                                        }
                                     }
-                                }
+                                },
                             }
                         }
-                    },
+                    }
                     Some(Err(failure)) => rsx! {
                         LoadFailed { failure, on_retry: move |()| listing.restart() }
                     },

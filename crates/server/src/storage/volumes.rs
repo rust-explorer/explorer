@@ -2,7 +2,7 @@ use std::io;
 use std::path::Path;
 
 use cap_std::ambient_authority;
-use cap_std::fs::Dir;
+use cap_std::fs::{Dir, MetadataExt as _};
 use rustix::fs::{Access, AtFlags};
 use rustix::io::Errno;
 
@@ -12,6 +12,8 @@ pub struct Volume {
     name: String,
     pub(super) root: Dir,
     read_only: bool,
+    /// The device of the root, which identifies its filesystem.
+    device: Option<u64>,
 }
 
 impl Volume {
@@ -58,10 +60,12 @@ impl Volumes {
                 }
             };
             let read_only = is_read_only(name, &root);
+            let device = root.dir_metadata().ok().map(|meta| meta.dev());
             volumes.push(Volume {
                 name: name.to_owned(),
                 root,
                 read_only,
+                device,
             });
         }
         volumes.sort_by(|a, b| a.name.cmp(&b.name));
@@ -76,6 +80,18 @@ impl Volumes {
 
     pub fn iter(&self) -> impl Iterator<Item = &Volume> {
         self.volumes.iter()
+    }
+
+    /// The names of the volumes on the same filesystem as `name`, itself included, as found at
+    /// startup.
+    #[must_use]
+    pub fn same_filesystem(&self, name: &str) -> Vec<String> {
+        let device = self.get(name).and_then(|vol| vol.device);
+        self.volumes
+            .iter()
+            .filter(|vol| vol.name == name || (device.is_some() && vol.device == device))
+            .map(|vol| vol.name.clone())
+            .collect()
     }
 }
 

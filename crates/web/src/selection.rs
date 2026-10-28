@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashSet};
 
 /// The checked entries of a folder, by name, and where a shift-click range starts.
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -45,16 +45,18 @@ impl Selection {
 
     /// Whether something selected, or the anchor, is no longer listed.
     pub fn has_unlisted(&self, rows: &[&str]) -> bool {
+        let listed = listed(rows);
         self.names
             .iter()
             .chain(&self.anchor)
-            .any(|name| !rows.contains(&name.as_str()))
+            .any(|name| !listed.contains(name.as_str()))
     }
 
     /// Drops what is no longer listed.
     pub fn retain(&mut self, rows: &[&str]) {
-        self.names.retain(|name| rows.contains(&name.as_str()));
-        if self.anchor.as_deref().is_some_and(|a| !rows.contains(&a)) {
+        let listed = listed(rows);
+        self.names.retain(|name| listed.contains(name.as_str()));
+        if self.anchor.as_deref().is_some_and(|a| !listed.contains(a)) {
             self.anchor = None;
         }
     }
@@ -75,6 +77,10 @@ impl Selection {
     pub fn contains(&self, name: &str) -> bool {
         self.names.contains(name)
     }
+}
+
+fn listed<'a>(rows: &[&'a str]) -> HashSet<&'a str> {
+    rows.iter().copied().collect()
 }
 
 #[cfg(test)]
@@ -167,6 +173,19 @@ mod tests {
         assert!(selection.is_empty());
         assert!(selection.has_unlisted(&["b"]));
         assert!(!selection.has_unlisted(&["a"]));
+    }
+
+    #[test]
+    fn bookkeeping_scales_with_big_folders() {
+        let rows: Vec<String> = (0..40_000).map(|i| format!("IMG_{i:06}.jpg")).collect();
+        let rows: Vec<&str> = rows.iter().map(String::as_str).collect();
+        let mut selection = Selection::default();
+        selection.set_all(&rows, true);
+        let started = std::time::Instant::now();
+        assert!(!selection.has_unlisted(&rows));
+        selection.retain(&rows[1..]);
+        assert_eq!(selection.len(), rows.len() - 1);
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
     }
 
     #[test]

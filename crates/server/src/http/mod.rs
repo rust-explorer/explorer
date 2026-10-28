@@ -25,7 +25,7 @@ use crate::auth::oidc::Oidc;
 use crate::auth::{self, csrf, session};
 use crate::browse;
 use crate::config::Config;
-use crate::downloads;
+use crate::downloads::{self, Downloads};
 use crate::favorites::{self, Favorites};
 use crate::search;
 use crate::storage::Volumes;
@@ -43,6 +43,7 @@ pub struct AppState {
     pub tasks: Arc<Tasks>,
     pub favorites: Arc<Favorites>,
     pub thumbnails: Arc<Thumbnails>,
+    pub downloads: Arc<Downloads>,
 }
 
 pub async fn router(state: AppState) -> Result<Router, sqlx::Error> {
@@ -67,7 +68,8 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
                 .latency_unit(LatencyUnit::Millis),
         );
 
-    let session = session::layer(state.db.clone(), state.config.session_ttl).await?;
+    let session = session::layer(state.db.clone()).await?;
+    let keep_alive = session::KeepAlive::new(state.config.session_ttl, state.db.clone());
     let origin: Arc<str> = csrf::public_origin(&state.config.public_url).into();
 
     let router = extra
@@ -81,7 +83,8 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
                 .merge(tasks::routes())
                 .merge(favorites::routes())
                 .merge(search::routes())
-                .fallback(not_found),
+                .fallback(not_found)
+                .layer(middleware::from_fn(csrf::refuse_cross_site)),
         )
         .nest("/auth", auth::routes().fallback(not_found))
         .nest(
@@ -110,7 +113,11 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
                     origin,
                     csrf::require_same_origin,
                 ))
-                .layer(session),
+                .layer(session)
+                .layer(middleware::from_fn_with_state(
+                    keep_alive,
+                    session::keep_alive,
+                )),
         );
     Ok(security_headers::security_headers(router))
 }

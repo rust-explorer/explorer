@@ -10,7 +10,7 @@ use shared::api::conflict::ConflictPolicy;
 use shared::api::uploads::PendingUpload;
 
 use super::MAX_PARALLEL;
-use super::plan::BatchPlan;
+use super::plan::{BatchPlan, FileSpec};
 use crate::api;
 use crate::conflict::Decision;
 
@@ -46,10 +46,9 @@ impl Queue {
         });
         let files = plan.files.into_iter().map(|spec| {
             let resumed = pending.iter().find(|upload| {
-                upload.volume == spec.volume
-                    && upload.path == spec.path
-                    && upload.length == spec.size
-                    && upload.modified_ms == spec.modified_ms
+                may_resume(upload, &spec)
+                    && upload.fingerprint.is_some()
+                    && upload.fingerprint == spec.fingerprint
             });
             let url = resumed.map(|upload| api::upload_url(&upload.id));
             let sent = resumed.map_or(0, |upload| upload.offset);
@@ -94,7 +93,7 @@ impl Queue {
                     self.advance(index, url, 0, now_ms, &mut effects);
                 }
                 Some(index) if self.items[index].status == Status::Cancelled => {
-                    effects.push(Effect::Delete { url });
+                    effects.push(Effect::Delete { key, url });
                 }
                 _ => {}
             },
@@ -118,6 +117,7 @@ impl Queue {
                 apply_to_all,
             } => self.decide(key, decision, apply_to_all, now_ms, &mut effects),
             Event::Cancel { key } => self.cancel(key, now_ms, &mut effects),
+            Event::CancelTooLate { key } => self.cancel_too_late(key, now_ms, &mut effects),
         }
         self.pump(&mut effects);
         effects
@@ -237,6 +237,16 @@ impl Queue {
     }
 }
 
+/// Whether `upload` may continue `spec` if their fingerprints match: the same destination, size
+/// and date, and the policy a new item starts with, so that the user is still asked on a conflict.
+pub fn may_resume(upload: &PendingUpload, spec: &FileSpec) -> bool {
+    upload.volume == spec.volume
+        && upload.path == spec.path
+        && upload.length == spec.size
+        && upload.modified_ms == spec.modified_ms
+        && upload.conflict == ConflictPolicy::Fail
+}
+
 #[cfg(test)]
 mod tests {
     use shared::api::error::ErrorBody;
@@ -244,9 +254,9 @@ mod tests {
     use super::*;
     use crate::api::ApiFailure;
     use crate::uploads::CHUNK_SIZE;
-    use crate::uploads::plan::FileSpec;
 
     const MIB: u64 = 1024 * 1024;
+    const FINGERPRINT: &str = "0123456789abcdef";
 
     fn spec(path: &str, size: u64) -> FileSpec {
         FileSpec {
@@ -254,6 +264,7 @@ mod tests {
             path: path.into(),
             size,
             modified_ms: Some(1000),
+            fingerprint: Some(FINGERPRINT.into()),
         }
     }
 
@@ -489,7 +500,10 @@ mod tests {
         let storage = server("insufficient_storage");
         assert_eq!(
             fail(&mut queue, 0, storage.clone(), 1),
-            [Effect::Delete { url: url(key0) }]
+            [Effect::Delete {
+                key: key0,
+                url: url(key0)
+            }]
         );
         assert_eq!(queue.items()[0].upload_url, None);
         assert!(fail(&mut queue, 1, server("permission_denied"), 1).is_empty());
@@ -511,6 +525,8 @@ mod tests {
             length: 40 * MIB,
             offset: 16 * MIB,
             modified_ms,
+            conflict: ConflictPolicy::Fail,
+            fingerprint: Some(FINGERPRINT.into()),
         }
     }
 
@@ -562,6 +578,42 @@ mod tests {
         );
         assert_eq!(effects, [create(&queue, 0, ConflictPolicy::Fail)]);
         assert_eq!(queue.items()[0].upload_url, None);
+    }
+
+    #[test]
+    fn upload_started_with_another_policy_is_not_resumed() {
+        let mut queue = Queue::default();
+        let replace = PendingUpload {
+            conflict: ConflictPolicy::Replace,
+            ..pending(Some(1000))
+        };
+        let effects = queue.add(plan(vec![spec("a.bin", 40 * MIB)]), &[replace], 0);
+        assert_eq!(effects, [create(&queue, 0, ConflictPolicy::Fail)]);
+        assert_eq!(queue.items()[0].upload_url, None);
+    }
+
+    #[test]
+    fn other_content_is_not_resumed() {
+        let other = PendingUpload {
+            fingerprint: Some("fedcba9876543210".into()),
+            ..pending(Some(1000))
+        };
+        let unknown = PendingUpload {
+            fingerprint: None,
+            ..pending(Some(1000))
+        };
+        for upload in [other, unknown] {
+            let mut queue = Queue::default();
+            let effects = queue.add(plan(vec![spec("a.bin", 40 * MIB)]), &[upload], 0);
+            assert_eq!(effects, [create(&queue, 0, ConflictPolicy::Fail)]);
+        }
+        let mut queue = Queue::default();
+        let unread = FileSpec {
+            fingerprint: None,
+            ..spec("a.bin", 40 * MIB)
+        };
+        let effects = queue.add(plan(vec![unread]), &[pending(Some(1000))], 0);
+        assert_eq!(effects, [create(&queue, 0, ConflictPolicy::Fail)]);
     }
 
     #[test]
@@ -728,7 +780,10 @@ mod tests {
             cancel(&mut queue, 0),
             [
                 Effect::Abort { key: key0 },
-                Effect::Delete { url: url(key0) },
+                Effect::Delete {
+                    key: key0,
+                    url: url(key0)
+                },
                 create(&queue, 3, ConflictPolicy::Fail),
             ]
         );
@@ -836,6 +891,17 @@ mod tests {
     }
 
     #[test]
+    fn too_many_patches_is_retried() {
+        let mut queue = Queue::default();
+        queue.add(files(1, 10), &[], 0);
+        created(&mut queue, 0, 0);
+        assert_eq!(
+            fail(&mut queue, 0, server("too_many_patches"), 0),
+            [Effect::WakeAt { at_ms: 1000 }]
+        );
+    }
+
+    #[test]
     fn unauthenticated_fails() {
         let mut queue = Queue::default();
         queue.add(files(1, 10), &[], 0);
@@ -856,6 +922,30 @@ mod tests {
     }
 
     #[test]
+    fn cancel_after_the_commit_shows_done() {
+        let mut queue = Queue::default();
+        queue.add(files(2, 10), &[], 0);
+        created(&mut queue, 0, 0);
+        let key0 = key(&queue, 0);
+        queue.handle(Event::Cancel { key: key0 }, 1);
+        assert_eq!(queue.items()[0].status, Status::Cancelled);
+
+        let effects = queue.handle(Event::CancelTooLate { key: key0 }, 2);
+        assert_eq!(queue.items()[0].status, Status::Done);
+        assert_eq!(queue.items()[0].sent, 10);
+        assert_eq!(effects, [refresh()]);
+
+        // Only a cancelled item turns done.
+        let key1 = key(&queue, 1);
+        assert!(
+            queue
+                .handle(Event::CancelTooLate { key: key1 }, 3)
+                .is_empty()
+        );
+        assert_eq!(queue.items()[1].status, Status::Uploading);
+    }
+
+    #[test]
     fn late_created_after_cancel_deletes() {
         let mut queue = Queue::default();
         queue.add(files(1, 10), &[], 0);
@@ -866,7 +956,7 @@ mod tests {
         );
         assert_eq!(
             created(&mut queue, 0, 1),
-            [Effect::Delete { url: url(key) }]
+            [Effect::Delete { key, url: url(key) }]
         );
         assert_eq!(queue.items()[0].status, Status::Cancelled);
     }
@@ -982,7 +1072,7 @@ mod tests {
         created(&mut queue, 0, 0);
         assert_eq!(
             fail(&mut queue, 0, server("permission_denied"), 1),
-            [Effect::Delete { url: url(key) }]
+            [Effect::Delete { key, url: url(key) }]
         );
     }
 
@@ -994,7 +1084,7 @@ mod tests {
         let key = key(&queue, 0);
         assert_eq!(
             fail(&mut queue, 0, server("cross_device"), 1),
-            [Effect::Delete { url: url(key) }]
+            [Effect::Delete { key, url: url(key) }]
         );
         assert_eq!(
             queue.items()[0].status,

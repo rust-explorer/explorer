@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod browse;
 pub mod conflict;
+pub mod downloads;
 pub mod error;
 pub mod favorites;
 pub mod health;

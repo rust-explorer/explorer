@@ -10,6 +10,8 @@ const ALREADY_EXISTS: &str = "already_exists";
 const UPLOAD_NOT_FOUND: &str = "upload_not_found";
 const UPLOAD_BUSY: &str = "upload_busy";
 const OFFSET_MISMATCH: &str = "offset_mismatch";
+/// The user has too many requests in flight, from other tabs or devices.
+const TOO_MANY_PATCHES: &str = "too_many_patches";
 /// Commit failures the user can fix; the staged file stays so that the upload can resume.
 const FIXABLE_AT_COMMIT: [&str; 5] = [
     ALREADY_EXISTS,
@@ -26,7 +28,10 @@ fn is_transient(failure: &ApiFailure) -> bool {
         ApiFailure::Network => true,
         ApiFailure::Http(status) => *status >= 500 && *status != 507,
         ApiFailure::Server(body) => {
-            matches!(body.code.as_str(), INTERNAL | UPLOAD_BUSY | OFFSET_MISMATCH)
+            matches!(
+                body.code.as_str(),
+                INTERNAL | UPLOAD_BUSY | OFFSET_MISMATCH | TOO_MANY_PATCHES
+            )
         }
     }
 }
@@ -132,7 +137,7 @@ impl Queue {
                     && code != UPLOAD_NOT_FOUND
                     && !resumable
                 {
-                    effects.push(Effect::Delete { url });
+                    effects.push(Effect::Delete { key: item.key, url });
                 }
                 self.finish(index, Status::Failed(failure), now_ms, effects);
             }

@@ -6,10 +6,10 @@ use gloo_timers::callback::Interval;
 use shared::api::browse::CreateFolder;
 use shared::api::conflict::ConflictPolicy;
 use shared::api::error::ErrorBody;
-use shared::tus::{TUS_VERSION, encode_metadata};
+use shared::tus::{FINGERPRINT_SAMPLE, TUS_VERSION, encode_metadata};
 use wasm_bindgen::JsCast as _;
 use wasm_bindgen::closure::Closure;
-use web_sys::{File, ProgressEvent, RequestCredentials, XmlHttpRequest};
+use web_sys::{Blob, File, ProgressEvent, RequestCredentials, XmlHttpRequest};
 
 use super::FileSpec;
 use crate::api::{self, ApiFailure};
@@ -46,6 +46,27 @@ fn offset(response: &Response) -> Result<u64, ApiFailure> {
         .ok_or(ApiFailure::Network)
 }
 
+/// The file's [`shared::tus::fingerprint`]; `None` when the browser cannot read it.
+pub async fn fingerprint(file: &File) -> Option<String> {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "the sample size is far below 2^53"
+    )]
+    let sample = FINGERPRINT_SAMPLE as f64;
+    let size = file.size();
+    let head = read(file, 0.0, sample.min(size)).await?;
+    let tail = read(file, (size - sample).max(0.0), size).await?;
+    Some(shared::tus::fingerprint(&head, &tail))
+}
+
+async fn read(blob: &Blob, start: f64, end: f64) -> Option<Vec<u8>> {
+    let slice = blob.slice_with_f64_and_f64(start, end).ok()?;
+    let buffer = wasm_bindgen_futures::JsFuture::from(slice.array_buffer())
+        .await
+        .ok()?;
+    Some(js_sys::Uint8Array::new(&buffer).to_vec())
+}
+
 /// Starts an upload and returns its URL.
 pub async fn create(spec: &FileSpec, conflict: ConflictPolicy) -> Result<String, ApiFailure> {
     let modified = spec.modified_ms.map(|ms| ms.to_string());
@@ -57,6 +78,9 @@ pub async fn create(spec: &FileSpec, conflict: ConflictPolicy) -> Result<String,
         pairs.push(("modified", modified));
     }
     pairs.push(("conflict", conflict.as_str()));
+    if let Some(fingerprint) = &spec.fingerprint {
+        pairs.push(("fingerprint", fingerprint));
+    }
     let request = tus(Method::POST, UPLOADS_URL)
         .header("Upload-Length", &spec.size.to_string())
         .header("Upload-Metadata", &encode_metadata(&pairs))

@@ -497,3 +497,19 @@ mod search {
         assert!(outcome.hits.is_empty());
     }
 }
+
+#[test]
+fn a_listing_stops_once_its_request_is_gone() {
+    let fixture = Fixture::new(|media| {
+        for name in ["a", "b", "c"] {
+            write(&media.join(name), b"x");
+        }
+    });
+    let asked = std::cell::Cell::new(0);
+    let listed = fixture.media().list_while(&RelPath::root(), &|| {
+        asked.set(asked.get() + 1);
+        asked.get() < 2
+    });
+    assert!(matches!(listed, Err(StorageError::Cancelled)), "{listed:?}");
+    assert_eq!(asked.get(), 2);
+}

@@ -31,8 +31,9 @@ pub enum Effect {
     Abort {
         key: ItemKey,
     },
-    /// Terminates the upload on the server.
+    /// Terminates the upload of `key` on the server.
     Delete {
+        key: ItemKey,
         url: String,
     },
     /// `tick` is due at that time.
@@ -76,6 +77,10 @@ pub enum Event {
         apply_to_all: bool,
     },
     Cancel {
+        key: ItemKey,
+    },
+    /// A cancelled item's upload had already been committed.
+    CancelTooLate {
         key: ItemKey,
     },
 }

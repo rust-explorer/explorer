@@ -2,13 +2,14 @@ use std::error::Error as StdError;
 
 use openidconnect::core::{CoreAuthenticationFlow, CoreGenderClaim};
 use openidconnect::{
-    AccessToken, AccessTokenHash, AuthorizationCode, CsrfToken, Nonce, OAuth2TokenResponse,
-    PkceCodeChallenge, PkceCodeVerifier, Scope, SubjectIdentifier, TokenResponse, UserInfoClaims,
+    AccessToken, AccessTokenHash, AuthorizationCode, ClaimsVerificationError, CsrfToken, Nonce,
+    OAuth2TokenResponse, PkceCodeChallenge, PkceCodeVerifier, Scope, SignatureVerificationError,
+    SubjectIdentifier, TokenResponse, UserInfoClaims,
 };
 use serde_json::Value;
 use url::Url;
 
-use super::types::ExtraClaims;
+use super::types::{Client, ExtraClaims};
 use super::{Oidc, PendingLogin, SigninError, VerifiedIdentity, error_chain};
 
 const SCOPES: [&str; 3] = ["profile", "email", "groups"];
@@ -18,7 +19,7 @@ impl Oidc {
     pub fn authorize_url(&self) -> (Url, PendingLogin) {
         let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
         let (url, state, nonce) = self
-            .client
+            .client()
             .authorize_url(
                 CoreAuthenticationFlow::AuthorizationCode,
                 CsrfToken::new_random,
@@ -41,8 +42,8 @@ impl Oidc {
         code: String,
         pending: PendingLogin,
     ) -> Result<VerifiedIdentity, SigninError> {
-        let tokens = self
-            .client
+        let client = self.client();
+        let tokens = client
             .exchange_code(AuthorizationCode::new(code))
             .map_err(|err| SigninError::ExchangeFailed(error_chain(&err)))?
             .set_pkce_verifier(PkceCodeVerifier::new(pending.pkce_verifier))
@@ -52,10 +53,22 @@ impl Oidc {
         let id_token = tokens
             .id_token()
             .ok_or_else(|| SigninError::InvalidToken("token response has no id_token".into()))?;
-        let verifier = self.client.id_token_verifier();
+        let nonce = Nonce::new(pending.nonce);
+        let unknown_key = matches!(
+            id_token.claims(&client.id_token_verifier(), &nonce),
+            Err(ClaimsVerificationError::SignatureVerification(
+                SignatureVerificationError::NoMatchingKey
+            ))
+        );
+        let client = if unknown_key {
+            self.refetch_keys(&client).await.unwrap_or(client)
+        } else {
+            client
+        };
+        let verifier = client.id_token_verifier();
         let invalid = |err: &dyn StdError| SigninError::InvalidToken(error_chain(err));
         let claims = id_token
-            .claims(&verifier, &Nonce::new(pending.nonce))
+            .claims(&verifier, &nonce)
             .map_err(|e| invalid(&e))?;
         if let Some(expected) = claims.access_token_hash() {
             let actual = AccessTokenHash::from_token(
@@ -74,7 +87,7 @@ impl Oidc {
         let groups = match claims.additional_claims().claims.get(&self.groups_claim) {
             Some(value) => parse_groups(value),
             None => {
-                self.userinfo_groups(tokens.access_token(), claims.subject())
+                self.userinfo_groups(&client, tokens.access_token(), claims.subject())
                     .await?
             }
         }
@@ -100,13 +113,11 @@ impl Oidc {
 
     async fn userinfo_groups(
         &self,
+        client: &Client,
         access_token: &AccessToken,
         subject: &SubjectIdentifier,
     ) -> Result<Option<Vec<String>>, SigninError> {
-        let Ok(request) = self
-            .client
-            .user_info(access_token.clone(), Some(subject.clone()))
-        else {
+        let Ok(request) = client.user_info(access_token.clone(), Some(subject.clone())) else {
             return Ok(None);
         };
         let info: UserInfoClaims<ExtraClaims, CoreGenderClaim> = request

@@ -30,7 +30,7 @@ tracing-subscriber = { workspace = true }
 humantime = { workspace = true }
 secrecy = { workspace = true }
 thiserror = { workspace = true }
-time = { workspace = true }
+time = { workspace = true, features = ["serde"] }
 tower-sessions = { workspace = true }
 tower-sessions-sqlx-store = { workspace = true }
 url = { workspace = true }
@@ -45,6 +45,7 @@ zip = { workspace = true }
 rand = { workspace = true }
 image = { workspace = true }
 sha2 = { workspace = true }
+unicode-normalization = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true, features = ["query", "form"] }

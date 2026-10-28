@@ -109,7 +109,7 @@ fn copy(
 ) -> Result<RelPath, StorageError> {
     let (path, dest_dir) = (rel(path), rel(dest_dir));
     storage::check_transfer(source, &path, dest, &dest_dir, conflict)?;
-    let plan = storage::plan_transfer(source, &path)?;
+    let plan = storage::plan_transfer(source, &path, progress)?;
     storage::copy(source, &path, dest, &dest_dir, conflict, &plan, progress)
 }
 
@@ -151,7 +151,8 @@ fn copy_file_across_volumes() {
             .set_modified(mtime())
             .unwrap();
     });
-    let plan = storage::plan_transfer(fixture.media(), &rel("Films/a.mkv")).unwrap();
+    let plan =
+        storage::plan_transfer(fixture.media(), &rel("Films/a.mkv"), &Recorder::default()).unwrap();
     assert_eq!((plan.files, plan.bytes, plan.items.len()), (1, 4, 1));
 
     let placed = copy(
@@ -185,7 +186,7 @@ fn copy_folder_tree() {
             .set_modified(mtime())
             .unwrap();
     });
-    let plan = storage::plan_transfer(fixture.media(), &rel("F")).unwrap();
+    let plan = storage::plan_transfer(fixture.media(), &rel("F"), &Recorder::default()).unwrap();
     assert_eq!((plan.files, plan.bytes, plan.skipped), (3, 7, 0));
     let progress = Recorder::default();
 
@@ -398,7 +399,7 @@ fn copy_skips_symlinked_dirs_and_fifos() {
             .unwrap();
         assert!(status.success());
     });
-    let plan = storage::plan_transfer(fixture.media(), &rel("F")).unwrap();
+    let plan = storage::plan_transfer(fixture.media(), &rel("F"), &Recorder::default()).unwrap();
     assert_eq!((plan.files, plan.skipped), (1, 2));
     let progress = Recorder::default();
 
@@ -479,7 +480,8 @@ fn target_appearing_after_check_is_kept() {
     write(&documents.join("F/theirs.txt"), b"theirs");
 
     for (path, expected) in [("a.txt", "a (1).txt"), ("F", "F (1)")] {
-        let plan = storage::plan_transfer(fixture.media(), &rel(path)).unwrap();
+        let plan =
+            storage::plan_transfer(fixture.media(), &rel(path), &Recorder::default()).unwrap();
         let placed = storage::copy(
             fixture.media(),
             &rel(path),
@@ -996,4 +998,21 @@ fn cross_volume_move_failing_to_delete_keeps_both_copies() {
     assert_eq!(fs::read(documents.join("F/a.txt")).unwrap(), b"a");
     assert_eq!(fs::read(documents.join("F/b.txt")).unwrap(), b"b");
     assert!(fixture.staged("documents").is_empty());
+}
+
+#[test]
+fn planning_stops_once_cancelled() {
+    let fixture = Fixture::new(|media, _| {
+        write(&media.join("F/a.txt"), b"a");
+        write(&media.join("F/Sub/b.txt"), b"b");
+    });
+    let progress = Recorder::default();
+    progress.cancelled.store(true, Ordering::Relaxed);
+    let planned = storage::plan_transfer(fixture.media(), &rel("F"), &progress);
+    assert!(
+        matches!(planned, Err(StorageError::Cancelled)),
+        "{planned:?}"
+    );
+    let plan = storage::plan_transfer(fixture.media(), &rel("F"), &Recorder::default());
+    assert_eq!(plan.unwrap().files, 2);
 }

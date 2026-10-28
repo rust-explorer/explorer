@@ -402,6 +402,32 @@ fn commit_replace_refuses_folder() {
     assert_eq!(staging.len(&id).unwrap(), Some(3));
 }
 
+/// The orphan sweep goes by the staged file's mtime: an old one must not show before the rename.
+#[test]
+fn staged_file_gets_its_old_mtime_only_once_placed() {
+    let fixture = Fixture::new(|media| fs::create_dir(media.join("folder")).unwrap());
+    let media = fixture.media();
+    let staging = media.staging().unwrap();
+    let id = stage(&staging, b"new");
+    let old = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+
+    let result = media.commit_staged(
+        &staging,
+        &id,
+        &rel("folder"),
+        ConflictPolicy::Replace,
+        Some(old),
+    );
+
+    assert!(result.is_err(), "{result:?}");
+    let staged = fixture.media_path().join(STAGING_DIR).join(id.as_str());
+    let modified = fs::metadata(staged).unwrap().modified().unwrap();
+    assert!(
+        modified > SystemTime::now() - Duration::from_secs(3600),
+        "{modified:?}"
+    );
+}
+
 #[test]
 fn commit_fail_after_race_keeps_both() {
     let fixture = Fixture::new(|_| {});

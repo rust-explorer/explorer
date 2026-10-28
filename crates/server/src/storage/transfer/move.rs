@@ -1,10 +1,12 @@
-use std::io;
+use std::collections::HashMap;
 
 use rustix::io::Errno;
 
 use shared::api::conflict::ConflictPolicy;
 
-use super::{TransferPlan, TransferProgress, check_transfer, copy, plan_transfer};
+use super::copy::{Taken, copy_taking};
+use super::remove::{Expect, Removed, Stamp, remove_if};
+use super::{TransferPlan, TransferProgress, check_transfer, plan_transfer};
 use crate::storage::read::{Identity, fs_path};
 use crate::storage::{InvalidPath, RelPath, StorageError, Volume, WalkItem};
 
@@ -73,12 +75,12 @@ pub fn move_entry(
     let plan = if let Some(plan) = plan {
         plan
     } else {
-        planned = plan_transfer(source, path)?;
+        planned = plan_transfer(source, path, progress)?;
         progress.planned(&planned);
         &planned
     };
-    let final_path = copy(source, path, dest, dest_dir, conflict, plan, progress)?;
-    remove_moved(source, path, plan).map_err(StorageError::on_source)?;
+    let (final_path, taken) = copy_taking(source, path, dest, dest_dir, conflict, plan, progress)?;
+    remove_moved(source, path, plan, &taken).map_err(StorageError::on_source)?;
     Ok(MoveOutcome::Copied { final_path })
 }
 
@@ -99,6 +101,10 @@ fn rename(
         .root
         .open_dir(fs_path(dest_dir))
         .map_err(|err| StorageError::from_io(dest_dir, err))?;
+    volume
+        .refuse_staging_in(&from, name, path)
+        .map_err(StorageError::on_source)?;
+    volume.refuse_staging_in(&to, name, &dest_dir.join(name)?)?;
     // `EINVAL`: a folder renamed into itself.
     volume
         .place(&from, name, &to, dest_dir, name, conflict)
@@ -112,52 +118,72 @@ fn rename(
         })
 }
 
-/// Removes from the source what the copy took: its files, then its folders once empty. A
-/// symlink moved as its target's copy goes alone; its target stays.
-fn remove_moved(source: &Volume, path: &RelPath, plan: &TransferPlan) -> Result<(), StorageError> {
-    let top = source
-        .root
-        .symlink_metadata(path.as_str())
-        .map_err(|err| StorageError::from_io(path, err))?;
-    if !top.is_dir() {
-        return remove_file(source, path);
-    }
-    for item in &plan.items {
-        if let WalkItem::File { path, .. } = item {
-            remove_file(source, path)?;
+/// Removes from the source what the copy took: its files, then its folders once empty, each
+/// only if it is still what was copied. A symlink moved as its target's copy goes alone, if it
+/// still leads there; its target stays. A file changed since it was copied stays, and so do the
+/// folders holding it: the move then fails, both copies kept.
+fn remove_moved(
+    source: &Volume,
+    path: &RelPath,
+    plan: &TransferPlan,
+    taken: &Taken,
+) -> Result<(), StorageError> {
+    let mut changed = None;
+    let mut remove = |at: &RelPath, expect: Expect| -> Result<Removed, StorageError> {
+        let removed = remove_if(source, at, expect, true)?;
+        if removed == Removed::Changed && changed.is_none() {
+            changed = Some(at.clone());
+        }
+        Ok(removed)
+    };
+    if matches!(taken.top, Expect::Dir(_)) && source.is_real_dir(path) {
+        let mut files = taken.files.clone();
+        let next_name = later_names(&files);
+        for at in 0..files.len() {
+            let (index, stamp) = files[at];
+            let removed = remove(item_path(plan, index), Expect::File(stamp))?;
+            // It matched, so the file had not changed: removing one of its names moved its
+            // change time, which its other names now show.
+            if removed == Removed::Yes
+                && let Some(&later) = next_name.get(&at)
+            {
+                let (index, stamp) = &mut files[later];
+                if let Ok(meta) = source
+                    .root
+                    .symlink_metadata(item_path(plan, *index).as_str())
+                {
+                    stamp.renew_ctime(&meta);
+                }
+            }
+        }
+        for (index, id) in taken.dirs.iter().rev() {
+            remove(item_path(plan, *index), Expect::Dir(*id))?;
         }
     }
-    let dirs = plan.items.iter().rev().filter_map(|item| match item {
-        WalkItem::Dir(dir) => Some(dir),
-        WalkItem::File { .. } => None,
-    });
-    for dir in dirs.chain([path]) {
-        remove_empty_dir(source, dir)?;
+    remove(path, taken.top)?;
+    match changed {
+        Some(path) => Err(StorageError::ChangedDuringMove(path)),
+        None => Ok(()),
     }
-    Ok(())
 }
 
-/// A file or a symlink, never a folder that took its place since.
-fn remove_file(volume: &Volume, path: &RelPath) -> Result<(), StorageError> {
-    let (parent, name) = split(path)?;
-    volume
-        .root
-        .open_dir(fs_path(&parent))
-        .and_then(|dir| dir.remove_file(name))
-        .map_err(|err| StorageError::from_io(path, err))
+/// For each file of the list, the next one that is another name of the same file.
+fn later_names(files: &[(usize, Stamp)]) -> HashMap<usize, usize> {
+    let mut last = HashMap::new();
+    let mut next = HashMap::new();
+    for (at, (_, stamp)) in files.iter().enumerate() {
+        if let Some(inode) = stamp.file_inode()
+            && let Some(before) = last.insert(inode, at)
+        {
+            next.insert(before, at);
+        }
+    }
+    next
 }
 
-/// A folder that still holds something, as a skipped entry, stays.
-fn remove_empty_dir(volume: &Volume, path: &RelPath) -> Result<(), StorageError> {
-    let (parent, name) = split(path)?;
-    match volume
-        .root
-        .open_dir(fs_path(&parent))
-        .and_then(|dir| dir.remove_dir(name))
-    {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == io::ErrorKind::DirectoryNotEmpty => Ok(()),
-        Err(err) => Err(StorageError::from_io(path, err)),
+fn item_path(plan: &TransferPlan, index: usize) -> &RelPath {
+    match &plan.items[index] {
+        WalkItem::Dir(path) | WalkItem::File { path, .. } => path,
     }
 }
 

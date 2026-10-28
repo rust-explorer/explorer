@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_i18n::t;
 use shared::api::browse::EntryKind;
+use shared::api::downloads::ZipSelection;
 
 use super::row_menu::action_label;
 use crate::actions::RowAction;
@@ -72,24 +73,42 @@ fn ActionIcon(action: RowAction) -> Element {
     }
 }
 
+/// How a selection downloads: one entry from its URL, several as one zip of `dir`, whose names
+/// are stored first since thousands of them don't fit in a URL.
+#[derive(Debug, PartialEq, Eq)]
+pub enum SelectionDownload {
+    Href(String),
+    Zip(ZipSelection),
+}
+
 /// One file downloads as is, one folder as a zip, several entries as one zip of `dir`; an entry
 /// that is neither a file nor a folder can't be downloaded.
-pub fn selection_href(
+pub fn selection_download(
     volume: &str,
     dir: &Segments,
     selected: &[(&str, EntryKind)],
-) -> Option<String> {
+) -> Option<SelectionDownload> {
     if selected.iter().any(|(_, kind)| *kind == EntryKind::Other) {
         return None;
     }
     match selected {
         [] => None,
-        [(name, EntryKind::File)] => Some(api::download_url(volume, &dir.child(name).joined())),
-        [(name, _)] => Some(api::zip_url(volume, &dir.child(name).joined())),
-        _ => {
-            let names: Vec<&str> = selected.iter().map(|(name, _)| *name).collect();
-            Some(api::zip_selection_url(volume, &dir.joined(), &names))
-        }
+        [(name, EntryKind::File)] => Some(SelectionDownload::Href(api::download_url(
+            volume,
+            &dir.child(name).joined(),
+        ))),
+        [(name, _)] => Some(SelectionDownload::Href(api::zip_url(
+            volume,
+            &dir.child(name).joined(),
+        ))),
+        _ => Some(SelectionDownload::Zip(ZipSelection {
+            volume: volume.to_owned(),
+            path: dir.joined(),
+            names: selected
+                .iter()
+                .map(|(name, _)| (*name).to_owned())
+                .collect(),
+        })),
     }
 }
 
@@ -99,22 +118,27 @@ mod tests {
     use EntryKind::{Dir, File, Other};
 
     #[test]
-    fn download_href_by_selection() {
+    fn download_by_selection() {
         let dir = Segments::from(vec!["Films".to_owned()]);
-        let href = |selected: &[(&str, EntryKind)]| selection_href("media", &dir, selected);
-        assert_eq!(href(&[]), None);
+        let download = |selected: &[(&str, EntryKind)]| selection_download("media", &dir, selected);
+        let href = |url: &str| Some(SelectionDownload::Href(url.to_owned()));
+        assert_eq!(download(&[]), None);
         assert_eq!(
-            href(&[("a b.mkv", File)]).as_deref(),
-            Some("/files/download?volume=media&path=Films%2Fa%20b.mkv")
+            download(&[("a b.mkv", File)]),
+            href("/files/download?volume=media&path=Films%2Fa%20b.mkv")
         );
         assert_eq!(
-            href(&[("Sub", Dir)]).as_deref(),
-            Some("/files/zip?volume=media&path=Films%2FSub")
+            download(&[("Sub", Dir)]),
+            href("/files/zip?volume=media&path=Films%2FSub")
         );
         assert_eq!(
-            href(&[("a", File), ("Sub", Dir)]).as_deref(),
-            Some("/files/zip?volume=media&path=Films&name=a&name=Sub")
+            download(&[("a", File), ("Sub", Dir)]),
+            Some(SelectionDownload::Zip(ZipSelection {
+                volume: "media".to_owned(),
+                path: "Films".to_owned(),
+                names: vec!["a".to_owned(), "Sub".to_owned()],
+            }))
         );
-        assert_eq!(href(&[("a", File), ("fifo", Other)]), None);
+        assert_eq!(download(&[("a", File), ("fifo", Other)]), None);
     }
 }

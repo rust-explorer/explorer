@@ -1,36 +1,37 @@
 use std::collections::HashSet;
+use std::fmt::Write as _;
 use std::io::{self, Read, Write};
-use std::mem;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::atomic::Ordering;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use ::zip::write::{FullFileOptions, StreamWriter};
 use ::zip::{CompressionMethod, DateTime, ZipWriter};
-use axum::body::{Body, Bytes};
+use axum::body::Body;
 use axum::extract::State;
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{HeaderValue, StatusCode, Uri, header};
 use axum::response::Response;
-use axum_extra::extract::{Query, QueryRejection};
+use axum_extra::extract::Query;
 use serde::Deserialize;
-use tokio::runtime::Handle;
+use shared::api::downloads::ZipSelection;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use super::attachment_headers;
+use super::channel::{CHUNK, ChannelWriter, Chunk, ZIP_SEND_TIMEOUT, send_timeout};
 use crate::auth::Action;
 use crate::auth::CurrentUser;
 use crate::http::AppState;
 use crate::http::access::{authorize, blocking_volume, invalid_query};
 use crate::http::error::ApiError;
-use crate::storage::{RelPath, Volume, WalkItem};
+use crate::storage::{EntryKind, RelPath, SkipReason, TreeItem, TreeWalk, Volume};
 
-const CHUNK: usize = 64 * 1024;
 const EXTENDED_TIMESTAMP: u16 = 0x5455;
 const CHANNEL_CAPACITY: usize = 8;
-const ZIP_SEND_TIMEOUT: Duration = Duration::from_secs(60);
-
-type Chunk = io::Result<Bytes>;
+/// Added at the top of an archive that left entries out, listing them.
+pub const SKIPPED_LIST: &str = "explorer-skipped.txt";
+/// Entries the list names; the rest are only counted.
+const SKIPPED_LIST_LIMIT: usize = 10_000;
 
 /// Query of `/files/zip`: with `name`s, only those entries of `path` are archived.
 #[derive(Deserialize)]
@@ -39,6 +40,12 @@ pub struct ZipQuery {
     path: String,
     #[serde(default)]
     name: Vec<String>,
+}
+
+/// Query of `/files/zip` for a stored selection.
+#[derive(Deserialize)]
+struct SelectionQuery {
+    selection: String,
 }
 
 /// Answers `HEAD` without walking the tree, which `get` would otherwise do implicitly.
@@ -53,72 +60,98 @@ pub async fn head() -> Response {
 pub async fn zip(
     State(state): State<AppState>,
     user: CurrentUser,
-    query: Result<Query<ZipQuery>, QueryRejection>,
+    uri: Uri,
 ) -> Result<Response, ApiError> {
-    let Ok(Query(ZipQuery {
+    let selection = if let Ok(Query(query)) = Query::<SelectionQuery>::try_from_uri(&uri) {
+        state
+            .downloads
+            .selection(&user.sub, &query.selection)
+            .ok_or_else(ApiError::selection_expired)?
+    } else {
+        let Ok(Query(query)) = Query::<ZipQuery>::try_from_uri(&uri) else {
+            return Err(invalid_query());
+        };
+        ZipSelection {
+            volume: query.volume,
+            path: query.path,
+            names: query.name,
+        }
+    };
+    stream_zip(state, user, selection).await
+}
+
+/// Checks the request, then streams the archive while it walks the tree. Each zip holds one
+/// of [`super::ZIP_CONCURRENCY`] slots, and of the user's [`super::ZIP_CONCURRENCY_PER_USER`],
+/// until it ends, and stops when the client goes away or stops reading.
+async fn stream_zip(
+    state: AppState,
+    user: CurrentUser,
+    ZipSelection {
         volume,
         path,
-        mut name,
-    })) = query
-    else {
-        return Err(invalid_query());
-    };
+        mut names,
+    }: ZipSelection,
+) -> Result<Response, ApiError> {
     let mut seen = HashSet::new();
-    name.retain(|name| seen.insert(name.clone()));
+    names.retain(|name| seen.insert(name.clone()));
     let path = authorize(&state, &user, &volume, &path, Action::Read)?;
-
-    let children = name
+    let children = names
         .iter()
         .map(|name| path.join(name))
         .collect::<Result<Vec<_>, _>>()?;
-    let items = blocking_volume(&state.volumes, &volume, {
+    let permit = state
+        .downloads
+        .try_zip(&user.sub)
+        .ok_or_else(ApiError::too_many_zips)?;
+
+    let walk = blocking_volume(&state.volumes, &volume, {
         let path = path.clone();
         move |vol| {
             if children.is_empty() {
-                return vol.walk(&path);
+                return vol.tree_walk(&path, None);
             }
-            let mut items = Vec::new();
+            let mut names = Vec::new();
             for child in &children {
-                items.extend(vol.walk_entry(child)?);
+                if vol.stat(child)?.kind == EntryKind::Other {
+                    return Err(crate::storage::StorageError::NotFound(child.clone()));
+                }
+                names.extend(child.file_name().map(str::to_owned));
             }
-            Ok(items)
+            vol.tree_walk(&path, Some(&names))
         }
     })
     .await?
     .map_err(|err| ApiError::from_storage(&volume, err))?;
 
-    let (files, bytes) = items.iter().fold((0u64, 0u64), |(files, bytes), item| {
-        if let WalkItem::File { size, .. } = item {
-            (files + 1, bytes + size)
-        } else {
-            (files, bytes)
-        }
-    });
-    tracing::info!(
-        user = user.sub,
-        action = "zip",
-        volume,
-        path = path.as_str(),
-        files,
-        bytes,
-        names = name.len(),
-        "zip"
-    );
-
     let archive_name = format!("{}.zip", path.file_name().unwrap_or(&volume));
     let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
     let volumes = Arc::clone(&state.volumes);
     let span = tracing::Span::current();
+    let names = names.len();
     tokio::task::spawn_blocking(move || {
+        let _permit = permit;
         let _entered = span.enter();
-        match volumes.get(&volume) {
-            Some(vol) => stream_archive(&volume, &path, tx, |zip| {
-                write_entries(zip, vol, &path, &items)
-            }),
-            None => {
-                let _ = tx.blocking_send(Err(io::Error::other("volume not found")));
-            }
-        }
+        let Some(vol) = volumes.get(&volume) else {
+            let _ = tx.blocking_send(Err(io::Error::other("volume not found")));
+            return;
+        };
+        let gone = tx.clone();
+        let mut tally = Tally::default();
+        let completed = stream_archive(&volume, &path, tx, |zip| {
+            write_entries(zip, vol, walk, &|| gone.is_closed(), &mut tally)
+        });
+        tracing::info!(
+            user = user.sub,
+            action = "zip",
+            volume,
+            path = path.as_str(),
+            files = tally.files,
+            bytes = tally.bytes,
+            skipped = tally.skipped_total,
+            names,
+            completed,
+            "zip"
+        );
     });
 
     let mut res = Response::new(Body::from_stream(ReceiverStream::new(rx)));
@@ -129,37 +162,48 @@ pub async fn zip(
 type Archive = ZipWriter<StreamWriter<ChannelWriter>>;
 
 struct Failure {
-    path: RelPath,
+    path: String,
     error: Box<dyn std::error::Error + Send + Sync>,
 }
 
 impl Failure {
-    fn at(path: &RelPath, error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
+    fn at(path: &str, error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
         Self {
-            path: path.clone(),
+            path: path.to_owned(),
             error: error.into(),
         }
     }
 }
 
-/// Ends the body with an error on any failure, unless the client is already gone.
+/// What an archive holds and what it left out.
+#[derive(Default)]
+struct Tally {
+    files: u64,
+    bytes: u64,
+    skipped: Vec<(String, SkipReason)>,
+    skipped_total: u64,
+}
+
+/// Ends the body with an error on any failure, unless the client is already gone. True when
+/// the archive was sent whole.
 fn stream_archive(
     volume: &str,
     root: &RelPath,
     tx: mpsc::Sender<Chunk>,
     entries: impl FnOnce(&mut Archive) -> Result<(), Failure>,
-) {
+) -> bool {
     let errors = tx.clone();
     let Err(failure) = write_archive(ChannelWriter::new(tx), root, entries) else {
-        return;
+        return true;
     };
     if errors.is_closed() {
         tracing::debug!(volume, path = root.as_str(), "zip client went away");
-        return;
+        return false;
     }
     tracing::warn!(
         volume,
-        path = failure.path.as_str(),
+        path = root.as_str(),
+        entry = failure.path,
         error = %failure.error,
         "zip aborted"
     );
@@ -168,6 +212,7 @@ fn stream_archive(
         Err(io::Error::other("zip archive aborted")),
         ZIP_SEND_TIMEOUT,
     );
+    false
 }
 
 fn write_archive(
@@ -186,61 +231,88 @@ fn write_archive(
         .and_then(|sink| Ok(sink.into_inner().flush()?))
         .map_err(|err| {
             aborted.store(true, Ordering::Relaxed);
-            Failure::at(root, err)
+            Failure::at(root.as_str(), err)
         })
 }
 
+/// Writes what the walk yields until it ends or `gone` says the client left, then the list of
+/// skipped entries if there are any.
 fn write_entries(
     zip: &mut Archive,
     volume: &Volume,
-    root: &RelPath,
-    items: &[WalkItem],
+    mut walk: TreeWalk,
+    gone: &dyn Fn() -> bool,
+    tally: &mut Tally,
 ) -> Result<(), Failure> {
-    for item in items {
+    while let Some(item) = walk.next(volume) {
+        if gone() {
+            return Err(Failure::at("", io::Error::from(io::ErrorKind::BrokenPipe)));
+        }
         match item {
-            WalkItem::Dir(path) => {
-                let modified = volume.stat(path).ok().and_then(|meta| meta.modified);
-                zip.add_directory(entry_name(root, path), entry_options(modified))
-                    .map_err(|err| Failure::at(path, err))?;
+            TreeItem::Dir { name, modified } => {
+                zip.add_directory(name.as_str(), entry_options(modified))
+                    .map_err(|err| Failure::at(&name, err))?;
             }
-            WalkItem::File { path, modified, .. } => {
-                let (file, _) = volume
-                    .open_file(path)
-                    .map_err(|err| Failure::at(path, err))?;
-                zip.start_file(entry_name(root, path), file_options(*modified))
-                    .map_err(|err| Failure::at(path, err))?;
-                copy_data(zip, path, file)?;
+            TreeItem::File {
+                name,
+                file,
+                size,
+                modified,
+            } => {
+                zip.start_file(name.as_str(), file_options(modified))
+                    .map_err(|err| Failure::at(&name, err))?;
+                copy_data(zip, &name, file)?;
+                tally.files += 1;
+                tally.bytes += size;
+            }
+            TreeItem::Skipped { name, reason } => {
+                tracing::debug!(
+                    entry = name,
+                    reason = reason.describe(),
+                    "zip skips an entry"
+                );
+                tally.skipped_total += 1;
+                if tally.skipped.len() < SKIPPED_LIST_LIMIT {
+                    tally.skipped.push((name, reason));
+                }
             }
         }
     }
-    Ok(())
+    if tally.skipped_total == 0 {
+        return Ok(());
+    }
+    tracing::warn!(skipped = tally.skipped_total, "zip left entries out");
+    let name = walk.unused_top_name(SKIPPED_LIST);
+    zip.start_file(name.as_str(), file_options(Some(SystemTime::now())))
+        .map_err(|err| Failure::at(&name, err))?;
+    zip.write_all(skipped_list(tally).as_bytes())
+        .map_err(|err| Failure::at(&name, err))
 }
 
-fn copy_data(zip: &mut Archive, path: &RelPath, mut source: impl Read) -> Result<(), Failure> {
+fn skipped_list(tally: &Tally) -> String {
+    let mut list = String::from("These entries could not be put in the archive:\n\n");
+    for (name, reason) in &tally.skipped {
+        let _ = writeln!(list, "{name}: {}", reason.describe());
+    }
+    let more = tally.skipped_total - tally.skipped.len() as u64;
+    if more > 0 {
+        let _ = writeln!(list, "... and {more} more");
+    }
+    list
+}
+
+fn copy_data(zip: &mut Archive, name: &str, mut source: impl Read) -> Result<(), Failure> {
     let mut buf = vec![0; CHUNK];
     loop {
         let n = match source.read(&mut buf) {
             Ok(0) => return Ok(()),
             Ok(n) => n,
             Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-            Err(err) => return Err(Failure::at(path, err)),
+            Err(err) => return Err(Failure::at(name, err)),
         };
         zip.write_all(&buf[..n])
-            .map_err(|err| Failure::at(path, err))?;
+            .map_err(|err| Failure::at(name, err))?;
     }
-}
-
-/// Backslashes become `_` so that Windows extractors cannot read them as separators.
-fn entry_name(root: &RelPath, path: &RelPath) -> String {
-    let relative = if root.is_root() {
-        path.as_str()
-    } else {
-        path.as_str()
-            .strip_prefix(root.as_str())
-            .and_then(|rest| rest.strip_prefix('/'))
-            .unwrap_or(path.as_str())
-    };
-    relative.replace('\\', "_")
 }
 
 fn file_options(modified: Option<SystemTime>) -> FullFileOptions<'static, 'static> {
@@ -294,87 +366,15 @@ fn zip_time(time: SystemTime) -> Option<DateTime> {
     .ok()
 }
 
-/// Fails with `TimedOut` when the channel stays full for `timeout`, so a stalled client cannot
-/// hold the blocking thread forever. Runs on a blocking thread of the runtime.
-fn send_timeout(tx: &mpsc::Sender<Chunk>, chunk: Chunk, timeout: Duration) -> io::Result<()> {
-    let sent = Handle::current().block_on(tokio::time::timeout(timeout, tx.send(chunk)));
-    match sent {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(_)) => Err(io::ErrorKind::BrokenPipe.into()),
-        Err(_) => Err(io::ErrorKind::TimedOut.into()),
-    }
-}
-
-/// Buffers the archive into chunks for the response body. Once aborted, it swallows writes.
-struct ChannelWriter {
-    tx: mpsc::Sender<Chunk>,
-    buf: Vec<u8>,
-    aborted: Arc<AtomicBool>,
-    send_timeout: Duration,
-}
-
-impl ChannelWriter {
-    fn new(tx: mpsc::Sender<Chunk>) -> Self {
-        Self {
-            tx,
-            buf: Vec::with_capacity(CHUNK),
-            aborted: Arc::new(AtomicBool::new(false)),
-            send_timeout: ZIP_SEND_TIMEOUT,
-        }
-    }
-
-    #[cfg(test)]
-    fn with_send_timeout(mut self, timeout: Duration) -> Self {
-        self.send_timeout = timeout;
-        self
-    }
-
-    fn send(&mut self) -> io::Result<()> {
-        if self.buf.is_empty() {
-            return Ok(());
-        }
-        let chunk = Bytes::from(mem::replace(&mut self.buf, Vec::with_capacity(CHUNK)));
-        send_timeout(&self.tx, Ok(chunk), self.send_timeout).inspect_err(|_| {
-            self.aborted.store(true, Ordering::Relaxed);
-        })
-    }
-}
-
-impl Write for ChannelWriter {
-    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-        if self.aborted.load(Ordering::Relaxed) {
-            return Ok(data.len());
-        }
-        let n = data.len().min(CHUNK - self.buf.len());
-        self.buf.extend_from_slice(&data[..n]);
-        if self.buf.len() == CHUNK {
-            self.send()?;
-        }
-        Ok(n)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        if self.aborted.load(Ordering::Relaxed) {
-            return Ok(());
-        }
-        self.send()
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
+    use std::time::Duration;
 
     use super::*;
 
     /// The writer blocks on the runtime it runs under, as on a blocking thread of the server.
     fn runtime() -> tokio::runtime::Runtime {
         tokio::runtime::Runtime::new().unwrap()
-    }
-
-    fn writer(capacity: usize) -> (ChannelWriter, mpsc::Receiver<Chunk>) {
-        let (tx, rx) = mpsc::channel(capacity);
-        (ChannelWriter::new(tx), rx)
     }
 
     /// Yields `0` bytes of ones, then fails.
@@ -400,11 +400,11 @@ mod tests {
         let _entered = rt.enter();
         for short in 0..512 {
             let (tx, mut rx) = mpsc::channel(64);
-            let path = RelPath::parse("big.bin").unwrap();
+            let path = "big.bin";
             stream_archive("media", &RelPath::root(), tx, |zip| {
-                zip.start_file(path.as_str(), file_options(None))
-                    .map_err(|err| Failure::at(&path, err))?;
-                copy_data(zip, &path, FailsAfter(3 * CHUNK - short))
+                zip.start_file(path, file_options(None))
+                    .map_err(|err| Failure::at(path, err))?;
+                copy_data(zip, path, FailsAfter(3 * CHUNK - short))
             });
             let items: Vec<Chunk> = std::iter::from_fn(|| rx.blocking_recv()).collect();
             let (last, data) = items.split_last().unwrap();
@@ -427,68 +427,16 @@ mod tests {
         let _entered = rt.enter();
         let (tx, rx) = mpsc::channel(1);
         drop(rx);
-        let path = RelPath::parse("big.bin").unwrap();
+        let path = "big.bin";
         let sink = ChannelWriter::new(tx);
         let aborted = Arc::clone(&sink.aborted);
         let result = write_archive(sink, &RelPath::root(), |zip| {
-            zip.start_file(path.as_str(), file_options(None))
-                .map_err(|err| Failure::at(&path, err))?;
-            copy_data(zip, &path, FailsAfter(3 * CHUNK))
+            zip.start_file(path, file_options(None))
+                .map_err(|err| Failure::at(path, err))?;
+            copy_data(zip, path, FailsAfter(3 * CHUNK))
         });
         assert!(result.is_err());
         assert!(aborted.load(Ordering::Relaxed));
-    }
-
-    #[test]
-    fn writer_sends_full_chunks_then_the_rest_on_flush() {
-        let rt = runtime();
-        let _entered = rt.enter();
-        let (mut writer, mut rx) = writer(4);
-        writer.write_all(&vec![7; CHUNK + 10]).unwrap();
-        writer.flush().unwrap();
-        drop(writer);
-        let sizes: Vec<usize> = std::iter::from_fn(|| rx.blocking_recv())
-            .map(|chunk| chunk.unwrap().len())
-            .collect();
-        assert_eq!(sizes, [CHUNK, 10]);
-    }
-
-    #[test]
-    fn writer_fails_once_the_receiver_is_gone() {
-        let rt = runtime();
-        let _entered = rt.enter();
-        let (mut writer, rx) = writer(1);
-        drop(rx);
-        let err = writer.write_all(&vec![0; CHUNK]).unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
-    }
-
-    #[test]
-    fn stalled_client_times_out() {
-        let rt = runtime();
-        let _entered = rt.enter();
-        let (tx, _rx) = mpsc::channel(1);
-        let mut writer = ChannelWriter::new(tx).with_send_timeout(Duration::from_millis(50));
-        writer.write_all(&vec![0; CHUNK]).unwrap();
-        let started = Instant::now();
-        let err = writer.write_all(&vec![0; CHUNK]).unwrap_err();
-        assert_eq!(err.kind(), io::ErrorKind::TimedOut);
-        assert!(started.elapsed() < Duration::from_secs(1));
-    }
-
-    #[test]
-    fn entry_names_are_relative_to_the_zipped_folder() {
-        let root = RelPath::parse("Docs").unwrap();
-        let path = RelPath::parse("Docs/sub/b.txt").unwrap();
-        assert_eq!(entry_name(&root, &path), "sub/b.txt");
-        assert_eq!(entry_name(&RelPath::root(), &path), "Docs/sub/b.txt");
-    }
-
-    #[test]
-    fn backslashes_in_entry_names_are_replaced() {
-        let root = RelPath::root();
-        let path = RelPath::parse("a\\..\\..\\x").unwrap();
-        assert_eq!(entry_name(&root, &path), "a_.._.._x");
     }
 
     #[test]

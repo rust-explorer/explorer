@@ -73,7 +73,8 @@ absolute or host path. See [security.md](security.md) for how paths are confined
 | `GET /api/volumes` | The volumes: name, `read_only`, and free space (`space`, `null` when it cannot be read). |
 | `GET /api/volumes/{volume}/entries?path=` | The entries of a folder, sorted by name: `name`, `kind` (`dir`, `file` or `other`), `size` (files only), `modified_ms`. |
 | `GET`, `HEAD /files/download?volume=&path=` | One file, as an attachment. Supports a single `Range`, a strong `ETag` and `If-Range`. |
-| `GET /files/zip?volume=&path=` | A folder as a zip, streamed. `path` is required: pass it empty for the whole volume. Repeat `name=` to archive only those entries of the folder (files or folders, each one a single name, as stored in the zip under that name; a repeated name counts once). Entries carry their modification time, in UTC in the DOS field and exactly in an extended timestamp. |
+| `GET /files/zip?volume=&path=` | A folder as a zip, streamed. `path` is required: pass it empty for the whole volume. Repeat `name=` to archive only those entries of the folder (files or folders, each one a single name, as stored in the zip under that name; a repeated name counts once). Entries carry their modification time, in UTC in the DOS field and exactly in an extended timestamp. With `selection=<id>` in place of the other parameters, the entries of a stored selection (below). |
+| `POST /files/zip/selections` | Stores a selection too large for a URL: `{volume, path, names}` (each name a single entry of the folder, at least one), answered 201 `{id}`. `GET /files/zip?selection=<id>` then zips it, for the same user, during 10 minutes; a user keeps their 16 newest selections. The body is limited to 2 MB. Nothing is read from disk until the zip, which checks everything again. |
 
 All of them require a signed-in user. Failures use the JSON error shape with these codes
 (`details` carries `volume` and `path` when they concern a path):
@@ -87,18 +88,38 @@ All of them require a signed-in user. Failures use the JSON error shape with the
 | `is_a_directory` | 400 | A download of a folder; use `/files/zip`. |
 | `permission_denied` | 403 | The container user cannot read it. |
 | `outside_volume` | 403 | The path resolves outside the volume (symlink escape). |
+| `too_many_zips` | 429 | 4 zips are already streaming on the server, or 2 for this user; try again when one ends. The web app starts zips with `<a download>`, which cannot read this answer: the browser shows a failed download (often "server problem") and the app shows nothing. |
+| `selection_expired` | 404 | No stored selection with this id for this user: it expired, was replaced by newer ones, or never existed. |
 | `range_not_satisfiable` | 416 | The requested range cannot be satisfied (it starts past the end of the file, the file is empty, or the range is `bytes=-0`). |
 
 Any other I/O failure is a 500 `internal` whose cause is only in the server log.
 
 Downloads: the body is streamed from the open file, so memory use does not depend on the
 file size. The zip is streamed without compression (`stored`) with zip64 entries, so
-there is no size limit and no temporary file. The folder is walked before the first byte is
-sent, so a missing or unreadable folder is a normal JSON error. A failure after streaming
-has started (for example a file that becomes unreadable) cannot change the status code:
-the server aborts the body, the browser reports a failed download, and the reason is in
-the server log (`zip aborted`, with the path). A client that stops reading for 60 seconds
-is treated as gone and the zip is aborted the same way.
+there is no size limit and no temporary file. The folder is checked and listed before the
+first byte is sent, so a missing or unreadable folder is a normal JSON error; the rest of
+the tree is walked while the archive streams, one folder listing per level in memory, so the
+first bytes leave at once and memory does not grow with the tree. At most 4 zips stream at
+once across all users, and 2 per user so that one user cannot take every slot
+(`too_many_zips` beyond); a zip stops, and frees its slot, as soon as the client goes away
+or stops reading for 60 seconds. The web app hands the zip URL to the browser as a
+download, so it never sees a refusal: the browser lists the download as failed. Checking for
+a free slot first would not help, since it could be taken before the download starts.
+
+Nothing is left out silently. Entries are reached by their names on disk, so a name that is
+not UTF-8, holds a control character or lies under a path longer than 4096 bytes is
+archived too, under a safe name: invalid UTF-8 becomes `�`, control characters and `\`
+become `_`, and a name that then collides with another one in its folder gets ` (2)`. What
+cannot be archived (a sub-folder or file the server cannot read, a symlink to a folder
+other than one selected itself in a multi-entry download, a
+broken or escaping symlink, a FIFO, socket or device) is skipped, and the archive then ends
+with `explorer-skipped.txt` at its top (renamed if that name is taken), listing each one
+with the reason (the first 10,000, then a count); the server logs `zip left entries out`
+at `warn`. A failure after streaming has started that is not one of these (a file that
+fails mid-read) cannot change the status code: the server aborts the body, the browser
+reports a failed download, and the reason is in the server log (`zip aborted`, with the
+path). A client that stops reading for 60 seconds is treated as gone and the zip is aborted
+the same way.
 
 ## Uploads
 
@@ -109,11 +130,11 @@ reload or a laptop going to sleep. The server never holds a whole file in memory
 | Route | Purpose |
 |---|---|
 | `OPTIONS /files/uploads` | Discovery: `Tus-Version` and `Tus-Extension: creation,termination`. |
-| `POST /files/uploads` | Creates an upload. `Upload-Length` is required (no deferred length, no body). `Upload-Metadata` carries `volume` and `path` (the destination file path, including the file name), and optionally `modified` (the file's `lastModified`, integer milliseconds) and `conflict` (`fail`, the default, `replace` or `keep_both`); values are base64, unknown keys are ignored. Answers 201 with `Location: /files/uploads/{id}` and `Upload-Offset: 0`. |
+| `POST /files/uploads` | Creates an upload. `Upload-Length` is required (no deferred length, no body). `Upload-Metadata` carries `volume` and `path` (the destination file path, including the file name), and optionally `modified` (the file's `lastModified`, integer milliseconds) `conflict` (`fail`, the default, `replace` or `keep_both`) and `fingerprint` (16 lowercase hex digits, see below); values are base64, unknown keys are ignored. Answers 201 with `Location: /files/uploads/{id}` and `Upload-Offset: 0`. |
 | `HEAD /files/uploads/{id}` | The current `Upload-Offset` and `Upload-Length`, with `Cache-Control: no-store`. |
 | `PATCH /files/uploads/{id}` | Appends the body at `Upload-Offset` (`Content-Type: application/offset+octet-stream`). Answers 204 with the new offset. |
-| `DELETE /files/uploads/{id}` | Cancels the upload and removes its staged data. |
-| `GET /api/uploads` | The signed-in user's unfinished uploads (`id`, `volume`, `path`, `length`, `offset`, `modified_ms`), so a reloaded page can resume them. |
+| `DELETE /files/uploads/{id}` | Cancels the upload and removes its staged data. Answers 204, or 409 `upload_committed` when the upload was already complete (the file stays in place). |
+| `GET /api/uploads` | The signed-in user's unfinished uploads (`id`, `volume`, `path`, `length`, `offset`, `modified_ms`, `conflict`, `fingerprint`), so a reloaded page can resume them. |
 | `POST /api/volumes/{volume}/folders` | Body `{"path": "..."}`. Creates a folder and its missing parents; an existing folder is fine. Answers 204. Used to upload folder trees, including empty folders. |
 
 `Tus-Resumable: 1.0.0` is required on every request under `/files/uploads` except
@@ -130,7 +151,10 @@ New error codes (JSON error shape as above):
 |---|---|---|
 | `already_exists` | 409 | The destination exists and `conflict` is `fail` (or no free "keep both" name was found up to `(999)`). |
 | `read_only_volume` | 403 | The volume is read-only. |
-| `insufficient_storage` | 507 | `Upload-Length` is larger than the volume's free space, or the disk filled up while writing. |
+| `insufficient_storage` | 507 | `Upload-Length` is larger than the volume's free space less what its unfinished uploads still have to receive, or the disk filled up while writing. |
+| `too_many_uploads` | 429 | The user already has 1000 unfinished uploads (`MAX_PENDING_UPLOADS`). |
+| `upload_committed` | 409 | `DELETE` of an upload that was already committed; `details.final_path` is where the file is. The record is dropped all the same. |
+| `too_many_patches` | 429 | The user already has 8 `PATCH` requests in flight (`MAX_PATCHES_PER_USER`); retry later. |
 | `upload_not_found` | 404 | Unknown id, another user's upload, or an upload whose staged file is gone. |
 | `offset_mismatch` | 409 | `Upload-Offset` is not the server's offset; `details.offset` carries the right one. |
 | `upload_busy` | 423 | Another request is writing or finishing this upload. |
@@ -145,15 +169,16 @@ An empty destination path (the volume root) is `invalid_path`; `is_a_directory`,
 
 How an upload is stored:
 
-1. Creation checks the destination (a parent that is a file, an existing file with
-   `conflict=fail`, a folder with `replace`) and the free space, creates the staged file and
+1. Creation checks the user's count of unfinished uploads, the destination (a parent that
+   is a file, an existing file with `conflict=fail`, a folder with `replace`) and the free
+   space less the bytes the volume's unfinished uploads still owe, creates the staged file and
    inserts a record in the `uploads` table of `explorer.db` (id, owner `sub`, volume, path,
-   length, `modified`, conflict policy, timestamps).
+   length, `modified`, conflict policy, fingerprint, timestamps).
 2. Data is written to `.explorer-uploads/<id>` at the root of the volume. The directory is
    created on first upload with mode `0700`, the file with `0666` less the umask, both owned
    by the container user; the final file keeps that mode, like any file the container
    creates. The offset reported to the client is the staged file's length, so it is right
-   after a crash. `.explorer-uploads` is rejected as the first component of any client path
+   after a crash. `.explorer-uploads`, in any letter case, is rejected as the first component of any client path
    (`invalid_path`, reason `reserved name`). It is also recognised by device and inode, so
    it is neither listed, zipped, read nor written through a symlink to the volume root or
    to the directory itself (`path_not_found`).
@@ -162,13 +187,14 @@ How an upload is stored:
    write. A body that sends nothing for 60 seconds is treated as a disconnect; what arrived
    is kept and flushed to disk.
 4. When the staged file reaches `Upload-Length`, the server creates the missing parent
-   folders, applies `modified` as the file's modification time, syncs it and renames it
-   into place. `fail` and `keep_both` use a no-replace rename, so a file that appears
+   folders, syncs the file and renames it into place, then applies `modified` as its
+   modification time (only once placed, so a staged file never looks old to the sweep). `fail` and `keep_both` use a no-replace rename, so a file that appears
    during the upload is never overwritten (with `fail` the upload then takes a "keep both"
    name and the log says so); `replace` renames over the destination but never over a
    folder. "Keep both" names `Film.mkv` as `Film (1).mkv`, then `(2)` and so on: the suffix
    goes before the last extension, and a name whose only dot is the first character has none
-   (`.bashrc (1)`). The record then gets its `final_path`; a retried empty `PATCH` at the end
+   (`.bashrc (1)`). A name that would then pass 255 bytes is shortened at the end of its
+   stem (of the whole name if the extension leaves no room). The record then gets its `final_path`; a retried empty `PATCH` at the end
    is answered 204, which makes the last chunk safe to resend. If the commit fails, the
    staged file stays complete and `HEAD` reports the full length; an empty `PATCH` at the end
    retries the commit, and the client sends one before it shows the upload as done. A
@@ -179,9 +205,14 @@ How an upload is stored:
    filesystem than the volume. Mount such a folder as its own volume.
 
 Abandoned uploads: a record not touched for 24 hours is deleted with its staged file, and
-so is a staged file older than that without a record. The sweep runs at startup and then
+so is a staged file older than that without a record. The sweep checks each record again
+once it holds the upload's lock, so an upload resumed meanwhile is kept. The sweep runs at startup and then
 every hour; it logs each abandoned upload it removes at `info` (`action` = `sweep`), then
 a summary of what it removed.
+A creation also removes the same user's unfinished uploads to the same volume and path
+that had no `PATCH` for 2 minutes and that no request holds (`upload superseded by a new
+upload`, `info`), since the client creates a new upload only when it does not resume them;
+otherwise an upload abandoned after a crash would keep its free space reserved for a day.
 
 Logs (`info`, with `user` = the OIDC `sub`, `action`, `volume`, `path`): upload started
 (with `length`), completed (with `bytes` and `final_path`), cancelled, folder created, and
@@ -225,6 +256,8 @@ New error codes (JSON error shape as above):
 |---|---|---|
 | `invalid_destination` | 400 | A copy or move of a folder into itself or one of its descendants, or a move into the folder the entry is already in. `details` name the entry, on its source volume. |
 | `task_not_found` | 404 | Unknown task id, or another user's. |
+| `changed_during_move` | 409 | A move to another volume found, when deleting the source, that a file had changed or been replaced since it was copied. That file stays in the source (with the folders holding it) and the copy is in the destination; the rest of the move is done. `details` name the file, on its source volume. |
+| `too_many_entries` | 400 | A copy, or a move to another volume, of a folder holding more than 1,000,000 files and folders in all. Nothing was copied. |
 | `too_many_tasks` | 429 | The user already has 1000 tasks queued or running. The web app posts the task again once some have finished. |
 
 Existing codes also apply: `already_exists` (409), `is_a_directory` (`replace` over or of a
@@ -237,7 +270,8 @@ How tasks run:
 
 - The registry is in memory (`crates/server/src/tasks`): a restart loses every task, and a
   task that was running stops with the process. A task belongs to the `sub` that created it.
-  A finished task is listed for one hour unless dismissed.
+  A finished task is listed for one hour unless dismissed, and only a user's 1000 most
+  recently created finished tasks are kept: older ones are forgotten first.
 - At most 2 tasks run at once, across all users; the others stay `queued`. Each runs on
   Tokio's blocking pool. A queued task is cancelled at once; a running copy, or the copy
   phase of a move, when it next checks (between 1 MiB chunks, and between entries of a
@@ -265,7 +299,7 @@ All of these only read, so they work on read-only volumes.
 | `GET /api/favorites` | The user's favorite folders, oldest first: `volume`, `path` and `exists` (false once the volume or the folder is gone or no longer a folder). |
 | `PUT /api/favorites` | Body `{"volume", "path"}`. Adds a folder (it must exist and be readable); adding one that is already there is a no-op. Answers 204. |
 | `DELETE /api/favorites?volume=&path=` | Removes one, whether or not it still exists. Answers 204. |
-| `GET /api/volumes/{volume}/search?q=` | Case-insensitive substring match on names under the whole volume: `{volume, query, hits, truncated}`, each hit with `path`, `kind` (`dir` or `file`), `size` and `modified_ms`. |
+| `GET /api/volumes/{volume}/search?q=` | Case- and accent-insensitive substring match on names under the whole volume, whatever their Unicode normalisation (a name stored decomposed, as macOS clients write it, matches a query typed composed): `{volume, query, hits, truncated}`, each hit with `path`, `kind` (`dir` or `file`), `size` and `modified_ms`. |
 | `GET /files/thumbnail?volume=&path=&v=` | A preview of an image, at most 320 px on its longest side. `v` only busts the browser cache. |
 
 Favorites are stored per user (the OIDC `sub`) in the `favorites` table of `explorer.db`, at
@@ -284,7 +318,8 @@ superseded search does not keep a thread busy. Nothing is indexed.
 Thumbnails are made for `jpg`, `jpeg`, `png`, `gif` and `webp` files of at most 64 MiB;
 anything else, a missing file or an image that cannot be decoded is 404
 `thumbnail_unavailable` (a decode failure is logged at `debug` only). The image is decoded
-within limits, shrunk, rotated according to its EXIF orientation and **re-encoded**: PNG when
+within limits (its estimated decode memory at most 512 MiB, see
+[security.md](security.md#thumbnails)), shrunk, rotated according to its EXIF orientation and **re-encoded**: PNG when
 it has transparency, JPEG otherwise. The user's bytes are never sent. At most 2 images are
 decoded at once across all users; a request that is cancelled mid-render keeps its slot until
 the work ends. Results are cached as files under `/config/cache/thumbnails` (see
@@ -328,8 +363,11 @@ How a scan counts:
 - `.explorer-uploads` is skipped, so staged data is not counted.
 - A folder it cannot read is skipped and marks itself and every folder above it as
   `incomplete`: its total is a lower bound.
-- A volume is walked by 4 threads. It keeps at most 1,000,000 folders as nodes; beyond that
+- A volume is walked by 4 threads. It keeps at most 200,000 folders as nodes; beyond that
   the deeper sub-folders are counted into their last listed ancestor and `collapsed` is set.
+- It keeps at most 200,000 file names in all (the biggest files of the folders read first,
+  usually the shallow ones); the folders read after that show their files as `other_files`
+  only. Together these bound a tree to roughly 50 MB of memory.
 - Folders are opened without following symlinks and checked against the inode seen when they
   were listed, so a folder swapped for a symlink meanwhile is not entered.
 - Folders waiting to be read more than 64 levels down don't keep their parent open; they are
@@ -356,8 +394,9 @@ entries keeps the DOM small. Sizes use SI units (1 kB = 1000 B). Each file row l
 browser handles the download and shows any failure in its own download list.
 
 Managing files: each row has a menu (Download, Rename, Move to, Copy to, Delete) and a checkbox;
-checking rows, with shift-click for a range, shows a bar to download them as a zip (one
-`name=` per entry), move, copy or delete them, and renaming is offered for one entry at a time.
+checking rows, with shift-click for a range, shows a bar to download them as a zip (the names are stored
+with `POST /files/zip/selections`, then the zip is fetched by its id, so thousands of entries
+fit; a failure to store them shows a dismissable alert), move, copy or delete them, and renaming is offered for one entry at a time.
 New folder is in the header. On a read-only volume only Download and Copy remain, and entries listed as `other` (symlinks the
 server does not follow) can only be renamed or deleted. Names are checked
 before they are sent (not empty, no slash, not `.` or `..`, at most 255 bytes, not the reserved
@@ -366,11 +405,15 @@ choose a read-only one. A rename, move or copy that hits an existing name opens 
 both or Cancel prompt as uploads, with "apply to all"; Replace is only offered for a file over
 a file. Delete, Move and Copy become tasks that appear in the activity panel (with the uploads)
 with their progress, a cancel or dismiss button and, for a task that skipped entries, how many.
+One action shows at most 20 task rows there, then a count of the others (a delete of thousands
+of entries is one task per entry).
 The tab polls `GET /api/tasks` every second while one of its tasks is queued or running, and
 refreshes the listing and the free space when one finishes. A tab shows the tasks it started;
 on load it also lists the user's queued and running tasks once and adopts them, so a reload
 keeps showing them until they finish (an adopted task never asks about a conflict, it is past
-that step).
+that step). A file task that drops out of the poll (another tab cleared it, it expired while
+the tab slept, or the server restarted) is shown as no longer tracked, with an unknown outcome,
+not as failed.
 
 Polish: a refresh button next to the breadcrumb reloads the listing, the free space and the
 favorites. The star next to the folder name adds or removes a favorite; favorites are listed
@@ -397,13 +440,20 @@ browser. The engine lives in `crates/web/src/uploads`:
 - A file is cut into 16 MiB chunks, each sent as one `PATCH`; at most 3 files upload at
   once. Before creating an upload, the client resumes a pending one (from `GET /api/uploads`)
   whose volume, path, size and modification time all match, so reloading and picking the
-  same file again continues from the server's offset.
+  same file again continues from the server's offset. It resumes only an upload created with
+  the `fail` policy, so that a new batch still asks before overwriting, and only when the
+  fingerprints match: a 64-bit FNV-1a hash of the file's first and last 64 KiB
+  (`shared::tus::fingerprint`), sent at creation. A different file with the same name, size
+  and date is uploaded anew rather than appended to the first one's data.
 - After a transient failure (network error, a 5xx answer that is not an API error, such as a
-  proxy's 502, `internal`, `upload_busy`, `offset_mismatch`) the item asks the server for its offset and retries after
+  proxy's 502, `internal`, `upload_busy`, `offset_mismatch`, `too_many_patches`) the item asks the server for its offset and retries after
   `min(1 s x 2^(attempt-1), 30 s)`, until the user cancels. A `PATCH` that reports no
   progress for 120 seconds is aborted and counts as a network error. An upload the server no
   longer knows (`upload_not_found`) is recreated from the start, once. When that offset is
   the full length, an empty `PATCH` confirms the commit before the item is marked done.
+- Cancelling aborts the request in flight and deletes the upload. If the last chunk had
+  already been committed (`upload_committed`), the item shows as done, not cancelled, and
+  the listing refreshes.
 - An `already_exists` answer opens a dialog: Replace, Keep both or Cancel, with an "apply to
   all" option for the rest of the batch. Folders that already exist are merged into, never a
   conflict.

@@ -5,7 +5,7 @@ use axum::http::header::{HeaderMap, HeaderName, HeaderValue};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use shared::api::conflict::ConflictPolicy;
-use shared::tus::{TUS_VERSION, decode_metadata};
+use shared::tus::{TUS_VERSION, decode_metadata, is_fingerprint};
 
 use crate::http::error::ApiError;
 
@@ -54,6 +54,7 @@ pub(super) struct Creation {
     pub(super) length: u64,
     pub(super) modified_ms: Option<i64>,
     pub(super) conflict: ConflictPolicy,
+    pub(super) fingerprint: Option<String>,
 }
 
 pub(super) fn parse_creation(headers: &HeaderMap) -> Result<Creation, ApiError> {
@@ -89,12 +90,20 @@ pub(super) fn parse_creation(headers: &HeaderMap) -> Result<Creation, ApiError> 
         })
         .transpose()?
         .unwrap_or_default();
+    let fingerprint = value("fingerprint")
+        .map(|v| {
+            is_fingerprint(v).then(|| v.to_owned()).ok_or_else(|| {
+                ApiError::invalid_upload("fingerprint must be 16 lowercase hex digits")
+            })
+        })
+        .transpose()?;
     Ok(Creation {
         volume: required("volume")?,
         path: required("path")?,
         length,
         modified_ms,
         conflict,
+        fingerprint,
     })
 }
 

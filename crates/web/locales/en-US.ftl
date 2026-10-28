@@ -76,6 +76,13 @@ error-task_not_found = This task no longer exists on the server.
 error-favorites_full = You can't have more than { $max } favorites. Remove one first.
 error-thumbnail_unavailable = No preview is available for this file.
 error-too_many_tasks = Too many tasks are waiting. Try again once some have finished.
+error-too_many_uploads = You have too many unfinished uploads. Cancel some, or wait a day for the abandoned ones to be cleared.
+error-too_many_patches = Too many uploads are being sent at once from your tabs or devices.
+error-upload_committed = This upload had already finished, so it could not be cancelled.
+error-changed_during_move = { $path } changed while it was being moved, so it was kept in its old place as well as copied to the new one.
+error-too_many_entries = { $path } holds too many files and folders to copy or move at once (a million at most). Copy or move its sub-folders one at a time.
+error-too_many_zips = Too many zips are being downloaded right now. Try again in a moment.
+error-selection_expired = This download expired. Select the entries and download them again.
 upload = Upload
 upload-open = Upload files or a folder
 upload-files = Files…
@@ -130,6 +137,8 @@ select-all = Select all entries
 select-entry = Select { $name }
 selection-count = { $count } selected
 selection-clear = Clear selection
+selection-download-failed = The download could not start.
+selection-download-dismiss = Dismiss
 rename-title = Rename { $name }
 rename-name = New name
 rename-save = Save
@@ -158,6 +167,12 @@ task-files-done =
     }
 task-done = Done
 task-cancelled = Cancelled
+task-vanished = No longer tracked by the server: check the folder to see how it ended.
+task-more =
+    { $count ->
+        [one] and 1 more task
+       *[other] and { $count } more tasks
+    }
 delete-title =
     { $count ->
         [one] Delete { $name }?

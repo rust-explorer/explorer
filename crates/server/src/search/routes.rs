@@ -1,5 +1,3 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use axum::Json;
@@ -9,11 +7,13 @@ use serde::Deserialize;
 use shared::api::browse::EntryKind;
 use shared::api::search::{MIN_QUERY_CHARS, SearchHit, SearchResults};
 
-use super::SEARCH_TIMEOUT;
+use tokio::sync::{Semaphore, SemaphorePermit};
+
+use super::{SEARCH_CONCURRENCY, SEARCH_TIMEOUT};
 use crate::auth::{Action, CurrentUser};
 use crate::browse::epoch_millis;
 use crate::http::AppState;
-use crate::http::access::{authorize, blocking_volume, invalid_query};
+use crate::http::access::{CancelOnDrop, authorize, blocking_volume, invalid_query};
 use crate::http::error::ApiError;
 use crate::storage::{self, SEARCH_LIMIT};
 
@@ -23,13 +23,11 @@ pub struct SearchQuery {
     q: String,
 }
 
-/// Sets the flag when dropped, so that a request the client abandoned stops its walk.
-struct CancelOnDrop(Arc<AtomicBool>);
+static SEARCHES: Semaphore = Semaphore::const_new(SEARCH_CONCURRENCY);
 
-impl Drop for CancelOnDrop {
-    fn drop(&mut self) {
-        self.0.store(true, Ordering::Relaxed);
-    }
+/// Waits for one of the [`SEARCH_CONCURRENCY`] search slots.
+async fn slot() -> Result<SemaphorePermit<'static>, ApiError> {
+    SEARCHES.acquire().await.map_err(ApiError::internal)
 }
 
 pub async fn search(
@@ -47,12 +45,13 @@ pub async fn search(
         return Err(invalid_query());
     }
 
-    let cancel = Arc::new(AtomicBool::new(false));
-    let _guard = CancelOnDrop(Arc::clone(&cancel));
+    let (_guard, cancel) = CancelOnDrop::new();
+    let slot = slot().await?;
     let started = Instant::now();
     let outcome = blocking_volume(&state.volumes, &volume, {
         let needle = needle.clone();
         move |vol| {
+            let _slot = slot;
             vol.search(
                 &needle,
                 SEARCH_LIMIT,
@@ -98,12 +97,20 @@ pub async fn search(
 mod tests {
     use super::*;
 
-    #[test]
-    fn dropping_the_guard_cancels_the_walk() {
-        let cancel = Arc::new(AtomicBool::new(false));
-        let guard = CancelOnDrop(Arc::clone(&cancel));
-        assert!(!cancel.load(Ordering::Relaxed));
-        drop(guard);
-        assert!(cancel.load(Ordering::Relaxed));
+    #[tokio::test]
+    async fn searches_wait_for_a_free_slot() {
+        let held = hold_all().await;
+        let wait = std::time::Duration::from_millis(50);
+        assert!(tokio::time::timeout(wait, slot()).await.is_err());
+        drop(held);
+        assert!(tokio::time::timeout(wait, slot()).await.is_ok());
+    }
+
+    async fn hold_all() -> Vec<SemaphorePermit<'static>> {
+        let mut held = Vec::new();
+        for _ in 0..SEARCH_CONCURRENCY {
+            held.push(slot().await.unwrap());
+        }
+        held
     }
 }

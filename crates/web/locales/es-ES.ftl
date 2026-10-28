@@ -76,6 +76,13 @@ error-task_not_found = Esta tarea ya no existe en el servidor.
 error-favorites_full = No puedes tener más de { $max } favoritos. Quita uno primero.
 error-thumbnail_unavailable = No hay vista previa disponible para este archivo.
 error-too_many_tasks = Hay demasiadas tareas en espera. Inténtalo de nuevo cuando terminen algunas.
+error-too_many_uploads = Tienes demasiadas subidas sin terminar. Cancela algunas o espera un día a que se borren las abandonadas.
+error-too_many_patches = Se están enviando demasiadas subidas a la vez desde tus pestañas o dispositivos.
+error-upload_committed = Esta subida ya había terminado, así que no se pudo cancelar.
+error-changed_during_move = { $path } cambió mientras se movía, así que se conservó en su ubicación anterior además de copiarse en la nueva.
+error-too_many_entries = { $path } contiene demasiados archivos y carpetas para copiarlo o moverlo de una vez (un millón como máximo). Copia o mueve sus subcarpetas una a una.
+error-too_many_zips = Se están descargando demasiados zips en este momento. Inténtalo de nuevo en un momento.
+error-selection_expired = Esta descarga ha caducado. Vuelve a seleccionar los elementos y descárgalos.
 upload = Subir
 upload-open = Subir archivos o una carpeta
 upload-files = Archivos…
@@ -134,6 +141,8 @@ selection-count =
        *[other] { $count } seleccionados
     }
 selection-clear = Borrar selección
+selection-download-failed = No se pudo iniciar la descarga.
+selection-download-dismiss = Cerrar
 rename-title = Cambiar el nombre de { $name }
 rename-name = Nuevo nombre
 rename-save = Guardar
@@ -162,6 +171,12 @@ task-files-done =
     }
 task-done = Terminada
 task-cancelled = Cancelada
+task-vanished = El servidor ya no sigue esta tarea: revisa la carpeta para ver cómo terminó.
+task-more =
+    { $count ->
+        [one] y 1 tarea más
+       *[other] y { $count } tareas más
+    }
 delete-title =
     { $count ->
         [one] ¿Eliminar { $name }?

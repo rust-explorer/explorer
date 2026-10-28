@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use dioxus::prelude::*;
 use dioxus_i18n::prelude::i18n;
 use dioxus_i18n::t;
@@ -12,17 +14,67 @@ use crate::tasks::{Task, use_tasks};
 
 const NOTE: &str = "mt-0.5 text-xs text-slate-500 dark:text-slate-400";
 
-/// The task rows of the activity panel.
+/// How many tasks of one batch get a row; the others are counted on one line.
+const BATCH_ROWS: usize = 20;
+
+/// The task rows of the activity panel; a big batch (a delete of thousands of entries) shows its
+/// first tasks and a count of the others.
 #[component]
 pub fn TaskRows() -> Element {
     let list = use_tasks().list();
-    let tasks: Vec<Task> = list.read().shown().cloned().collect();
+    let list = list.read();
+    let shown: Vec<&Task> = list.shown().collect();
+    let rows = grouped(shown.iter().copied(), |task| task.batch);
 
     rsx! {
-        for task in tasks {
-            TaskRow { key: "task-{task.key.0}", task }
+        for row in rows {
+            match row {
+                Row::Item(task) => rsx! {
+                    TaskRow { key: "task-{task.key.0}", task: Task::clone(task) }
+                },
+                Row::More { batch, count } => rsx! {
+                    li { key: "more-{batch}", class: "py-2 {NOTE}", {t!("task-more", count: count)} }
+                },
+            }
         }
     }
+}
+
+#[derive(Debug, PartialEq)]
+enum Row<T> {
+    Item(T),
+    /// The `count` items of `batch` past the first [`BATCH_ROWS`].
+    More {
+        batch: u64,
+        count: usize,
+    },
+}
+
+/// The items in order, at most [`BATCH_ROWS`] per batch, each batch's count of the others
+/// after its last item.
+fn grouped<T>(items: impl Iterator<Item = T> + Clone, batch_of: impl Fn(&T) -> u64) -> Vec<Row<T>> {
+    let mut sizes: HashMap<u64, usize> = HashMap::new();
+    for item in items.clone() {
+        *sizes.entry(batch_of(&item)).or_default() += 1;
+    }
+    let mut seen: HashMap<u64, usize> = HashMap::new();
+    let mut rows = Vec::new();
+    for item in items {
+        let batch = batch_of(&item);
+        let seen = seen.entry(batch).or_default();
+        *seen += 1;
+        let size = sizes[&batch];
+        if *seen <= BATCH_ROWS {
+            rows.push(Row::Item(item));
+        }
+        if *seen == size && size > BATCH_ROWS {
+            rows.push(Row::More {
+                batch,
+                count: size - BATCH_ROWS,
+            });
+        }
+    }
+    rows
 }
 
 #[component]
@@ -45,7 +97,7 @@ fn TaskRow(task: Task) -> Element {
                 if let (TaskSpec::Usage { source }, Some(info), TaskState::Done) = (&task.spec, &task.info, state) {
                     ViewLink { route: usage_route(&info.id, source), name: name.clone() }
                 }
-                if state == TaskState::Done {
+                if state == TaskState::Done && !task.vanished() {
                     span {
                         class: "text-green-600 dark:text-green-400",
                         role: "img",
@@ -86,6 +138,11 @@ fn TaskStatus(task: Task) -> Element {
         return rsx! {
             p { class: "mt-0.5 text-xs text-red-700 dark:text-red-400", {t!("task-cancel-failed")} }
             FailureNote { failure: failure.clone() }
+        };
+    }
+    if task.vanished() {
+        return rsx! {
+            p { class: NOTE, {t!("task-vanished")} }
         };
     }
     let usage = matches!(task.spec, TaskSpec::Usage { .. });
@@ -256,6 +313,36 @@ mod tests {
             "media/Films/a.mkv"
         );
         assert_eq!(display(&location("media", "")), "media");
+    }
+
+    #[test]
+    fn big_batches_are_cut() {
+        let items: Vec<(u64, usize)> = (0..25)
+            .map(|i| (7, i))
+            .chain([(8, 0)])
+            .chain((25..30).map(|i| (7, i)))
+            .collect();
+        let rows = grouped(items.iter(), |item| item.0);
+        assert_eq!(rows.len(), BATCH_ROWS + 2);
+        assert!(
+            rows[..20]
+                .iter()
+                .all(|row| matches!(row, Row::Item((7, _))))
+        );
+        assert_eq!(rows[20], Row::Item(&(8, 0)));
+        assert_eq!(
+            rows[21],
+            Row::More {
+                batch: 7,
+                count: 10
+            }
+        );
+
+        let small = [(1, 0), (2, 0), (1, 1)];
+        assert_eq!(
+            grouped(small.iter(), |item| item.0),
+            small.iter().map(Row::Item).collect::<Vec<_>>()
+        );
     }
 
     #[test]
