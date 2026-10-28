@@ -362,11 +362,26 @@ mod tests {
     #[test]
     fn decode_cost_counts_what_the_decoders_keep() {
         let mib = 1024 * 1024;
-        assert_eq!(decode_cost(ImageFormat::Png, false, 100 * mib, 0), 100 * mib);
-        assert_eq!(decode_cost(ImageFormat::Jpeg, false, 100 * mib, mib), 101 * mib);
-        assert_eq!(decode_cost(ImageFormat::Jpeg, true, 100 * mib, mib), 301 * mib);
-        assert_eq!(decode_cost(ImageFormat::WebP, false, 100 * mib, 0), 300 * mib);
-        assert_eq!(decode_cost(ImageFormat::Gif, false, 100 * mib, 0), 200 * mib);
+        assert_eq!(
+            decode_cost(ImageFormat::Png, false, 100 * mib, 0),
+            100 * mib
+        );
+        assert_eq!(
+            decode_cost(ImageFormat::Jpeg, false, 100 * mib, mib),
+            101 * mib
+        );
+        assert_eq!(
+            decode_cost(ImageFormat::Jpeg, true, 100 * mib, mib),
+            301 * mib
+        );
+        assert_eq!(
+            decode_cost(ImageFormat::WebP, false, 100 * mib, 0),
+            300 * mib
+        );
+        assert_eq!(
+            decode_cost(ImageFormat::Gif, false, 100 * mib, 0),
+            200 * mib
+        );
         assert_eq!(decode_cost(ImageFormat::Png, false, u64::MAX, 1), u64::MAX);
     }
 

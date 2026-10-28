@@ -232,7 +232,9 @@ Signing in successfully but landing on `/access-denied` means the user is not in
 ## Troubleshooting downloads
 
 A download that fails after it started cannot show an error page: the browser lists it as
-failed in its download list. The reason is in the server log (`zip aborted` names the
+failed in its download list. A zip that had to leave entries out (unreadable, symlinks to
+folders, special files) still completes and lists them in `explorer-skipped.txt` at its
+top. The reason of a failure is in the server log (`zip aborted` names the
 path that failed; storage failures show the code, the volume and the path; only
 unexpected I/O failures also show the OS error). A large download interrupted by the
 network can be resumed by the browser, as files support `Range` requests.
@@ -240,7 +242,8 @@ network can be resumed by the browser, as files support `Range` requests.
 If a download is cut at a fixed time or size, check the reverse proxy's timeouts and
 buffering limits. A zip download is also aborted when the client stops reading for 60
 seconds. `/files/zip` requires the `path` parameter; an empty `path` downloads the whole
-volume.
+volume. At most 4 zips stream at once across all users; a fifth gets `too_many_zips` until
+one ends.
 
 ## Updating
 

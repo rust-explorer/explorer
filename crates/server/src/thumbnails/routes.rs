@@ -89,9 +89,11 @@ pub async fn thumbnail(
             size,
             modified: meta.modified,
         };
-        bounded(&state.thumbnails, move || generate(&thumbnails, &key, &source))
-            .await?
-            .ok_or_else(ApiError::thumbnail_unavailable)?
+        bounded(&state.thumbnails, move || {
+            generate(&thumbnails, &key, &source)
+        })
+        .await?
+        .ok_or_else(ApiError::thumbnail_unavailable)?
     };
     tracing::debug!(
         user = user.sub,

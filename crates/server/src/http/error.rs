@@ -8,6 +8,8 @@ use shared::api::error::ErrorBody;
 use shared::api::favorites::MAX_FAVORITES;
 use shared::api::tasks::MAX_ACTIVE_TASKS;
 
+use crate::downloads::ZIP_CONCURRENCY;
+
 use crate::http::request_id::request_id;
 use crate::storage::{InvalidPath, StorageError};
 
@@ -134,6 +136,24 @@ impl ApiError {
             StatusCode::TOO_MANY_REQUESTS,
             "too_many_tasks",
             format!("At most {MAX_ACTIVE_TASKS} tasks can wait or run at once"),
+        )
+    }
+
+    #[must_use]
+    pub fn too_many_zips() -> Self {
+        Self::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too_many_zips",
+            format!("At most {ZIP_CONCURRENCY} zips can be downloaded at once"),
+        )
+    }
+
+    #[must_use]
+    pub fn selection_expired() -> Self {
+        Self::new(
+            StatusCode::NOT_FOUND,
+            "selection_expired",
+            "This selection expired; select the entries again",
         )
     }
 

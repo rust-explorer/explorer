@@ -73,7 +73,8 @@ absolute or host path. See [security.md](security.md) for how paths are confined
 | `GET /api/volumes` | The volumes: name, `read_only`, and free space (`space`, `null` when it cannot be read). |
 | `GET /api/volumes/{volume}/entries?path=` | The entries of a folder, sorted by name: `name`, `kind` (`dir`, `file` or `other`), `size` (files only), `modified_ms`. |
 | `GET`, `HEAD /files/download?volume=&path=` | One file, as an attachment. Supports a single `Range`, a strong `ETag` and `If-Range`. |
-| `GET /files/zip?volume=&path=` | A folder as a zip, streamed. `path` is required: pass it empty for the whole volume. Repeat `name=` to archive only those entries of the folder (files or folders, each one a single name, as stored in the zip under that name; a repeated name counts once). Entries carry their modification time, in UTC in the DOS field and exactly in an extended timestamp. |
+| `GET /files/zip?volume=&path=` | A folder as a zip, streamed. `path` is required: pass it empty for the whole volume. Repeat `name=` to archive only those entries of the folder (files or folders, each one a single name, as stored in the zip under that name; a repeated name counts once). Entries carry their modification time, in UTC in the DOS field and exactly in an extended timestamp. With `selection=<id>` in place of the other parameters, the entries of a stored selection (below). |
+| `POST /files/zip/selections` | Stores a selection too large for a URL: `{volume, path, names}` (each name a single entry of the folder, at least one), answered 201 `{id}`. `GET /files/zip?selection=<id>` then zips it, for the same user, during 10 minutes; a user keeps their 16 newest selections. The body is limited to 2 MB. Nothing is read from disk until the zip, which checks everything again. |
 
 All of them require a signed-in user. Failures use the JSON error shape with these codes
 (`details` carries `volume` and `path` when they concern a path):
@@ -87,18 +88,34 @@ All of them require a signed-in user. Failures use the JSON error shape with the
 | `is_a_directory` | 400 | A download of a folder; use `/files/zip`. |
 | `permission_denied` | 403 | The container user cannot read it. |
 | `outside_volume` | 403 | The path resolves outside the volume (symlink escape). |
+| `too_many_zips` | 429 | 4 zips are already streaming on the server; try again when one ends. |
+| `selection_expired` | 404 | No stored selection with this id for this user: it expired, was replaced by newer ones, or never existed. |
 | `range_not_satisfiable` | 416 | The requested range cannot be satisfied (it starts past the end of the file, the file is empty, or the range is `bytes=-0`). |
 
 Any other I/O failure is a 500 `internal` whose cause is only in the server log.
 
 Downloads: the body is streamed from the open file, so memory use does not depend on the
 file size. The zip is streamed without compression (`stored`) with zip64 entries, so
-there is no size limit and no temporary file. The folder is walked before the first byte is
-sent, so a missing or unreadable folder is a normal JSON error. A failure after streaming
-has started (for example a file that becomes unreadable) cannot change the status code:
-the server aborts the body, the browser reports a failed download, and the reason is in
-the server log (`zip aborted`, with the path). A client that stops reading for 60 seconds
-is treated as gone and the zip is aborted the same way.
+there is no size limit and no temporary file. The folder is checked and listed before the
+first byte is sent, so a missing or unreadable folder is a normal JSON error; the rest of
+the tree is walked while the archive streams, one folder listing per level in memory, so the
+first bytes leave at once and memory does not grow with the tree. At most 4 zips stream at
+once across all users (`too_many_zips` beyond); a zip stops, and frees its slot, as soon as
+the client goes away.
+
+Nothing is left out silently. Entries are reached by their names on disk, so a name that is
+not UTF-8, holds a control character or lies under a path longer than 4096 bytes is
+archived too, under a safe name: invalid UTF-8 becomes `�`, control characters and `\`
+become `_`, and a name that then collides with another one in its folder gets ` (2)`. What
+cannot be archived (a sub-folder or file the server cannot read, a symlink to a folder, a
+broken or escaping symlink, a FIFO, socket or device) is skipped, and the archive then ends
+with `explorer-skipped.txt` at its top (renamed if that name is taken), listing each one
+with the reason (the first 10,000, then a count); the server logs `zip left entries out`
+at `warn`. A failure after streaming has started that is not one of these (a file that
+fails mid-read) cannot change the status code: the server aborts the body, the browser
+reports a failed download, and the reason is in the server log (`zip aborted`, with the
+path). A client that stops reading for 60 seconds is treated as gone and the zip is aborted
+the same way.
 
 ## Uploads
 

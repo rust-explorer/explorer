@@ -325,7 +325,9 @@ impl Scan<'_> {
             let unnamed = job.unnamed || name.is_none();
             let job = match name {
                 Some(name)
-                    if !job.unnamed && !job.collapsed && state.nodes.len() < self.limits.max_dirs =>
+                    if !job.unnamed
+                        && !job.collapsed
+                        && state.nodes.len() < self.limits.max_dirs =>
                 {
                     let index = state.nodes.len();
                     state.nodes.push(UsageNode {

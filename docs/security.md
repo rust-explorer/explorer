@@ -46,7 +46,8 @@ Login is a harmless `GET` that only starts a sign-in; the callback is protected 
 This covers every write: creating, appending to and cancelling an upload (`POST`, `PATCH`,
 `DELETE` under `/files/uploads`), creating a folder, renaming, and creating or cancelling a
 task (`POST /api/tasks`, `DELETE /api/tasks/{id}`), and adding or removing a favorite (`PUT`, `DELETE /api/favorites`). The zip of several entries is a `GET` and
-changes nothing. Uploads use same-origin `XHR` and
+changes nothing; storing a large selection for it (`POST /files/zip/selections`) is a
+`POST` and goes through this check. Uploads use same-origin `XHR` and
 `fetch`, so the browser sends an `Origin` the check accepts.
 
 Everything under `/files` (downloads, zips, thumbnails, uploads) also refuses, with 403
@@ -211,7 +212,16 @@ action reach outside its volume.
   `..`, containing `/`, a control character, or the reserved name at the volume root is
   `invalid_path`, and a
   name that does not exist is `path_not_found`. Entries are resolved and walked under the
-  same rules as a folder zip, and need read access only.
+  same rules as a folder zip, and need read access only. A selection stored with
+  `POST /files/zip/selections` is checked the same way when stored and again when zipped,
+  belongs to the user who stored it (another user gets `selection_expired`), expires after
+  10 minutes, and a user keeps at most 16.
+- **Zip walk.** Below the zipped folder, every folder and file is opened by its name from
+  its already opened parent, without following symlinks, and a folder is only entered if it
+  is still the one that was listed (device and inode). Symlinks to files are resolved from
+  the volume root and confined like any path; symlinks to folders are not followed. Folders
+  more than 64 levels down don't keep a descriptor open while they are walked. At most 4
+  zips stream at once; each stops when its client goes away.
 - **Logs.** A new folder, rename, delete and finished copy or move are logged at `info`
   with the user's `sub`, `action`, `volume`, `path` (and `dest_volume` and `final_path`);
   failures, refused ones included, once at `warn` with the same fields and the error. A
