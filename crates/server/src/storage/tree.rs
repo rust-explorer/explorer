@@ -164,7 +164,7 @@ impl TreeWalk {
 
     /// A name for an entry of the walked folder that no entry has taken.
     pub fn unused_top_name(&mut self, wanted: &str) -> String {
-        unique(&mut self.frames[0].used, wanted.to_owned())
+        unique(&mut self.frames[0].used, wanted)
     }
 
     fn visit(&mut self, volume: &Volume, depth: usize, raw: CString) -> Visit {
@@ -177,10 +177,9 @@ impl TreeWalk {
             .as_ref()
             .and_then(|rel| raw.to_str().ok().and_then(|name| rel.join(name).ok()));
         let prefix = frame.prefix.clone();
-        let name = prefix + &unique(&mut self.frames[depth].used, safe_name(&raw));
-        let dir = match self.dir_fd(depth) {
-            Ok(dir) => dir,
-            Err(_) => return skip(name, SkipReason::Unreadable),
+        let name = prefix + &unique(&mut self.frames[depth].used, &safe_name(&raw));
+        let Ok(dir) = self.dir_fd(depth) else {
+            return skip(name, SkipReason::Unreadable);
         };
         let stat = match rustix::fs::statat(&dir, raw.as_c_str(), AtFlags::SYMLINK_NOFOLLOW) {
             Ok(stat) => stat,
@@ -195,7 +194,7 @@ impl TreeWalk {
                 let opened = open_dir_at(&dir, &raw, identity(&stat));
                 drop(dir);
                 match opened {
-                    Ok(fd) => self.folder(depth, fd, raw, name, rel),
+                    Ok(fd) => Self::folder(depth, fd, raw, name, rel),
                     Err(_) => skip(name, SkipReason::Unreadable),
                 }
             }
@@ -245,7 +244,7 @@ impl TreeWalk {
                     .map_err(|_| Errno::ACCESS)
                     .and_then(|dir| reopen(&OwnedFd::from(dir)));
                 match opened {
-                    Ok(fd) => self.folder(depth, fd, raw, name, Some(path)),
+                    Ok(fd) => Self::folder(depth, fd, raw, name, Some(path)),
                     Err(_) => skip(name, SkipReason::Unreadable),
                 }
             }
@@ -257,7 +256,6 @@ impl TreeWalk {
 
     /// A folder opened as `fd`, entered next.
     fn folder(
-        &self,
         depth: usize,
         fd: OwnedFd,
         raw: CString,
@@ -374,11 +372,11 @@ fn safe_name(raw: &CStr) -> String {
         .collect()
 }
 
-fn unique(used: &mut HashSet<String>, name: String) -> String {
-    let mut candidate = name.clone();
+fn unique(used: &mut HashSet<String>, name: &str) -> String {
+    let mut candidate = name.to_owned();
     let mut n = 2;
     while used.contains(&candidate) {
-        candidate = keep_both_name(&name, n);
+        candidate = keep_both_name(name, n);
         n += 1;
     }
     used.insert(candidate.clone());
@@ -429,8 +427,8 @@ mod tests {
         let raw = |bytes: &[u8]| CString::new(bytes).unwrap();
         assert_eq!(safe_name(&raw(b"a\nb\\c.txt")), "a_b_c.txt");
         assert_eq!(safe_name(&raw(b"caf\xe9.txt")), "caf\u{fffd}.txt");
-        assert_eq!(unique(&mut used, "a.txt".to_owned()), "a.txt");
-        assert_eq!(unique(&mut used, "a.txt".to_owned()), "a (2).txt");
-        assert_eq!(unique(&mut used, "a.txt".to_owned()), "a (3).txt");
+        assert_eq!(unique(&mut used, "a.txt"), "a.txt");
+        assert_eq!(unique(&mut used, "a.txt"), "a (2).txt");
+        assert_eq!(unique(&mut used, "a.txt"), "a (3).txt");
     }
 }

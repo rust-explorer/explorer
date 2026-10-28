@@ -24,7 +24,7 @@ struct Setup {
     client: Client,
     data: PathBuf,
     dir: TempDir,
-    _fake: common::fake_oidc::FakeOidc,
+    fake: common::fake_oidc::FakeOidc,
 }
 
 async fn setup() -> Setup {
@@ -37,7 +37,7 @@ async fn setup() -> Setup {
         client,
         data,
         dir,
-        _fake: fake,
+        fake,
     }
 }
 
@@ -684,9 +684,9 @@ async fn stored_selections_are_checked_and_private() {
     )
     .await;
     let created: shared::api::downloads::ZipSelectionCreated = json(res).await;
-    s._fake.claims(serde_json::json!({ "sub": "other-user" }));
+    s.fake.claims(serde_json::json!({ "sub": "other-user" }));
     let app = s.client.app.clone();
-    let mut other = Client::signed_in(app, &s._fake).await;
+    let mut other = Client::signed_in(app, &s.fake).await;
     let res = other
         .get(&format!("/files/zip?selection={}", created.id))
         .await;

@@ -277,10 +277,7 @@ impl Scan<'_> {
         node.files += read.files.len() as u64 + unnamed_files;
         let named_bytes = read.files.iter().map(|(_, bytes)| bytes).sum::<u64>();
         node.bytes += named_bytes + unnamed_bytes;
-        if job.unnamed && !job.collapsed {
-            node.other_files += read.files.len() as u64 + unnamed_files;
-            node.other_bytes += named_bytes + unnamed_bytes;
-        } else if !job.collapsed && !names_left {
+        if !job.collapsed && (job.unnamed || !names_left) {
             node.other_files += read.files.len() as u64 + unnamed_files;
             node.other_bytes += named_bytes + unnamed_bytes;
         } else if !job.collapsed {
