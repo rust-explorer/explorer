@@ -50,8 +50,11 @@ changes nothing. Uploads use same-origin `XHR` and
 `fetch`, so the browser sends an `Origin` the check accepts.
 
 Everything under `/files` (downloads, zips, thumbnails, uploads) also refuses, with 403
-`csrf_rejected`, a request the browser marks `Sec-Fetch-Site: cross-site`, so that a link or an
-image on another site cannot start a download or a zip with the user's cookie.
+`csrf_rejected`, a request the browser marks `Sec-Fetch-Site: cross-site` or `same-site`, so that
+an image or a script on another site, sibling subdomains included (other apps on the same NAS
+domain), cannot start a download or a zip with the user's cookie. A `GET` the user started by
+clicking a link (`Sec-Fetch-Mode: navigate` with `Sec-Fetch-User: ?1`), such as a download link
+in a webmail, still passes. A request without these headers passes too.
 
 ## Open redirects
 

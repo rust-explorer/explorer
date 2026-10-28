@@ -468,21 +468,38 @@ async fn cross_site_requests_are_refused() {
         "/files/zip?volume=media&path=",
         "/files/download?volume=media&path=a.txt",
     ] {
-        let mut req = common::get(uri);
-        req.headers_mut()
-            .insert("sec-fetch-site", "cross-site".parse().unwrap());
-        let body = error_of(s.client.send(req).await, StatusCode::FORBIDDEN).await;
-        assert_eq!(body.code, "csrf_rejected", "{uri}");
+        let request = |fetch: &[(&'static str, &str)]| {
+            let mut req = common::get(uri);
+            for (name, value) in fetch {
+                req.headers_mut().insert(*name, value.parse().unwrap());
+            }
+            req
+        };
+        for site in ["cross-site", "same-site"] {
+            let req = request(&[("sec-fetch-site", site)]);
+            let body = error_of(s.client.send(req).await, StatusCode::FORBIDDEN).await;
+            assert_eq!(body.code, "csrf_rejected", "{uri} {site}");
+
+            let clicked = request(&[
+                ("sec-fetch-site", site),
+                ("sec-fetch-mode", "navigate"),
+                ("sec-fetch-user", "?1"),
+            ]);
+            assert_eq!(
+                s.client.send(clicked).await.status(),
+                StatusCode::OK,
+                "{uri} {site} link"
+            );
+        }
 
         for site in ["same-origin", "none"] {
-            let mut req = common::get(uri);
-            req.headers_mut()
-                .insert("sec-fetch-site", site.parse().unwrap());
+            let req = request(&[("sec-fetch-site", site)]);
             assert_eq!(
                 s.client.send(req).await.status(),
                 StatusCode::OK,
                 "{uri} {site}"
             );
         }
+        assert_eq!(s.client.send(request(&[])).await.status(), StatusCode::OK);
     }
 }
