@@ -40,7 +40,7 @@ if that is longer.
 | Path | Purpose |
 |---|---|
 | `/data` | Each real directory mounted under `/data` is a volume, named after its mount point. Read at startup. |
-| `/config` | Explorer's state: sessions, upload records and favorites in `explorer.db` (SQLite), and the thumbnail cache. Must be writable by the container user; startup checks this and exits with a clear message otherwise. Explorer creates the database files with mode `600` and the cache folders with `700`; keep `/config` itself `700`. |
+| `/config` | Explorer's state: sessions, upload records and favorites in `explorer.db` (SQLite), and the thumbnail cache. Must be writable by the container user; startup checks this and exits with a clear message otherwise. Explorer creates the database files with mode `600` and the cache folders with `700`, and sets those modes at startup on files and folders an earlier version left more open; keep `/config` itself `700` (startup logs a warning otherwise). |
 | `/usr/share/explorer/web` | Web bundle, shipped in the image. |
 
 The server listens on `0.0.0.0:8080`. These are fixed in the image.

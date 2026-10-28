@@ -39,6 +39,7 @@ pub enum DbError {
 pub async fn open(config_dir: &Path) -> Result<SqlitePool, DbError> {
     check_writable(config_dir)?;
     restrict_files(config_dir).map_err(|source| not_writable(config_dir, source))?;
+    warn_if_open(config_dir);
     let options = SqliteConnectOptions::new()
         .filename(config_dir.join(DB_FILE))
         .create_if_missing(true)
@@ -93,6 +94,20 @@ fn restrict_files(dir: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// The database files are owner-only, but a folder others can enter still shows their names, and
+/// what an earlier version left there.
+fn warn_if_open(dir: &Path) {
+    if let Ok(meta) = std::fs::metadata(dir)
+        && meta.permissions().mode() & 0o077 != 0
+    {
+        tracing::warn!(
+            path = %dir.display(),
+            mode = format!("{:o}", meta.permissions().mode() & 0o777),
+            "the config folder is open to other users; make it 700"
+        );
+    }
 }
 
 fn not_writable(path: &Path, source: io::Error) -> DbError {

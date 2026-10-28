@@ -16,7 +16,7 @@ use explorer_server::http::{AppState, router};
 use explorer_server::storage::Volumes;
 use explorer_server::tasks::Tasks;
 use explorer_server::telemetry;
-use explorer_server::thumbnails::{self, Thumbnails};
+use explorer_server::thumbnails;
 use explorer_server::uploads::{self, Uploads};
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
@@ -92,7 +92,7 @@ async fn main() -> ExitCode {
         }
     };
 
-    let thumbnail_cache = match Thumbnails::new(config.config_dir.join(thumbnails::CACHE_DIR)) {
+    let thumbnail_cache = match thumbnails::open_cache(&config.config_dir) {
         Ok(cache) => Arc::new(cache),
         Err(err) => {
             tracing::error!(error = %err, "thumbnail cache unavailable");
