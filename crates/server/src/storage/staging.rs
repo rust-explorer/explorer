@@ -48,6 +48,14 @@ fn map_err(err: io::Error) -> StorageError {
     StorageError::from_io(&RelPath::root(), err)
 }
 
+fn invalid_upload(id: &StagedId) -> StorageError {
+    tracing::warn!(
+        upload = id.as_str(),
+        "staged upload is not a regular file with a single link"
+    );
+    StorageError::InvalidUpload
+}
+
 impl Staging {
     /// Created `0o666` less the umask, like any new file: the `0700` directory keeps it private
     /// until the rename, and the uploaded file keeps that mode.
@@ -118,11 +126,11 @@ impl Staging {
         let file = match self.dir.open_with(id.as_str(), &options) {
             Ok(file) => file.into_std(),
             Err(err) if err.raw_os_error() == Some(Errno::LOOP.raw_os_error()) => {
-                return Err(StorageError::InvalidUpload);
+                return Err(invalid_upload(id));
             }
             Err(err) => {
                 return Err(match StorageError::from_io(path, err) {
-                    StorageError::OutsideVolume(_) => StorageError::InvalidUpload,
+                    StorageError::OutsideVolume(_) => invalid_upload(id),
                     other => other,
                 });
             }
@@ -131,7 +139,7 @@ impl Staging {
             .metadata()
             .map_err(|err| StorageError::from_io(path, err))?;
         if !meta.is_file() || meta.nlink() != 1 {
-            return Err(StorageError::InvalidUpload);
+            return Err(invalid_upload(id));
         }
         Ok(file)
     }

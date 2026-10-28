@@ -11,6 +11,8 @@ use shared::api::tasks::MAX_ACTIVE_TASKS;
 use crate::http::request_id::request_id;
 use crate::storage::{InvalidPath, StorageError};
 
+const UNUSABLE_STAGED: &str = "The staged upload can't be used";
+
 #[derive(Debug)]
 pub struct ApiError {
     status: StatusCode,
@@ -278,15 +280,7 @@ impl ApiError {
             }
             // The caller picks the source volume for it, see [`ApiError::from_transfer`].
             StorageError::Source(inner) => return Self::map_storage(volume, *inner, log),
-            StorageError::InvalidUpload => {
-                if log {
-                    tracing::warn!(
-                        volume,
-                        "staged upload is not a regular file with a single link"
-                    );
-                }
-                return Self::invalid_upload("The staged upload can't be used");
-            }
+            StorageError::InvalidUpload => return Self::invalid_upload(UNUSABLE_STAGED),
             StorageError::Cancelled => {
                 return Self::internal("a cancellation reported as an error");
             }
