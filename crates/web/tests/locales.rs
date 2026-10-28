@@ -107,6 +107,8 @@ fn every_api_error_code_has_a_message() {
         "too_many_uploads",
         "too_many_patches",
         "upload_committed",
+        "changed_during_move",
+        "too_many_entries",
     ]
     .iter()
     .map(|code| format!("error-{code}"))

@@ -9,10 +9,9 @@ pub enum NameError {
 }
 
 const MAX_NAME_BYTES: usize = 255;
-const RESERVED: &str = ".explorer-uploads";
 
-/// The trimmed name when the server can accept it; the reserved name is only refused at the
-/// volume root, where it lives.
+/// The trimmed name when the server can accept it; the reserved name, in any case, is only
+/// refused at the volume root, where it lives.
 pub fn validate_name(name: &str, at_root: bool) -> Result<&str, NameError> {
     let name = name.trim();
     if name.is_empty() {
@@ -21,7 +20,7 @@ pub fn validate_name(name: &str, at_root: bool) -> Result<&str, NameError> {
         Err(NameError::Slash)
     } else if name == "." || name == ".." {
         Err(NameError::Dot)
-    } else if at_root && name == RESERVED {
+    } else if at_root && shared::names::is_reserved_name(name) {
         Err(NameError::Reserved)
     } else if name.len() > MAX_NAME_BYTES {
         Err(NameError::TooLong)
@@ -58,6 +57,10 @@ mod tests {
     fn reserved_name_only_at_the_root() {
         assert_eq!(
             validate_name(".explorer-uploads", true),
+            Err(NameError::Reserved)
+        );
+        assert_eq!(
+            validate_name(".EXPLORER-UPLOADS", true),
             Err(NameError::Reserved)
         );
         assert_eq!(

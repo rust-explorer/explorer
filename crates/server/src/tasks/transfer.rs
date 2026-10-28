@@ -125,7 +125,7 @@ impl TransferTask {
         to: &Volume,
         progress: &Progress,
     ) -> Result<Transferred, StorageError> {
-        let plan = storage::plan_transfer(from, &self.path)?;
+        let plan = storage::plan_transfer(from, &self.path, progress)?;
         progress.set_plan(&plan);
         let placed = storage::copy(
             from,
@@ -156,7 +156,7 @@ impl TransferTask {
         let plan = if from.name() == to.name() {
             None
         } else {
-            let plan = storage::plan_transfer(from, &self.path)?;
+            let plan = storage::plan_transfer(from, &self.path, progress)?;
             progress.set_plan(&plan);
             Some(plan)
         };

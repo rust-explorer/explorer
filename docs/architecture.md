@@ -157,7 +157,7 @@ How an upload is stored:
    created on first upload with mode `0700`, the file with `0666` less the umask, both owned
    by the container user; the final file keeps that mode, like any file the container
    creates. The offset reported to the client is the staged file's length, so it is right
-   after a crash. `.explorer-uploads` is rejected as the first component of any client path
+   after a crash. `.explorer-uploads`, in any letter case, is rejected as the first component of any client path
    (`invalid_path`, reason `reserved name`). It is also recognised by device and inode, so
    it is neither listed, zipped, read nor written through a symlink to the volume root or
    to the directory itself (`path_not_found`).
@@ -172,7 +172,8 @@ How an upload is stored:
    name and the log says so); `replace` renames over the destination but never over a
    folder. "Keep both" names `Film.mkv` as `Film (1).mkv`, then `(2)` and so on: the suffix
    goes before the last extension, and a name whose only dot is the first character has none
-   (`.bashrc (1)`). The record then gets its `final_path`; a retried empty `PATCH` at the end
+   (`.bashrc (1)`). A name that would then pass 255 bytes is shortened at the end of its
+   stem (of the whole name if the extension leaves no room). The record then gets its `final_path`; a retried empty `PATCH` at the end
    is answered 204, which makes the last chunk safe to resend. If the commit fails, the
    staged file stays complete and `HEAD` reports the full length; an empty `PATCH` at the end
    retries the commit, and the client sends one before it shows the upload as done. A
@@ -230,6 +231,8 @@ New error codes (JSON error shape as above):
 |---|---|---|
 | `invalid_destination` | 400 | A copy or move of a folder into itself or one of its descendants, or a move into the folder the entry is already in. `details` name the entry, on its source volume. |
 | `task_not_found` | 404 | Unknown task id, or another user's. |
+| `changed_during_move` | 409 | A move to another volume found, when deleting the source, that a file had changed or been replaced since it was copied. That file stays in the source (with the folders holding it) and the copy is in the destination; the rest of the move is done. `details` name the file, on its source volume. |
+| `too_many_entries` | 400 | A copy, or a move to another volume, of a folder holding more than 1,000,000 files and folders in all. Nothing was copied. |
 | `too_many_tasks` | 429 | The user already has 1000 tasks queued or running. The web app posts the task again once some have finished. |
 
 Existing codes also apply: `already_exists` (409), `is_a_directory` (`replace` over or of a
@@ -242,7 +245,8 @@ How tasks run:
 
 - The registry is in memory (`crates/server/src/tasks`): a restart loses every task, and a
   task that was running stops with the process. A task belongs to the `sub` that created it.
-  A finished task is listed for one hour unless dismissed.
+  A finished task is listed for one hour unless dismissed, and only a user's 1000 most
+  recently created finished tasks are kept: older ones are forgotten first.
 - At most 2 tasks run at once, across all users; the others stay `queued`. Each runs on
   Tokio's blocking pool. A queued task is cancelled at once; a running copy, or the copy
   phase of a move, when it next checks (between 1 MiB chunks, and between entries of a

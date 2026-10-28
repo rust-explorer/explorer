@@ -5,7 +5,7 @@ use cap_std::fs::{Metadata, MetadataExt as _, OpenOptions, OpenOptionsExt};
 use rustix::fs::OFlags;
 
 use super::error::is_escape;
-use super::path::STAGING_DIR;
+use super::path::{STAGING_DIR, is_staging_name};
 use super::write::prefixes;
 use super::{RelPath, StorageError, Volume};
 
@@ -46,7 +46,7 @@ pub(super) struct Entry {
 }
 
 /// A directory or file by device and inode, whatever path or symlink leads to it.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Identity(u64, u64);
 
 impl Identity {
@@ -57,14 +57,14 @@ impl Identity {
 
 /// What makes an entry part of the staging area: being the staging directory, or bearing its
 /// name in the volume root, however either is reached.
-struct Reserved {
+pub(super) struct Reserved {
     root: Identity,
     staging: Option<Identity>,
 }
 
 impl Reserved {
-    fn hides(&self, parent: Identity, name: &str, entry: Option<Identity>) -> bool {
-        (parent == self.root && name == STAGING_DIR) || (entry.is_some() && entry == self.staging)
+    pub(super) fn hides(&self, parent: Identity, name: &str, entry: Option<Identity>) -> bool {
+        (parent == self.root && is_staging_name(name)) || (entry.is_some() && entry == self.staging)
     }
 }
 
@@ -117,7 +117,10 @@ impl Volume {
 
     pub fn stat(&self, path: &RelPath) -> Result<EntryMeta, StorageError> {
         self.refuse_reserved(path)?;
-        let meta = self.metadata(path)?;
+        let meta = match self.in_checked_parent(path)? {
+            Some((_, _, meta)) => meta,
+            None => self.metadata(path)?,
+        };
         Ok(EntryMeta::from_metadata(self.entry_name(path), &meta))
     }
 
@@ -132,17 +135,22 @@ impl Volume {
             }
         };
         self.refuse_reserved(path)?;
-        check(&self.metadata(path)?)?;
         // Non-blocking so that a FIFO swapped in after the check cannot hang the open; it has no
-        // effect on regular files.
+        // effect on regular files. Opened from its checked parent unless it is a symlink.
+        let mut flags = OFlags::NONBLOCK | OFlags::NOCTTY;
         let mut options = OpenOptions::new();
-        options
-            .read(true)
-            .custom_flags((OFlags::NONBLOCK | OFlags::NOCTTY).bits().cast_signed());
-        let file = self
-            .root
-            .open_with(fs_path(path), &options)
-            .map_err(|err| StorageError::from_io(path, err))?;
+        options.read(true);
+        let opened = if let Some((parent, name, meta)) = self.in_checked_parent(path)? {
+            check(&meta)?;
+            flags |= OFlags::NOFOLLOW;
+            options.custom_flags(flags.bits().cast_signed());
+            parent.open_with(name, &options)
+        } else {
+            check(&self.metadata(path)?)?;
+            options.custom_flags(flags.bits().cast_signed());
+            self.root.open_with(fs_path(path), &options)
+        };
+        let file = opened.map_err(|err| StorageError::from_io(path, err))?;
         let meta = file
             .metadata()
             .map_err(|err| StorageError::from_io(path, err))?;
@@ -233,7 +241,7 @@ impl Volume {
         Ok(())
     }
 
-    fn reserved(&self) -> Result<Reserved, StorageError> {
+    pub(super) fn reserved(&self) -> Result<Reserved, StorageError> {
         let root = self
             .root
             .dir_metadata()
@@ -275,6 +283,9 @@ impl Volume {
         let handle = self.root.open_dir(fs_path(dir)).map_err(map_err)?;
         let reserved = self.reserved()?;
         let listed = Identity::of(&handle.dir_metadata().map_err(map_err)?);
+        if reserved.staging == Some(listed) {
+            return Err(StorageError::NotFound(dir.clone()));
+        }
         let mut entries = Vec::new();
         for entry in handle.entries().map_err(map_err)? {
             if !go_on() {

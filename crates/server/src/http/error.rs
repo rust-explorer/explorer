@@ -10,7 +10,7 @@ use shared::api::tasks::MAX_ACTIVE_TASKS;
 use shared::api::uploads::{MAX_PATCHES_PER_USER, MAX_PENDING_UPLOADS};
 
 use crate::http::request_id::request_id;
-use crate::storage::{InvalidPath, StorageError};
+use crate::storage::{InvalidPath, RelPath, StorageError};
 
 const UNUSABLE_STAGED: &str = "The staged upload can't be used";
 
@@ -261,6 +261,8 @@ impl ApiError {
                 "Already exists: ",
                 path,
             ),
+            StorageError::ChangedDuringMove(path) => return Self::changed(volume, &path, log),
+            StorageError::TooManyEntries(path) => return Self::too_many(volume, &path, log),
             StorageError::NoSpace(path) => {
                 if log {
                     tracing::warn!(volume, path = path.as_str(), "not enough space");
@@ -328,6 +330,27 @@ impl ApiError {
                 return Self::internal(source);
             }
         };
+        Self::storage_failure(volume, (status, code, label), &path, log)
+    }
+
+    fn changed(volume: &str, path: &RelPath, log: bool) -> Self {
+        let label = "Changed during the move, so both copies were kept: ";
+        let failure = (StatusCode::CONFLICT, "changed_during_move", label);
+        Self::storage_failure(volume, failure, path, log)
+    }
+
+    fn too_many(volume: &str, path: &RelPath, log: bool) -> Self {
+        let label = "Too many entries to copy or move at once in ";
+        let failure = (StatusCode::BAD_REQUEST, "too_many_entries", label);
+        Self::storage_failure(volume, failure, path, log)
+    }
+
+    fn storage_failure(
+        volume: &str,
+        (status, code, label): (StatusCode, &'static str, &str),
+        path: &RelPath,
+        log: bool,
+    ) -> Self {
         if log {
             tracing::warn!(volume, path = path.as_str(), code, "storage request failed");
         }
@@ -483,6 +506,19 @@ mod tests {
         assert_eq!(
             dest.details,
             Some(json!({ "volume": "documents", "path": "a.txt" }))
+        );
+        let changed = ApiError::from_transfer(
+            "media",
+            "documents",
+            StorageError::Source(Box::new(StorageError::ChangedDuringMove(path()))),
+        );
+        assert_eq!(
+            (changed.status, changed.code),
+            (StatusCode::CONFLICT, "changed_during_move")
+        );
+        assert_eq!(
+            changed.details,
+            Some(json!({ "volume": "media", "path": "a.txt" }))
         );
     }
 

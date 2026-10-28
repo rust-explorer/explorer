@@ -8,7 +8,7 @@ use shared::api::error::ErrorBody;
 use shared::api::tasks::{MAX_ACTIVE_TASKS, TaskInfo, TaskSpec, TaskState};
 use tokio::sync::Semaphore;
 
-use super::{FINISHED_TTL, MAX_RUNNING, MAX_USAGE_TREES};
+use super::{FINISHED_TTL, MAX_FINISHED_TASKS, MAX_RUNNING, MAX_USAGE_TREES};
 use crate::storage::{TransferPlan, UsageTree};
 
 const ID_LEN: usize = 32;
@@ -178,6 +178,23 @@ impl Entries {
         }
     }
 
+    /// Forgets the oldest finished tasks of `user` beyond [`MAX_FINISHED_TASKS`].
+    fn keep_finished(&mut self, user: &str) {
+        let mut finished: Vec<(u64, String)> = self
+            .by_id
+            .iter()
+            .filter(|(_, entry)| entry.user == user && entry.finished_at.is_some())
+            .map(|(id, entry)| (entry.seq, id.clone()))
+            .collect();
+        let Some(extra) = finished.len().checked_sub(MAX_FINISHED_TASKS) else {
+            return;
+        };
+        finished.sort_unstable();
+        for (_, id) in finished.into_iter().take(extra) {
+            self.by_id.remove(&id);
+        }
+    }
+
     /// Forgets tasks finished more than [`FINISHED_TTL`] before `now`.
     fn prune(&mut self, now: Instant) {
         self.by_id.retain(|_, entry| {
@@ -269,6 +286,7 @@ impl Tasks {
             TaskState::Queued => {
                 entry.progress.cancel();
                 entry.finish(TaskState::Cancelled, Instant::now());
+                entries.keep_finished(user);
             }
             TaskState::Running => entry.progress.cancel(),
             TaskState::Done | TaskState::Failed | TaskState::Cancelled => {
@@ -340,10 +358,12 @@ impl Tasks {
             }
         };
         entry.finish(state, Instant::now());
+        let user = entry.user.clone();
         if let Some(tree) = tree.filter(|_| state == TaskState::Done) {
             entry.usage = Some(Arc::new(tree));
             entries.keep_usage(id);
         }
+        entries.keep_finished(&user);
     }
 
     fn lock(&self) -> MutexGuard<'_, Entries> {
@@ -434,6 +454,32 @@ mod tests {
             .map(|task| task.id)
             .collect();
         assert_eq!(left, [queued]);
+    }
+
+    #[test]
+    fn keeps_the_newest_finished_tasks_of_a_user() {
+        let tasks = Tasks::new();
+        let (bob, _) = tasks.insert("bob", spec("b")).unwrap();
+        tasks.finish(&bob, Outcome::Done);
+        let (running, _) = tasks.insert("ada", spec("r")).unwrap();
+        tasks.start(&running).unwrap();
+        let finished: Vec<String> = (0..MAX_FINISHED_TASKS + 3)
+            .map(|i| {
+                let (id, _) = tasks.insert("ada", spec(&i.to_string())).unwrap();
+                if i % 2 == 0 {
+                    tasks.finish(&id, Outcome::Done);
+                } else {
+                    tasks.cancel_or_dismiss("ada", &id).unwrap();
+                }
+                id
+            })
+            .collect();
+
+        let listed: Vec<String> = tasks.list("ada").into_iter().map(|task| task.id).collect();
+        assert_eq!(listed.len(), MAX_FINISHED_TASKS + 1);
+        assert_eq!(listed[0], running);
+        assert_eq!(listed[1..], finished[3..]);
+        assert_eq!(tasks.list("bob").len(), 1);
     }
 
     #[test]

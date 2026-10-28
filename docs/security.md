@@ -151,11 +151,14 @@ Names that are not valid UTF-8 are skipped with a warning.
   upload creates, gets the same permissions as any file the container creates (`0644` with
   the usual `022` umask: readable by other host users who can reach the folder). To keep
   uploads private, restrict access to the volume's folder on the host.
-- **Reserved name.** Any client path whose first component is `.explorer-uploads` is
-  rejected with `invalid_path` (reason `reserved name`). The volume root and the staging
+- **Reserved name.** Any client path whose first component is `.explorer-uploads`, in any
+  letter case (a volume may sit on a filesystem that ignores case), is rejected with
+  `invalid_path` (reason `reserved name`), and no such entry is listed at a volume root. The volume root and the staging
   directory are also recognised by device and inode, so a symlink inside the volume that
   points to the root or to the staging directory does not reach it either: it is never
-  listed or zipped, and reading or writing through such a path is `path_not_found`.
+  listed or zipped, and reading or writing through such a path is `path_not_found`. The
+  check is made again on the folder handle the operation then acts through, so a symlink
+  renamed in and out of place while a request runs cannot slip past it.
 - **Ownership.** An upload belongs to the OIDC `sub` that created it. Looking it up, resuming
   it, appending to it or cancelling it as another user is a 404 `upload_not_found`; the
   upload id is 128 random bits and is not a capability on its own. `GET /api/uploads` lists
@@ -221,13 +224,30 @@ action reach outside its volume.
   The error's `details` name the entry being moved or copied, on its source volume.
 - **Cross-volume moves.** Volumes may be different filesystems, so a move to another volume
   copies first, then deletes. The source is touched only after the copy is complete: a
-  failed or cancelled copy leaves it whole and removes the partial destination. After that,
+  failed or cancelled copy leaves it whole and removes the partial destination: only
+  the files and folders the copy made, each checked by device and inode (and size and
+  modification time for files), so a folder renamed into its place, or files someone added
+  to it meanwhile, stay. After that,
   each copied file is deleted from the source, then the folders left empty. What the copy
   skipped (see Symlinks) stays in the source, with its folders, and is reported in `skipped`.
+  A source file is deleted only if it is still the file that was read: same device and
+  inode, size, modification and change time as when the copy opened it. One that was
+  written to, replaced or renamed over since stays in the source next to its copy, and the
+  move fails with `changed_during_move` (409). Only a change in the instant between that
+  check and the delete can slip through.
   If a delete fails midway, the destination is complete and the source may be partly
   removed; nothing is lost, but the move is reported as failed. A move within one volume that hits a nested mount falls back to the same copy and delete.
   Copies use the staging directory of the destination volume, so their data never leaves it
   until it is renamed into place.
+- **Size of a copy.** A copy, or a move to another volume, first lists the whole folder,
+  which it keeps in memory while it runs: past 1,000,000 files and folders it stops and fails
+  with `too_many_entries` before copying anything. Cancelling the task also stops the listing.
+- **Permissions.** A copy, and a move to another volume, give each file and folder the
+  permission bits of its source (read, write and execute for owner, group and others), so a
+  private `0600` file stays private; set-user-ID, set-group-ID and sticky bits are dropped.
+  The owner and group are the container user's, as for any file it creates. A move within a
+  volume is a rename and keeps everything. On a filesystem without Unix permissions (exFAT,
+  some SMB mounts) the copy gets whatever that filesystem gives.
 - **Tasks.** A task belongs to the OIDC `sub` that created it; listing, cancelling or
   dismissing another user's task is a 404 `task_not_found`, and the ids are 128 random bits.
   A user has at most 1000 tasks queued or running; more answer 429 `too_many_tasks`. The web
@@ -238,7 +258,8 @@ action reach outside its volume.
   folder or a staged file in `.explorer-uploads` (the hourly sweep removes the staged file
   after 24 hours). At most 2 tasks run at
   once for the whole server, so a large copy delays others. A finished task is forgotten after
-  an hour. Failures keep the request id of the request that created the task.
+  an hour, or sooner once its user has 1000 newer finished tasks, so a script posting tasks
+  in a loop cannot grow the server's memory without bound. Failures keep the request id of the request that created the task.
 - **Zip of several entries.** Each `name=` must be a single valid component: empty, `.`,
   `..`, containing `/`, a control character, or the reserved name at the volume root is
   `invalid_path`, and a

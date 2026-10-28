@@ -6,7 +6,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use rustix::fs::AtFlags;
 use rustix::io::Errno;
 
-use super::super::path::STAGING_DIR;
+use super::super::path::{STAGING_DIR, is_staging_name};
 use super::super::read::fs_path;
 use super::folder::{Measured, Source};
 use super::hard_links::{HardLink, HardLinks, Offered};
@@ -34,6 +34,9 @@ pub(super) fn scan(
         .map(|stat| Measured::of(&stat))
         .filter(|stat| stat.is_dir)
         .map(Measured::id);
+    if staging == Some(start_stat.id()) {
+        return Err(StorageError::NotFound(path.clone()));
+    }
 
     progress.add_bytes(start_stat.bytes);
     let scan = Scan {
@@ -236,7 +239,7 @@ impl Scan<'_> {
         name: &CStr,
         stat: Measured,
     ) {
-        if (dir_id == self.root_id && name.to_bytes() == STAGING_DIR.as_bytes())
+        if (dir_id == self.root_id && name.to_str().is_ok_and(is_staging_name))
             || Some(stat.id()) == self.staging
         {
             return;
