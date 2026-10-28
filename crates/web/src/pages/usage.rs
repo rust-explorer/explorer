@@ -35,6 +35,9 @@ pub fn Usage(id: String, volume: Segment, path: Segments) -> Element {
         .iter()
         .find(|task| task.info.as_ref().is_some_and(|info| info.id == id))
         .cloned();
+    let dropped = task
+        .as_ref()
+        .is_some_and(|task| list.read().result_dropped(task.key));
     // The result exists once the task is done; a task this tab does not know may be done too.
     let wanted = task
         .as_ref()
@@ -129,7 +132,7 @@ pub fn Usage(id: String, volume: Segment, path: Segments) -> Element {
         (Some(task), _) if task.is_active() => rsx! {
             Scanning { task }
         },
-        (Some(task), _) if task.result_dropped() => rsx! {
+        (Some(_), _) if dropped => rsx! {
             Stopped { title: t!("usage-unavailable-title"), message: t!("usage-unavailable-message"), source }
         },
         (Some(task), _) if task.state() == TaskState::Cancelled => rsx! {

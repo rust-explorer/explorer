@@ -62,7 +62,7 @@ impl TaskList {
             if task.cancel_requested {
                 self.tasks.retain(|task| task.key != key);
             } else {
-                task.deferred = true;
+                self.deferred.push(key);
             }
             return;
         }

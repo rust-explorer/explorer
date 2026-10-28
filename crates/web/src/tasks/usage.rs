@@ -29,7 +29,7 @@ impl TaskList {
     pub fn folder_size(&self, volume: &str, path: &str) -> FolderSize {
         match self.newest_usage(volume, path) {
             None => FolderSize::Unknown,
-            Some(task) if task.result_dropped() => FolderSize::Unknown,
+            Some(task) if self.result_dropped(task.key) => FolderSize::Unknown,
             Some(task) => match (&task.info, task.state()) {
                 (Some(info), TaskState::Done) => FolderSize::Known(info.bytes_done),
                 _ => FolderSize::Computing,
@@ -40,7 +40,7 @@ impl TaskList {
     /// Whether the server may still have the result of the finished scan `task`: it is among
     /// the [`MAX_USAGE_TREES`] newest finished scans of distinct folders this tab knows.
     fn result_kept(&self, task: &Task) -> bool {
-        if task.result_dropped() {
+        if self.result_dropped(task.key) {
             return false;
         }
         let mut newer: Vec<&Location> = Vec::new();

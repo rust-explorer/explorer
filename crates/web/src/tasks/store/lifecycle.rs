@@ -44,8 +44,6 @@ impl TaskList {
                     finished_at_ms: None,
                     finished_before: false,
                     dismissed: false,
-                    deferred: false,
-                    result_dropped: false,
                     cancel_failure: None,
                 });
                 Effect::Post { key, spec }
@@ -83,8 +81,6 @@ impl TaskList {
                 finished_at_ms: None,
                 finished_before: finished_scan,
                 dismissed: finished_scan,
-                deferred: false,
-                result_dropped: false,
                 cancel_failure: None,
             });
         }
@@ -96,11 +92,13 @@ impl TaskList {
 
     /// The task stops once the server notices; before the server has it, once it does.
     pub fn cancel(&mut self, key: TaskKey) -> Vec<Effect> {
+        let deferred = self.deferred.contains(&key);
         let Some(task) = self.task_mut(key).filter(|task| task.is_active()) else {
             return Vec::new();
         };
-        if task.conflict.is_some() || task.deferred {
+        if task.conflict.is_some() || deferred {
             self.tasks.retain(|task| task.key != key);
+            self.deferred.retain(|&deferred| deferred != key);
             self.forget_ended_batches();
             return Vec::new();
         }
@@ -137,12 +135,15 @@ impl TaskList {
     /// The server no longer has the result of the finished scan `id`, such as when scans from
     /// another tab pushed it out: the next analysis of its folder starts a new one.
     pub fn result_gone(&mut self, id: &str) {
-        if let Some(task) = self.tasks.iter_mut().find(|task| {
+        let found = self.tasks.iter().find(|task| {
             task.server_id() == Some(id)
                 && matches!(task.spec, TaskSpec::Usage { .. })
                 && task.state() == TaskState::Done
-        }) {
-            task.result_dropped = true;
+        });
+        if let Some(task) = found
+            && !self.dropped_results.contains(&task.key)
+        {
+            self.dropped_results.push(task.key);
         }
     }
 

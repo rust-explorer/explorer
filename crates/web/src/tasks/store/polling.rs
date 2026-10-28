@@ -1,7 +1,7 @@
 use shared::api::error::ErrorBody;
 use shared::api::tasks::{Location, MAX_ACTIVE_TASKS, TaskInfo};
 
-use super::{Effect, Event, POLL_EVERY_MS, TASK_NOT_FOUND, TaskList, changes_files};
+use super::{Effect, Event, POLL_EVERY_MS, TASK_NOT_FOUND, TaskKey, TaskList, changes_files};
 use crate::api::ApiFailure;
 
 impl TaskList {
@@ -89,20 +89,20 @@ impl TaskList {
             .tasks
             .iter()
             .filter(|task| task.info.is_none() && task.is_active())
-            .filter(|task| task.conflict.is_none() && !task.deferred)
+            .filter(|task| task.conflict.is_none() && !self.deferred.contains(&task.key))
             .count();
         let room = MAX_ACTIVE_TASKS.saturating_sub(active + posting);
-        for task in self
-            .tasks
-            .iter_mut()
-            .filter(|task| task.deferred)
-            .take(room)
-        {
-            task.deferred = false;
-            effects.push(Effect::Post {
-                key: task.key,
-                spec: task.spec.clone(),
-            });
+        let ready: Vec<TaskKey> = self
+            .deferred
+            .drain(..room.min(self.deferred.len()))
+            .collect();
+        for key in ready {
+            if let Some(task) = self.task_mut(key) {
+                effects.push(Effect::Post {
+                    key,
+                    spec: task.spec.clone(),
+                });
+            }
         }
     }
 
@@ -116,7 +116,7 @@ impl TaskList {
             .filter(|task| task.is_active())
             .filter_map(|task| task.server_id().map(str::to_owned))
             .collect();
-        if !waiting.is_empty() || self.tasks.iter().any(|task| task.deferred) {
+        if !waiting.is_empty() || !self.deferred.is_empty() {
             self.polling = true;
             self.polled = waiting;
             effects.push(Effect::PollAfter { ms: POLL_EVERY_MS });

@@ -42,10 +42,6 @@ pub struct Task {
     finished_before: bool,
     /// Cleared from the activity panel, but still known for its result.
     dismissed: bool,
-    /// Refused for the user's task limit: posted again once others finish.
-    deferred: bool,
-    /// A finished scan whose result the server no longer keeps.
-    result_dropped: bool,
     /// Why the last cancel request failed.
     cancel_failure: Option<ApiFailure>,
 }
@@ -85,10 +81,6 @@ impl Task {
 
     pub(in crate::tasks) fn dismissed(&self) -> bool {
         self.dismissed
-    }
-
-    pub fn result_dropped(&self) -> bool {
-        self.result_dropped
     }
 
     pub fn cancel_failure(&self) -> Option<&ApiFailure> {
@@ -157,6 +149,10 @@ pub struct TaskList {
     signed_out: bool,
     /// The server's tasks were taken over, or could not be listed.
     adopted: bool,
+    /// Tasks refused for the user's task limit, posted again in this order once others finish.
+    deferred: Vec<TaskKey>,
+    /// Finished scans whose result the server no longer keeps.
+    dropped_results: Vec<TaskKey>,
 }
 
 impl TaskList {
@@ -176,6 +172,10 @@ impl TaskList {
 
     pub fn signed_out(&self) -> bool {
         self.signed_out
+    }
+
+    pub fn result_dropped(&self, key: TaskKey) -> bool {
+        self.dropped_results.contains(&key)
     }
 
     pub fn active_count(&self) -> usize {
