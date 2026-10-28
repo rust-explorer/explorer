@@ -261,7 +261,9 @@ never serve the original:
   and logged at `debug`.
 - **Concurrency.** At most 2 decodes run at once across all users, each on the blocking pool.
   The permit stays with the work when the request is cancelled, so scrolling through a large
-  grid cannot start more decodes than that.
+  grid cannot start more decodes than that. A request waiting for a permit has only looked the
+  source up: the file is opened once the permit is granted (and refused if its size or
+  modification time changed meanwhile), so a flood of queued requests holds no descriptors.
 - **Headers.** `Content-Type` is the format that was written (`image/jpeg` or `image/png`),
   with `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`, like downloads.
   `Cache-Control: private, max-age=604800` keeps it out of shared caches; the strong `ETag`

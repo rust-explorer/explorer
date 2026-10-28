@@ -18,6 +18,7 @@ struct Setup {
     client: Client,
     data: PathBuf,
     cache: PathBuf,
+    thumbnails: std::sync::Arc<explorer_server::thumbnails::Thumbnails>,
     _dir: TempDir,
     _fake: common::fake_oidc::FakeOidc,
 }
@@ -27,12 +28,14 @@ async fn setup() -> Setup {
     let (state, fake) = common::state_with_volumes(dir.path(), &["media"]).await;
     let data = state.config.data_dir.join("media");
     let cache = state.thumbnails.dir().to_owned();
+    let thumbnails = std::sync::Arc::clone(&state.thumbnails);
     let app = router(state).await.unwrap();
     let client = Client::signed_in(app, &fake).await;
     Setup {
         client,
         data,
         cache,
+        thumbnails,
         _dir: dir,
         _fake: fake,
     }
@@ -92,6 +95,25 @@ async fn thumbnail_is_served_and_cached() {
     assert_eq!(header_of(&second, header::ETAG), etag);
     assert_eq!(body_of(second).await, first_body);
     assert_eq!(cached_files(&s), 1);
+}
+
+/// A request queued behind the render permits holds no descriptor of its source: the file is
+/// opened once a permit is granted, so one deleted meanwhile has no thumbnail.
+#[tokio::test]
+async fn queued_request_opens_its_source_only_once_it_may_render() {
+    let mut s = setup().await;
+    s.write_photo(&png(64, 64));
+    let held = [
+        s.thumbnails.permit().await.unwrap(),
+        s.thumbnails.permit().await.unwrap(),
+    ];
+    let mut request = Box::pin(s.client.get(URI));
+    let waited = tokio::time::timeout(std::time::Duration::from_millis(300), &mut request).await;
+    assert!(waited.is_err(), "the request did not wait for a permit");
+    fs::remove_file(s.data.join("Photos/a.png")).unwrap();
+    drop(held);
+    let res = request.await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
