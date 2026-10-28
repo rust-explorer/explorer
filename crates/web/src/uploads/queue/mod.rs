@@ -485,8 +485,13 @@ mod tests {
         let mut queue = Queue::default();
         queue.add(files(3, 10), &[], 0);
         created(&mut queue, 0, 0);
+        let key0 = key(&queue, 0);
         let storage = server("insufficient_storage");
-        assert!(fail(&mut queue, 0, storage.clone(), 1).is_empty());
+        assert_eq!(
+            fail(&mut queue, 0, storage.clone(), 1),
+            [Effect::Delete { url: url(key0) }]
+        );
+        assert_eq!(queue.items()[0].upload_url, None);
         assert!(fail(&mut queue, 1, server("permission_denied"), 1).is_empty());
         assert!(fail(&mut queue, 2, ApiFailure::Http(507), 1).is_empty());
         assert!(queue.tick(i64::MAX).is_empty());
@@ -574,6 +579,7 @@ mod tests {
         assert_eq!(queue.items()[0].upload_url, None);
         assert_eq!(queue.items()[0].sent, 0);
         created(&mut queue, 0, 2);
+        // Nothing is left on the server to delete.
         assert!(fail(&mut queue, 0, server("upload_not_found"), 3).is_empty());
         assert_eq!(
             queue.items()[0].status,
@@ -933,7 +939,11 @@ mod tests {
         let mut queue = Queue::default();
         queue.add(files(1, 10), &[], 0);
         created(&mut queue, 0, 0);
-        assert!(fail(&mut queue, 0, server("cross_device"), 1).is_empty());
+        let key = key(&queue, 0);
+        assert_eq!(
+            fail(&mut queue, 0, server("cross_device"), 1),
+            [Effect::Delete { url: url(key) }]
+        );
         assert_eq!(
             queue.items()[0].status,
             Status::Failed(server("cross_device"))

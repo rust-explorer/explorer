@@ -117,7 +117,15 @@ impl Queue {
                 item.confirmed = 0;
                 effects.push(item.create());
             }
-            _ => self.finish(index, Status::Failed(failure), now_ms, effects),
+            _ => {
+                // The server keeps the staged file until its sweep unless told otherwise.
+                if let Some(url) = item.upload_url.take()
+                    && code != UPLOAD_NOT_FOUND
+                {
+                    effects.push(Effect::Delete { url });
+                }
+                self.finish(index, Status::Failed(failure), now_ms, effects);
+            }
         }
     }
 }
