@@ -76,6 +76,7 @@ error-task_not_found = Cette tâche n'existe plus sur le serveur.
 error-favorites_full = Vous ne pouvez pas avoir plus de { $max } favoris. Retirez-en un d'abord.
 error-thumbnail_unavailable = Aucun aperçu n'est disponible pour ce fichier.
 error-too_many_tasks = Trop de tâches sont en attente. Réessayez quand certaines seront terminées.
+error-changed_during_move = { $path } a été modifié pendant le déplacement : il a été conservé à son ancien emplacement en plus de sa copie au nouvel emplacement.
 upload = Uploader
 upload-open = Uploader des fichiers ou un dossier
 upload-files = Fichiers…

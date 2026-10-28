@@ -76,6 +76,7 @@ error-task_not_found = This task no longer exists on the server.
 error-favorites_full = You can't have more than { $max } favorites. Remove one first.
 error-thumbnail_unavailable = No preview is available for this file.
 error-too_many_tasks = Too many tasks are waiting. Try again once some have finished.
+error-changed_during_move = { $path } changed while it was being moved, so it was kept in its old place as well as copied to the new one.
 upload = Upload
 upload-open = Upload files or a folder
 upload-files = Files…

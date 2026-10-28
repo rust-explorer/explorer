@@ -9,7 +9,7 @@ use shared::api::favorites::MAX_FAVORITES;
 use shared::api::tasks::MAX_ACTIVE_TASKS;
 
 use crate::http::request_id::request_id;
-use crate::storage::{InvalidPath, StorageError};
+use crate::storage::{InvalidPath, RelPath, StorageError};
 
 const UNUSABLE_STAGED: &str = "The staged upload can't be used";
 
@@ -231,6 +231,7 @@ impl ApiError {
                 "Already exists: ",
                 path,
             ),
+            StorageError::ChangedDuringMove(path) => return Self::changed(volume, &path, log),
             StorageError::NoSpace(path) => {
                 if log {
                     tracing::warn!(volume, path = path.as_str(), "not enough space");
@@ -298,6 +299,21 @@ impl ApiError {
                 return Self::internal(source);
             }
         };
+        Self::storage_failure(volume, (status, code, label), &path, log)
+    }
+
+    fn changed(volume: &str, path: &RelPath, log: bool) -> Self {
+        let label = "Changed during the move, so both copies were kept: ";
+        let failure = (StatusCode::CONFLICT, "changed_during_move", label);
+        Self::storage_failure(volume, failure, path, log)
+    }
+
+    fn storage_failure(
+        volume: &str,
+        (status, code, label): (StatusCode, &'static str, &str),
+        path: &RelPath,
+        log: bool,
+    ) -> Self {
         if log {
             tracing::warn!(volume, path = path.as_str(), code, "storage request failed");
         }
@@ -453,6 +469,19 @@ mod tests {
         assert_eq!(
             dest.details,
             Some(json!({ "volume": "documents", "path": "a.txt" }))
+        );
+        let changed = ApiError::from_transfer(
+            "media",
+            "documents",
+            StorageError::Source(Box::new(StorageError::ChangedDuringMove(path()))),
+        );
+        assert_eq!(
+            (changed.status, changed.code),
+            (StatusCode::CONFLICT, "changed_during_move")
+        );
+        assert_eq!(
+            changed.details,
+            Some(json!({ "volume": "media", "path": "a.txt" }))
         );
     }
 

@@ -1,10 +1,10 @@
-use std::io;
-
 use rustix::io::Errno;
 
 use shared::api::conflict::ConflictPolicy;
 
-use super::{TransferPlan, TransferProgress, check_transfer, copy, plan_transfer};
+use super::copy::{Taken, copy_taking};
+use super::remove::{Expect, Removed, remove_if};
+use super::{TransferPlan, TransferProgress, check_transfer, plan_transfer};
 use crate::storage::read::{Identity, fs_path};
 use crate::storage::{InvalidPath, RelPath, StorageError, Volume, WalkItem};
 
@@ -77,8 +77,8 @@ pub fn move_entry(
         progress.planned(&planned);
         &planned
     };
-    let final_path = copy(source, path, dest, dest_dir, conflict, plan, progress)?;
-    remove_moved(source, path, plan).map_err(StorageError::on_source)?;
+    let (final_path, taken) = copy_taking(source, path, dest, dest_dir, conflict, plan, progress)?;
+    remove_moved(source, path, plan, &taken).map_err(StorageError::on_source)?;
     Ok(MoveOutcome::Copied { final_path })
 }
 
@@ -112,52 +112,41 @@ fn rename(
         })
 }
 
-/// Removes from the source what the copy took: its files, then its folders once empty. A
-/// symlink moved as its target's copy goes alone; its target stays.
-fn remove_moved(source: &Volume, path: &RelPath, plan: &TransferPlan) -> Result<(), StorageError> {
-    let top = source
-        .root
-        .symlink_metadata(path.as_str())
-        .map_err(|err| StorageError::from_io(path, err))?;
-    if !top.is_dir() {
-        return remove_file(source, path);
-    }
-    for item in &plan.items {
-        if let WalkItem::File { path, .. } = item {
-            remove_file(source, path)?;
+/// Removes from the source what the copy took: its files, then its folders once empty, each
+/// only if it is still what was copied. A symlink moved as its target's copy goes alone, if it
+/// still leads there; its target stays. A file changed since it was copied stays, and so do the
+/// folders holding it: the move then fails, both copies kept.
+fn remove_moved(
+    source: &Volume,
+    path: &RelPath,
+    plan: &TransferPlan,
+    taken: &Taken,
+) -> Result<(), StorageError> {
+    let mut changed = None;
+    let mut remove = |at: &RelPath, expect: Expect| -> Result<(), StorageError> {
+        if remove_if(source, at, expect, true)? == Removed::Changed && changed.is_none() {
+            changed = Some(at.clone());
+        }
+        Ok(())
+    };
+    if matches!(taken.top, Expect::Dir(_)) && source.is_real_dir(path) {
+        for (index, stamp) in &taken.files {
+            remove(item_path(plan, *index), Expect::File(*stamp))?;
+        }
+        for (index, id) in taken.dirs.iter().rev() {
+            remove(item_path(plan, *index), Expect::Dir(*id))?;
         }
     }
-    let dirs = plan.items.iter().rev().filter_map(|item| match item {
-        WalkItem::Dir(dir) => Some(dir),
-        WalkItem::File { .. } => None,
-    });
-    for dir in dirs.chain([path]) {
-        remove_empty_dir(source, dir)?;
+    remove(path, taken.top)?;
+    match changed {
+        Some(path) => Err(StorageError::ChangedDuringMove(path)),
+        None => Ok(()),
     }
-    Ok(())
 }
 
-/// A file or a symlink, never a folder that took its place since.
-fn remove_file(volume: &Volume, path: &RelPath) -> Result<(), StorageError> {
-    let (parent, name) = split(path)?;
-    volume
-        .root
-        .open_dir(fs_path(&parent))
-        .and_then(|dir| dir.remove_file(name))
-        .map_err(|err| StorageError::from_io(path, err))
-}
-
-/// A folder that still holds something, as a skipped entry, stays.
-fn remove_empty_dir(volume: &Volume, path: &RelPath) -> Result<(), StorageError> {
-    let (parent, name) = split(path)?;
-    match volume
-        .root
-        .open_dir(fs_path(&parent))
-        .and_then(|dir| dir.remove_dir(name))
-    {
-        Ok(()) => Ok(()),
-        Err(err) if err.kind() == io::ErrorKind::DirectoryNotEmpty => Ok(()),
-        Err(err) => Err(StorageError::from_io(path, err)),
+fn item_path(plan: &TransferPlan, index: usize) -> &RelPath {
+    match &plan.items[index] {
+        WalkItem::Dir(path) | WalkItem::File { path, .. } => path,
     }
 }
 

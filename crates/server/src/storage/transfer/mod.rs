@@ -1,6 +1,7 @@
 mod check;
 mod copy;
 mod r#move;
+mod remove;
 
 pub use check::check_transfer;
 pub use copy::copy;

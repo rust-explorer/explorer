@@ -46,7 +46,7 @@ pub(super) struct Entry {
 }
 
 /// A directory or file by device and inode, whatever path or symlink leads to it.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Identity(u64, u64);
 
 impl Identity {

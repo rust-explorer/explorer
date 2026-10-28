@@ -3,7 +3,9 @@ use std::time::SystemTime;
 
 use shared::api::conflict::ConflictPolicy;
 
+use super::remove::{Expect, Removed, Stamp, remove_if};
 use super::{COPY_CHUNK, TransferPlan, TransferProgress};
+use crate::storage::read::Identity;
 use crate::storage::write::KEEP_BOTH_MAX;
 use crate::storage::{
     InvalidPath, RelPath, StagedId, Staging, StorageError, Volume, WalkItem, keep_both_name,
@@ -11,7 +13,8 @@ use crate::storage::{
 
 /// Copies `path` of `source` into the folder `dest_dir` of `dest`, which may be the same volume,
 /// following `plan`. Returns the path the copy ended up at. On failure or cancellation nothing
-/// is left behind: no staged file, no partial folder.
+/// it made is left behind: no staged file, no partial folder, unless something else was put
+/// there meanwhile.
 pub fn copy(
     source: &Volume,
     path: &RelPath,
@@ -21,6 +24,34 @@ pub fn copy(
     plan: &TransferPlan,
     progress: &dyn TransferProgress,
 ) -> Result<RelPath, StorageError> {
+    copy_taking(source, path, dest, dest_dir, conflict, plan, progress).map(|(placed, _)| placed)
+}
+
+/// What a copy read from its source, for a move to remove: the copied entry, and the files and
+/// folders of a copied folder by their index in the plan, each as it was when read.
+pub(super) struct Taken {
+    pub top: Expect,
+    pub files: Vec<(usize, Stamp)>,
+    pub dirs: Vec<(usize, Identity)>,
+}
+
+/// What a folder copy made in the destination, by index in the plan, with the path a file
+/// ended up at when it is not the planned one.
+#[derive(Default)]
+struct Made {
+    entries: Vec<(usize, Option<RelPath>, Expect)>,
+}
+
+/// Like [`copy`], also returning what it took from the source.
+pub(super) fn copy_taking(
+    source: &Volume,
+    path: &RelPath,
+    dest: &Volume,
+    dest_dir: &RelPath,
+    conflict: ConflictPolicy,
+    plan: &TransferPlan,
+    progress: &dyn TransferProgress,
+) -> Result<(RelPath, Taken), StorageError> {
     let Some(name) = path.file_name() else {
         return Err(InvalidPath {
             reason: "the volume root can't be copied",
@@ -46,23 +77,74 @@ pub fn copy(
     ] = plan.items.as_slice()
         && file == path
     {
-        return files.copy(file, &dest_dir.join(name)?, conflict, *modified);
+        let copied = files.copy(file, &dest_dir.join(name)?, conflict, *modified)?;
+        let taken = Taken {
+            top: Expect::File(copied.source),
+            files: Vec::new(),
+            dirs: Vec::new(),
+        };
+        return Ok((copied.placed, taken));
     }
 
+    let source_err = |err| StorageError::from_io(path, err).on_source();
+    let top_id = Identity::of(&source.root.metadata(path.as_str()).map_err(source_err)?);
     let top = create_top(dest, dest_dir, name, conflict)?;
-    match files.copy_tree(path, &top, plan) {
-        Ok(()) => Ok(top),
+    let made_top = dest
+        .root
+        .symlink_metadata(top.as_str())
+        .map(|meta| Identity::of(&meta))
+        .map_err(|err| StorageError::from_io(&top, err))?;
+    let mut taken = Taken {
+        top: Expect::Dir(top_id),
+        files: Vec::new(),
+        dirs: Vec::new(),
+    };
+    let mut made = Made::default();
+    match files.copy_tree(path, &top, plan, &mut made, &mut taken) {
+        Ok(()) => Ok((top, taken)),
         Err(err) => {
-            if let Err(cleanup) = dest.delete(&top) {
-                tracing::warn!(
-                    volume = dest.name(),
-                    path = top.as_str(),
-                    error = %cleanup,
-                    "cannot remove a partly copied folder"
-                );
-            }
+            undo(dest, path, &top, made_top, plan, &made);
             Err(err)
         }
+    }
+}
+
+/// Removes what a failed folder copy made, deepest first, each only if it is still what the
+/// copy made: whatever else was put there meanwhile stays, with the folders holding it.
+fn undo(
+    dest: &Volume,
+    path: &RelPath,
+    top: &RelPath,
+    made_top: Identity,
+    plan: &TransferPlan,
+    made: &Made,
+) {
+    let remove = |at: &RelPath, expect| match remove_if(dest, at, expect, false) {
+        Ok(Removed::Yes | Removed::Gone) => 0,
+        Ok(Removed::Changed | Removed::NotEmpty) => 1,
+        Err(err) => {
+            tracing::warn!(volume = dest.name(), path = at.as_str(), error = %err, "cannot remove part of a failed copy");
+            1
+        }
+    };
+    let mut kept = 0;
+    for (index, placed, expect) in made.entries.iter().rev() {
+        let planned = match &plan.items[*index] {
+            WalkItem::Dir(item) | WalkItem::File { path: item, .. } => rebase(item, path, top),
+        };
+        kept += match placed.clone().map_or(planned, Ok) {
+            Ok(at) => remove(&at, *expect),
+            Err(_) => 1,
+        };
+    }
+    kept += remove(top, Expect::Dir(made_top));
+    if kept > 0 {
+        tracing::warn!(
+            volume = dest.name(),
+            path = top.as_str(),
+            kept,
+            "a failed copy left entries that changed or were added meanwhile"
+        );
     }
 }
 
@@ -111,31 +193,60 @@ struct Files<'a> {
     progress: &'a dyn TransferProgress,
 }
 
+/// A file copied: where it was placed, the source as it was read and the copy as placed.
+struct CopiedFile {
+    placed: RelPath,
+    source: Stamp,
+    made: Stamp,
+}
+
 impl Files<'_> {
-    /// Replays the walk of `path` under the freshly created `top`, where nothing can conflict.
+    /// Replays the walk of `path` under the freshly created `top`, where nothing can conflict,
+    /// noting what it makes and what it takes.
     fn copy_tree(
         &self,
         path: &RelPath,
         top: &RelPath,
         plan: &TransferPlan,
+        made: &mut Made,
+        taken: &mut Taken,
     ) -> Result<(), StorageError> {
-        for item in &plan.items {
+        for (index, item) in plan.items.iter().enumerate() {
             if self.progress.is_cancelled() {
                 return Err(StorageError::Cancelled);
             }
             match item {
-                WalkItem::Dir(dir) => self.dest.create_dir(&rebase(dir, path, top)?)?,
+                WalkItem::Dir(dir) => {
+                    let to = rebase(dir, path, top)?;
+                    let source = self
+                        .source
+                        .root
+                        .symlink_metadata(dir.as_str())
+                        .ok()
+                        .filter(cap_std::fs::Metadata::is_dir);
+                    self.dest.create_dir(&to)?;
+                    let created = self
+                        .dest
+                        .root
+                        .symlink_metadata(to.as_str())
+                        .map_err(|err| StorageError::from_io(&to, err))?;
+                    made.entries
+                        .push((index, None, Expect::Dir(Identity::of(&created))));
+                    if let Some(source) = source {
+                        taken.dirs.push((index, Identity::of(&source)));
+                    }
+                }
                 WalkItem::File {
                     path: file,
                     modified,
                     ..
                 } => {
-                    self.copy(
-                        file,
-                        &rebase(file, path, top)?,
-                        ConflictPolicy::Fail,
-                        *modified,
-                    )?;
+                    let to = rebase(file, path, top)?;
+                    let copied = self.copy(file, &to, ConflictPolicy::Fail, *modified)?;
+                    let renamed = (copied.placed != to).then_some(copied.placed);
+                    made.entries
+                        .push((index, renamed, Expect::File(copied.made)));
+                    taken.files.push((index, copied.source));
                 }
             }
         }
@@ -149,14 +260,23 @@ impl Files<'_> {
         to: &RelPath,
         conflict: ConflictPolicy,
         modified: Option<SystemTime>,
-    ) -> Result<RelPath, StorageError> {
+    ) -> Result<CopiedFile, StorageError> {
         let id = StagedId::random();
-        let placed = self.stream(from, to, &id).and_then(|()| {
+        let placed = self.stream(from, to, &id).and_then(|(output, source)| {
             if self.progress.is_cancelled() {
                 return Err(StorageError::Cancelled);
             }
-            self.dest
-                .commit_staged(self.staging, &id, to, conflict, modified)
+            let placed = self
+                .dest
+                .commit_staged(self.staging, &id, to, conflict, modified)?;
+            let made = output
+                .metadata()
+                .map_err(|err| StorageError::from_io(&placed, err))?;
+            Ok(CopiedFile {
+                placed,
+                source,
+                made: Stamp::placed(&made),
+            })
         });
         match placed {
             Ok(placed) => {
@@ -176,12 +296,19 @@ impl Files<'_> {
         }
     }
 
-    fn stream(&self, from: &RelPath, to: &RelPath, id: &StagedId) -> Result<(), StorageError> {
+    /// Returns the staged file, still open, and the source as it was when opened.
+    fn stream(
+        &self,
+        from: &RelPath,
+        to: &RelPath,
+        id: &StagedId,
+    ) -> Result<(std::fs::File, Stamp), StorageError> {
         let read_err = |err| StorageError::from_io(from, err).on_source();
         let (mut input, _) = self
             .source
             .open_file(from)
             .map_err(StorageError::on_source)?;
+        let source = Stamp::source(&input.metadata().map_err(read_err)?);
         let mut output = self.staging.create(id)?;
         let mut chunk = vec![0; COPY_CHUNK];
         loop {
@@ -190,7 +317,7 @@ impl Files<'_> {
             }
             let n = fill(&mut input, &mut chunk).map_err(read_err)?;
             if n == 0 {
-                return Ok(());
+                return Ok((output, source));
             }
             output
                 .write_all(&chunk[..n])

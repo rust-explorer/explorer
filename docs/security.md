@@ -189,9 +189,17 @@ action reach outside its volume.
   The error's `details` name the entry being moved or copied, on its source volume.
 - **Cross-volume moves.** Volumes may be different filesystems, so a move to another volume
   copies first, then deletes. The source is touched only after the copy is complete: a
-  failed or cancelled copy leaves it whole and removes the partial destination. After that,
+  failed or cancelled copy leaves it whole and removes the partial destination: only
+  the files and folders the copy made, each checked by device and inode (and size and
+  modification time for files), so a folder renamed into its place, or files someone added
+  to it meanwhile, stay. After that,
   each copied file is deleted from the source, then the folders left empty. What the copy
   skipped (see Symlinks) stays in the source, with its folders, and is reported in `skipped`.
+  A source file is deleted only if it is still the file that was read: same device and
+  inode, size, modification and change time as when the copy opened it. One that was
+  written to, replaced or renamed over since stays in the source next to its copy, and the
+  move fails with `changed_during_move` (409). Only a change in the instant between that
+  check and the delete can slip through.
   If a delete fails midway, the destination is complete and the source may be partly
   removed; nothing is lost, but the move is reported as failed. A move within one volume that hits a nested mount falls back to the same copy and delete.
   Copies use the staging directory of the destination volume, so their data never leaves it
