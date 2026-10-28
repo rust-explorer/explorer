@@ -20,3 +20,4 @@ pub use file_table::FileTable;
 pub use read_only_notice::ReadOnlyNotice;
 pub use refresh_button::RefreshButton;
 pub use view_toggle::ViewToggle;
+pub use virtual_list::VirtualList;

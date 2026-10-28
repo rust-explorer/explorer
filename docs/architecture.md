@@ -366,6 +366,8 @@ choose a read-only one. A rename, move or copy that hits an existing name opens 
 both or Cancel prompt as uploads, with "apply to all"; Replace is only offered for a file over
 a file. Delete, Move and Copy become tasks that appear in the activity panel (with the uploads)
 with their progress, a cancel or dismiss button and, for a task that skipped entries, how many.
+One action shows at most 20 task rows there, then a count of the others (a delete of thousands
+of entries is one task per entry).
 The tab polls `GET /api/tasks` every second while one of its tasks is queued or running, and
 refreshes the listing and the free space when one finishes. A tab shows the tasks it started;
 on load it also lists the user's queued and running tasks once and adopts them, so a reload

@@ -162,6 +162,11 @@ task-files-done =
     }
 task-done = Terminé
 task-cancelled = Annulé
+task-more =
+    { $count ->
+        [one] et 1 autre tâche
+       *[other] et { $count } autres tâches
+    }
 delete-title =
     { $count ->
         [one] Supprimer { $name } ?
