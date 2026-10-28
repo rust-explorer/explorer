@@ -377,8 +377,9 @@ entries keeps the DOM small. Sizes use SI units (1 kB = 1000 B). Each file row l
 browser handles the download and shows any failure in its own download list.
 
 Managing files: each row has a menu (Download, Rename, Move to, Copy to, Delete) and a checkbox;
-checking rows, with shift-click for a range, shows a bar to download them as a zip (one
-`name=` per entry), move, copy or delete them, and renaming is offered for one entry at a time.
+checking rows, with shift-click for a range, shows a bar to download them as a zip (the names are stored
+with `POST /files/zip/selections`, then the zip is fetched by its id, so thousands of entries
+fit; a failure to store them shows a dismissable alert), move, copy or delete them, and renaming is offered for one entry at a time.
 New folder is in the header. On a read-only volume only Download and Copy remain, and entries listed as `other` (symlinks the
 server does not follow) can only be renamed or deleted. Names are checked
 before they are sent (not empty, no slash, not `.` or `..`, at most 255 bytes, not the reserved

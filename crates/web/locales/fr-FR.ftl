@@ -136,6 +136,8 @@ selection-count =
        *[other] { $count } sélectionnés
     }
 selection-clear = Désélectionner
+selection-download-failed = Le téléchargement n'a pas pu démarrer.
+selection-download-dismiss = Fermer
 rename-title = Renommer { $name }
 rename-name = Nouveau nom
 rename-save = Enregistrer
