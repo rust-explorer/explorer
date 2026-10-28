@@ -15,7 +15,8 @@ pub struct SweepReport {
 }
 
 /// Deletes uploads idle for longer than [`UPLOAD_TTL`] with their staged files, then staged
-/// files that have no record and are just as old. Failures are logged and skipped.
+/// files that have no record and are just as old. Uploads locked by a request are left alone.
+/// Failures are logged and skipped.
 pub async fn sweep(uploads: &Uploads, volumes: &Arc<Volumes>, now: SystemTime) -> SweepReport {
     let mut report = SweepReport::default();
     let cutoff = now.checked_sub(UPLOAD_TTL).unwrap_or(UNIX_EPOCH);
@@ -30,6 +31,10 @@ pub async fn sweep(uploads: &Uploads, volumes: &Arc<Volumes>, now: SystemTime) -
     match uploads.expired(cutoff_ms).await {
         Ok(expired) => {
             for record in expired {
+                // A request working on it keeps it alive until its next `touch`.
+                let Some(_lock) = uploads.try_lock(&record.id) else {
+                    continue;
+                };
                 if record.final_path.is_none()
                     && let Err(err) = remove_staged(volumes, &record.volume, &record.id).await
                 {

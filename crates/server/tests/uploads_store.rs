@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime};
 
 use explorer_server::db;
 use explorer_server::storage::{RelPath, UploadId, Volumes};
-use explorer_server::uploads::{UPLOAD_TTL, UploadRecord, Uploads, sweep};
+use explorer_server::uploads::{SweepReport, UPLOAD_TTL, UploadRecord, Uploads, sweep};
 use shared::api::ConflictPolicy;
 
 const HOUR_MS: i64 = 3_600_000;
@@ -142,6 +142,25 @@ async fn sweep_removes_expired_uploads_and_their_files() {
     assert!(!staged(&fx, "media", &old.id));
     assert!(fx.uploads.get(&fresh.id, "alice").await.unwrap().is_some());
     assert!(staged(&fx, "media", &fresh.id));
+}
+
+#[tokio::test]
+async fn sweep_skips_locked_uploads() {
+    let fx = fixture(&["media"]).await;
+    let old = record("alice", "media", now_ms() - 25 * HOUR_MS);
+    fx.uploads.insert(&old).await.unwrap();
+    stage(&fx, "media", &old.id, UPLOAD_TTL + Duration::from_secs(60));
+
+    let lock = fx.uploads.try_lock(&old.id).unwrap();
+    let report = sweep(&fx.uploads, &fx.volumes, SystemTime::now()).await;
+    assert_eq!(report, SweepReport::default());
+    assert!(fx.uploads.get(&old.id, "alice").await.unwrap().is_some());
+    assert!(staged(&fx, "media", &old.id));
+
+    drop(lock);
+    let report = sweep(&fx.uploads, &fx.volumes, SystemTime::now()).await;
+    assert_eq!(report.uploads, 1);
+    assert!(!staged(&fx, "media", &old.id));
 }
 
 #[tokio::test]

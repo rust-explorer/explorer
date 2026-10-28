@@ -18,7 +18,7 @@ use crate::config::Config;
 use crate::error::{ApiError, attach_request_id};
 use crate::oidc::Oidc;
 use crate::storage::Volumes;
-use crate::uploads::Uploads;
+use crate::uploads::{self, Uploads};
 use crate::{api, auth, csrf, files, session, web};
 
 #[derive(Clone)]
@@ -77,6 +77,7 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
                 .layer(trace)
                 .layer(PropagateRequestIdLayer::x_request_id())
                 .layer(middleware::from_fn(attach_request_id))
+                .layer(middleware::from_fn(uploads::tag_tus_responses))
                 .layer(middleware::from_fn_with_state(
                     origin,
                     csrf::require_same_origin,

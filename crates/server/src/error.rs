@@ -81,6 +81,78 @@ impl ApiError {
         .with_details(json!({ "volume": name }))
     }
 
+    #[must_use]
+    pub fn insufficient_storage(volume: &str, path: &str) -> Self {
+        Self::new(
+            StatusCode::INSUFFICIENT_STORAGE,
+            "insufficient_storage",
+            format!("Not enough space on {volume}"),
+        )
+        .with_details(json!({ "volume": volume, "path": path }))
+    }
+
+    #[must_use]
+    pub fn upload_not_found() -> Self {
+        Self::new(
+            StatusCode::NOT_FOUND,
+            "upload_not_found",
+            "Upload not found",
+        )
+    }
+
+    /// `offset` is where the upload actually stands.
+    #[must_use]
+    pub fn offset_mismatch(offset: u64) -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            "offset_mismatch",
+            format!("The upload is at offset {offset}"),
+        )
+        .with_details(json!({ "offset": offset }))
+    }
+
+    #[must_use]
+    pub fn upload_busy() -> Self {
+        Self::new(
+            StatusCode::LOCKED,
+            "upload_busy",
+            "Another request is writing this upload",
+        )
+    }
+
+    #[must_use]
+    pub fn upload_too_large(length: u64) -> Self {
+        Self::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "upload_too_large",
+            format!("The upload is limited to {length} bytes"),
+        )
+        .with_details(json!({ "length": length }))
+    }
+
+    #[must_use]
+    pub fn invalid_upload(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, "invalid_upload", message)
+    }
+
+    #[must_use]
+    pub fn unsupported_tus_version() -> Self {
+        Self::new(
+            StatusCode::PRECONDITION_FAILED,
+            "unsupported_tus_version",
+            "Unsupported tus version",
+        )
+    }
+
+    #[must_use]
+    pub fn unsupported_media_type(expected: &str) -> Self {
+        Self::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "unsupported_media_type",
+            format!("Expected Content-Type {expected}"),
+        )
+    }
+
     /// Maps a storage failure on `volume`, logging it; an I/O error stays out of the response.
     #[must_use]
     pub fn from_storage(volume: &str, err: StorageError) -> Self {
@@ -114,12 +186,7 @@ impl ApiError {
             ),
             StorageError::NoSpace(path) => {
                 tracing::warn!(volume, path = path.as_str(), "not enough space");
-                return Self::new(
-                    StatusCode::INSUFFICIENT_STORAGE,
-                    "insufficient_storage",
-                    format!("Not enough space on {volume}"),
-                )
-                .with_details(json!({ "volume": volume, "path": path.as_str() }));
+                return Self::insufficient_storage(volume, path.as_str());
             }
             StorageError::OutsideVolume(path) => {
                 tracing::warn!(
