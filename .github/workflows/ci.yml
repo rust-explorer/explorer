@@ -29,7 +29,9 @@ jobs:
           rustup show active-toolchain
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - uses: cargo-bins/cargo-binstall@8a2045612414e945291083f820cd50b4d8fc2218 # v1.26.0
-      - name: Install dx
-        run: cargo binstall --no-confirm --locked dioxus-cli@0.7.10
+        with:
+          version: 1.26.0
+      - name: Install dx and cargo-audit
+        run: cargo binstall --no-confirm --locked dioxus-cli@0.7.10 cargo-audit@0.22.2
       - name: Run checks
         run: cargo xtask ci --no-docker
