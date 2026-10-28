@@ -319,7 +319,10 @@ How a scan counts:
 
 - Sizes are the space allocated on disk (`st_blocks` x 512), not the apparent size, so a
   sparse or compressed file counts for what it takes.
-- A file with several hard links is counted once.
+- A file with several hard links is counted once, up to 100,000 such files per scan; beyond
+  that, each of its names counts.
+- A name that is not valid UTF-8 can't be shown: a file so named counts among `other_files`,
+  and a folder so named counts, with all it holds, into its parent's `other_files`.
 - It never crosses a filesystem boundary (a nested mount is skipped, like `du -x`) and never
   follows a symlink; symlinks and other special files count as their own small entry.
 - `.explorer-uploads` is skipped, so staged data is not counted.
@@ -329,6 +332,8 @@ How a scan counts:
   the deeper sub-folders are counted into their last listed ancestor and `collapsed` is set.
 - Folders are opened without following symlinks and checked against the inode seen when they
   were listed, so a folder swapped for a symlink meanwhile is not entered.
+- Folders waiting to be read more than 64 levels down don't keep their parent open; they are
+  reopened one name at a time from the scanned folder, so open descriptors don't grow with depth.
 
 The tree is kept in memory with the task. A user keeps at most 4 finished scans (`MAX_USAGE_TREES`)
 and one per folder: a new scan of a folder replaces the previous one, and the oldest beyond four

@@ -431,3 +431,61 @@ fn usage_fails_when_a_worker_panics() {
         .expect("the scan hung after a worker panicked");
     assert!(failed);
 }
+
+#[test]
+fn usage_scans_deep_folders() {
+    let depth = 100;
+    let deep: PathBuf = std::iter::repeat_n("d", depth).collect();
+    let fixture = Fixture::new(|media| {
+        write(&media.join(&deep).join("x.bin"), 10_000);
+        write(&media.join("d/side.bin"), 10_000);
+    });
+    let tree = fixture.scan("").unwrap();
+    let (_, files, dirs) = tree.totals();
+    assert_eq!((files, dirs), (2, depth as u64));
+    let bottom = view(&tree, deep.to_str().unwrap());
+    assert_eq!(bottom.files, 1);
+    assert_eq!(bottom.items[0].name, "x.bin");
+}
+
+/// Linux only: macOS refuses names that are not UTF-8.
+#[test]
+fn usage_counts_names_that_are_not_utf8_among_other_files() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let data = tempfile::tempdir().unwrap();
+    let media = data.path().join("media");
+    let bad_dir = media.join(OsStr::from_bytes(b"dir\xff"));
+    if fs::create_dir_all(&bad_dir).is_err() {
+        return;
+    }
+    write(&media.join("ok.bin"), 10_000);
+    write(&media.join(OsStr::from_bytes(b"bad\xff.bin")), 20_000);
+    write(&bad_dir.join("inner.bin"), 30_000);
+    write(&bad_dir.join("Sub/x.bin"), 40_000);
+    let volumes = Volumes::discover(data.path()).unwrap();
+
+    let tree = usage(
+        volumes.get("media").unwrap(),
+        &RelPath::root(),
+        &Counter::default(),
+    )
+    .unwrap();
+    let root = view(&tree, "");
+    assert_eq!((root.files, root.dirs), (4, 2));
+    assert!(
+        root.items
+            .iter()
+            .all(|item| !item.name.contains('\u{fffd}'))
+    );
+    assert!(root.items.iter().all(|item| item.kind != UsageKind::Dir));
+    let other = root
+        .items
+        .iter()
+        .find(|item| item.kind == UsageKind::OtherFiles)
+        .unwrap();
+    assert_eq!(other.files, 3);
+    let listed: u64 = root.items.iter().map(|item| item.bytes).sum();
+    assert_eq!(listed + allocated(&media), root.bytes);
+}
