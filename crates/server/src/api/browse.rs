@@ -2,7 +2,9 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::Json;
+use axum::extract::rejection::{PathRejection, QueryRejection};
 use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use serde::Deserialize;
 use shared::api::{Entry, EntryKind, Listing, Space, VolumeInfo};
 
@@ -51,9 +53,16 @@ pub async fn volumes(
 pub async fn entries(
     State(state): State<AppState>,
     user: CurrentUser,
-    Path(volume): Path<String>,
-    Query(query): Query<EntriesQuery>,
+    volume: Result<Path<String>, PathRejection>,
+    query: Result<Query<EntriesQuery>, QueryRejection>,
 ) -> Result<Json<Listing>, ApiError> {
+    let (Ok(Path(volume)), Ok(Query(query))) = (volume, query) else {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_path",
+            "Invalid volume or path parameter",
+        ));
+    };
     if state.volumes.get(&volume).is_none() {
         return Err(ApiError::volume_not_found(&volume));
     }

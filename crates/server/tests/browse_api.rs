@@ -157,6 +157,19 @@ async fn traversal_attempts_are_invalid_path() {
 }
 
 #[tokio::test]
+async fn malformed_requests_get_a_json_invalid_path() {
+    let mut s = setup().await;
+    for uri in [
+        "/api/volumes/media/entries?path=a&path=b",
+        "/api/volumes/%FF/entries",
+    ] {
+        let res = s.client.get(uri).await;
+        let body = error_of(res, StatusCode::BAD_REQUEST).await;
+        assert_eq!(body.code, "invalid_path", "{uri}");
+    }
+}
+
+#[tokio::test]
 async fn special_characters_round_trip() {
     let mut s = setup().await;
     let folder = s.data.join("media/é #?%");

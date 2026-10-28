@@ -25,7 +25,9 @@ pub(crate) async fn blocking_volume<T: Send + 'static>(
 ) -> Result<T, ApiError> {
     let volumes = Arc::clone(volumes);
     let name = volume.to_owned();
+    let span = tracing::Span::current();
     tokio::task::spawn_blocking(move || {
+        let _entered = span.enter();
         volumes
             .get(&name)
             .map(op)

@@ -9,7 +9,7 @@ use ::zip::{CompressionMethod, DateTime, ZipWriter};
 use axum::body::{Body, Bytes};
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::Response;
 use serde::Deserialize;
 use tokio::sync::mpsc;
@@ -33,6 +33,15 @@ pub struct ZipQuery {
     volume: String,
     #[serde(default)]
     path: String,
+}
+
+/// Answers `HEAD` without walking the tree, which `get` would otherwise do implicitly.
+pub async fn head() -> Response {
+    let mut res = Response::new(Body::empty());
+    *res.status_mut() = StatusCode::METHOD_NOT_ALLOWED;
+    res.headers_mut()
+        .insert(header::ALLOW, HeaderValue::from_static("GET"));
+    res
 }
 
 pub async fn zip(
@@ -80,12 +89,16 @@ pub async fn zip(
     let archive_name = format!("{}.zip", path.file_name().unwrap_or(&volume));
     let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
     let volumes = Arc::clone(&state.volumes);
-    tokio::task::spawn_blocking(move || match volumes.get(&volume) {
-        Some(vol) => stream_archive(&volume, &path, tx, |zip| {
-            write_entries(zip, vol, &path, &items)
-        }),
-        None => {
-            let _ = tx.blocking_send(Err(io::Error::other("volume not found")));
+    let span = tracing::Span::current();
+    tokio::task::spawn_blocking(move || {
+        let _entered = span.enter();
+        match volumes.get(&volume) {
+            Some(vol) => stream_archive(&volume, &path, tx, |zip| {
+                write_entries(zip, vol, &path, &items)
+            }),
+            None => {
+                let _ = tx.blocking_send(Err(io::Error::other("volume not found")));
+            }
         }
     });
 
@@ -193,15 +206,17 @@ fn copy_data(zip: &mut Archive, path: &RelPath, mut source: impl Read) -> Result
     }
 }
 
-fn entry_name<'a>(root: &RelPath, path: &'a RelPath) -> &'a str {
-    if root.is_root() {
+/// Backslashes become `_` so that Windows extractors cannot read them as separators.
+fn entry_name(root: &RelPath, path: &RelPath) -> String {
+    let relative = if root.is_root() {
         path.as_str()
     } else {
         path.as_str()
             .strip_prefix(root.as_str())
             .and_then(|rest| rest.strip_prefix('/'))
             .unwrap_or(path.as_str())
-    }
+    };
+    relative.replace('\\', "_")
 }
 
 fn file_options(modified: Option<SystemTime>) -> SimpleFileOptions {
@@ -371,6 +386,13 @@ mod tests {
         let path = RelPath::parse("Docs/sub/b.txt").unwrap();
         assert_eq!(entry_name(&root, &path), "sub/b.txt");
         assert_eq!(entry_name(&RelPath::root(), &path), "Docs/sub/b.txt");
+    }
+
+    #[test]
+    fn backslashes_in_entry_names_are_replaced() {
+        let root = RelPath::root();
+        let path = RelPath::parse("a\\..\\..\\x").unwrap();
+        assert_eq!(entry_name(&root, &path), "a_.._.._x");
     }
 
     #[test]

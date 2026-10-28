@@ -48,3 +48,5 @@ error-is_a_directory = { $path } is a folder, not a file.
 error-permission_denied = You don't have permission to open { $path }.
 error-outside_volume = { $path } points outside its volume, so it can't be opened.
 error-range_not_satisfiable = The requested part of the file is out of range.
+error-internal = Something went wrong on the server. Try again in a moment.
+error-forbidden = You don't have access to this.
