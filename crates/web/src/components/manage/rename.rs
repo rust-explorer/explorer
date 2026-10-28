@@ -9,7 +9,7 @@ use super::form::{BUTTON, INPUT, PRIMARY, Problem};
 use crate::api::{self, ApiFailure};
 use crate::components::common::{ConflictPrompt, FocusTarget, Modal};
 use crate::conflict::use_queued_conflict;
-use crate::names::validate_name;
+use crate::names::{NameError, validate_name};
 use crate::revision::Revision;
 
 const TITLE_ID: &str = "rename-title";
@@ -81,9 +81,9 @@ pub fn RenameDialog(
         if busy() {
             return;
         }
-        match validate_name(&name(), at_root) {
-            Ok(new_name) if new_name == current => on_close.call(()),
-            Ok(new_name) => send((new_name.to_owned(), ConflictPolicy::Fail)),
+        match new_name(&name(), &current, at_root) {
+            Ok(None) => on_close.call(()),
+            Ok(Some(new_name)) => send((new_name.to_owned(), ConflictPolicy::Fail)),
             Err(error) => problem.set(Some(Problem::Name(error))),
         }
     };
@@ -204,6 +204,19 @@ fn stem_end(name: &str, kind: EntryKind) -> u32 {
     u32::try_from(stem.encode_utf16().count()).unwrap_or(u32::MAX)
 }
 
+/// The name to rename `current` to, or `None` when the input leaves it as is; a name with
+/// outer spaces submitted untouched is unchanged, not its trimmed form.
+fn new_name<'a>(
+    input: &'a str,
+    current: &str,
+    at_root: bool,
+) -> Result<Option<&'a str>, NameError> {
+    if input == current {
+        return Ok(None);
+    }
+    validate_name(input, at_root).map(|name| (name != current).then_some(name))
+}
+
 fn final_name(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
@@ -231,6 +244,18 @@ mod tests {
         ] {
             assert_eq!(stem_end(name, kind), end, "{name:?}");
         }
+    }
+
+    #[test]
+    fn untouched_names_are_not_renamed() {
+        assert_eq!(new_name(" report.pdf", " report.pdf", false), Ok(None));
+        assert_eq!(new_name("report.pdf ", "report.pdf ", false), Ok(None));
+        assert_eq!(new_name("report.pdf ", "report.pdf", false), Ok(None));
+        assert_eq!(
+            new_name(" notes.txt ", "report.pdf", false),
+            Ok(Some("notes.txt"))
+        );
+        assert_eq!(new_name(" ", "report.pdf", false), Err(NameError::Empty));
     }
 
     #[test]
