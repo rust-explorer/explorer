@@ -6,6 +6,7 @@ pub mod config;
 pub mod csrf;
 pub mod db;
 pub mod error;
+pub mod files;
 pub mod healthcheck;
 pub mod oidc;
 pub mod session;

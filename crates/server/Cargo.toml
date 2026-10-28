@@ -35,6 +35,10 @@ tower-sessions-sqlx-store = { workspace = true }
 url = { workspace = true }
 openidconnect = { workspace = true }
 serde = { workspace = true }
+http-range-header = { workspace = true }
+httpdate = { workspace = true }
+percent-encoding = { workspace = true }
+tokio-util = { workspace = true }
 
 [dev-dependencies]
 axum = { workspace = true, features = ["query", "form"] }
