@@ -94,7 +94,7 @@ impl Queue {
                     self.advance(index, url, 0, now_ms, &mut effects);
                 }
                 Some(index) if self.items[index].status == Status::Cancelled => {
-                    effects.push(Effect::Delete { url });
+                    effects.push(Effect::Delete { key, url });
                 }
                 _ => {}
             },
@@ -118,6 +118,7 @@ impl Queue {
                 apply_to_all,
             } => self.decide(key, decision, apply_to_all, now_ms, &mut effects),
             Event::Cancel { key } => self.cancel(key, now_ms, &mut effects),
+            Event::CancelTooLate { key } => self.cancel_too_late(key, now_ms, &mut effects),
         }
         self.pump(&mut effects);
         effects
@@ -489,7 +490,10 @@ mod tests {
         let storage = server("insufficient_storage");
         assert_eq!(
             fail(&mut queue, 0, storage.clone(), 1),
-            [Effect::Delete { url: url(key0) }]
+            [Effect::Delete {
+                key: key0,
+                url: url(key0)
+            }]
         );
         assert_eq!(queue.items()[0].upload_url, None);
         assert!(fail(&mut queue, 1, server("permission_denied"), 1).is_empty());
@@ -728,7 +732,10 @@ mod tests {
             cancel(&mut queue, 0),
             [
                 Effect::Abort { key: key0 },
-                Effect::Delete { url: url(key0) },
+                Effect::Delete {
+                    key: key0,
+                    url: url(key0)
+                },
                 create(&queue, 3, ConflictPolicy::Fail),
             ]
         );
@@ -867,6 +874,30 @@ mod tests {
     }
 
     #[test]
+    fn cancel_after_the_commit_shows_done() {
+        let mut queue = Queue::default();
+        queue.add(files(2, 10), &[], 0);
+        created(&mut queue, 0, 0);
+        let key0 = key(&queue, 0);
+        queue.handle(Event::Cancel { key: key0 }, 1);
+        assert_eq!(queue.items()[0].status, Status::Cancelled);
+
+        let effects = queue.handle(Event::CancelTooLate { key: key0 }, 2);
+        assert_eq!(queue.items()[0].status, Status::Done);
+        assert_eq!(queue.items()[0].sent, 10);
+        assert_eq!(effects, [refresh()]);
+
+        // Only a cancelled item turns done.
+        let key1 = key(&queue, 1);
+        assert!(
+            queue
+                .handle(Event::CancelTooLate { key: key1 }, 3)
+                .is_empty()
+        );
+        assert_eq!(queue.items()[1].status, Status::Uploading);
+    }
+
+    #[test]
     fn late_created_after_cancel_deletes() {
         let mut queue = Queue::default();
         queue.add(files(1, 10), &[], 0);
@@ -877,7 +908,7 @@ mod tests {
         );
         assert_eq!(
             created(&mut queue, 0, 1),
-            [Effect::Delete { url: url(key) }]
+            [Effect::Delete { key, url: url(key) }]
         );
         assert_eq!(queue.items()[0].status, Status::Cancelled);
     }
@@ -993,7 +1024,7 @@ mod tests {
         created(&mut queue, 0, 0);
         assert_eq!(
             fail(&mut queue, 0, server("permission_denied"), 1),
-            [Effect::Delete { url: url(key) }]
+            [Effect::Delete { key, url: url(key) }]
         );
     }
 
@@ -1005,7 +1036,7 @@ mod tests {
         let key = key(&queue, 0);
         assert_eq!(
             fail(&mut queue, 0, server("cross_device"), 1),
-            [Effect::Delete { url: url(key) }]
+            [Effect::Delete { key, url: url(key) }]
         );
         assert_eq!(
             queue.items()[0].status,

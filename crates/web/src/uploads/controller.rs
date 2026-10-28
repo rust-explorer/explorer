@@ -126,6 +126,7 @@ mod browser {
     };
 
     const UPLOAD_BUSY: &str = "upload_busy";
+    const UPLOAD_COMMITTED: &str = "upload_committed";
     const DELETE_ATTEMPTS: u32 = 5;
 
     impl Uploads {
@@ -230,8 +231,12 @@ mod browser {
                             let _ = xhr.abort();
                         }
                     }
-                    Effect::Delete { url } => {
-                        spawn_forever(delete(url));
+                    Effect::Delete { key, url } => {
+                        spawn_forever(async move {
+                            if delete(url).await {
+                                self.dispatch(Event::CancelTooLate { key });
+                            }
+                        });
                     }
                     Effect::WakeAt { at_ms } => {
                         spawn_forever(async move {
@@ -292,16 +297,19 @@ mod browser {
     }
 
     /// An aborted PATCH can hold the upload's lock for a moment, so a busy upload is retried.
-    async fn delete(url: String) {
+    /// Returns whether the upload turned out to be committed already.
+    async fn delete(url: String) -> bool {
         for attempt in 1..=DELETE_ATTEMPTS {
             match transport::delete(&url).await {
                 Err(ApiFailure::Server(body)) if body.code == UPLOAD_BUSY => {
                     let delay = u32::try_from(retry_delay_ms(attempt)).unwrap_or(u32::MAX);
                     TimeoutFuture::new(delay).await;
                 }
-                _ => return,
+                Err(ApiFailure::Server(body)) => return body.code == UPLOAD_COMMITTED,
+                _ => return false,
             }
         }
+        false
     }
 
     /// The picked folder's `webkitRelativePath`, or the bare name.

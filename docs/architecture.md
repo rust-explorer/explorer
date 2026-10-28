@@ -112,7 +112,7 @@ reload or a laptop going to sleep. The server never holds a whole file in memory
 | `POST /files/uploads` | Creates an upload. `Upload-Length` is required (no deferred length, no body). `Upload-Metadata` carries `volume` and `path` (the destination file path, including the file name), and optionally `modified` (the file's `lastModified`, integer milliseconds) and `conflict` (`fail`, the default, `replace` or `keep_both`); values are base64, unknown keys are ignored. Answers 201 with `Location: /files/uploads/{id}` and `Upload-Offset: 0`. |
 | `HEAD /files/uploads/{id}` | The current `Upload-Offset` and `Upload-Length`, with `Cache-Control: no-store`. |
 | `PATCH /files/uploads/{id}` | Appends the body at `Upload-Offset` (`Content-Type: application/offset+octet-stream`). Answers 204 with the new offset. |
-| `DELETE /files/uploads/{id}` | Cancels the upload and removes its staged data. |
+| `DELETE /files/uploads/{id}` | Cancels the upload and removes its staged data. Answers 204, or 409 `upload_committed` when the upload was already complete (the file stays in place). |
 | `GET /api/uploads` | The signed-in user's unfinished uploads (`id`, `volume`, `path`, `length`, `offset`, `modified_ms`), so a reloaded page can resume them. |
 | `POST /api/volumes/{volume}/folders` | Body `{"path": "..."}`. Creates a folder and its missing parents; an existing folder is fine. Answers 204. Used to upload folder trees, including empty folders. |
 
@@ -132,6 +132,7 @@ New error codes (JSON error shape as above):
 | `read_only_volume` | 403 | The volume is read-only. |
 | `insufficient_storage` | 507 | `Upload-Length` is larger than the volume's free space less what its unfinished uploads still have to receive, or the disk filled up while writing. |
 | `too_many_uploads` | 429 | The user already has 1000 unfinished uploads (`MAX_PENDING_UPLOADS`). |
+| `upload_committed` | 409 | `DELETE` of an upload that was already committed; `details.final_path` is where the file is. The record is dropped all the same. |
 | `too_many_patches` | 429 | The user already has 8 `PATCH` requests in flight (`MAX_PATCHES_PER_USER`); retry later. |
 | `upload_not_found` | 404 | Unknown id, another user's upload, or an upload whose staged file is gone. |
 | `offset_mismatch` | 409 | `Upload-Offset` is not the server's offset; `details.offset` carries the right one. |
@@ -408,6 +409,9 @@ browser. The engine lives in `crates/web/src/uploads`:
   progress for 120 seconds is aborted and counts as a network error. An upload the server no
   longer knows (`upload_not_found`) is recreated from the start, once. When that offset is
   the full length, an empty `PATCH` confirms the commit before the item is marked done.
+- Cancelling aborts the request in flight and deletes the upload. If the last chunk had
+  already been committed (`upload_committed`), the item shows as done, not cancelled, and
+  the listing refreshes.
 - An `already_exists` answer opens a dialog: Replace, Keep both or Cancel, with an "apply to
   all" option for the rest of the batch. Folders that already exist are merged into, never a
   conflict.

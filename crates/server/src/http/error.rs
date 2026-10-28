@@ -167,6 +167,17 @@ impl ApiError {
         .with_details(json!({ "offset": offset }))
     }
 
+    /// A cancel that came after the upload was committed to `final_path`.
+    #[must_use]
+    pub fn upload_committed(final_path: &str) -> Self {
+        Self::new(
+            StatusCode::CONFLICT,
+            "upload_committed",
+            "The upload was already complete",
+        )
+        .with_details(json!({ "final_path": final_path }))
+    }
+
     #[must_use]
     pub fn upload_busy() -> Self {
         Self::new(

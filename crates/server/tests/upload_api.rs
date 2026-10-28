@@ -724,8 +724,10 @@ async fn delete_cancels_and_removes_staged_file() {
         patch(&mut s.client, &location, 0, b"b").await.status(),
         StatusCode::NO_CONTENT
     );
+    // Too late to cancel: the client must not report it as cancelled.
     let res = delete(&mut s.client, &location).await;
-    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    let body = error(res, StatusCode::CONFLICT, "upload_committed").await;
+    assert_eq!(body.details.unwrap()["final_path"], "b.txt");
     assert_eq!(fs::read(s.media().join("b.txt")).unwrap(), b"b");
     assert_eq!(
         head(&mut s.client, &location).await.status(),

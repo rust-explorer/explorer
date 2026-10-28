@@ -255,15 +255,17 @@ pub(super) async fn cancel(
         .delete(&record.id)
         .await
         .map_err(ApiError::internal)?;
-    if record.final_path.is_none() {
-        tracing::info!(
-            user = user.sub,
-            action = "upload",
-            volume = record.volume,
-            path = record.path.as_str(),
-            "upload cancelled"
-        );
+    // The cancel lost the race with the last chunk: the client must not report it cancelled.
+    if let Some(final_path) = &record.final_path {
+        return Err(ApiError::upload_committed(final_path.as_str()));
     }
+    tracing::info!(
+        user = user.sub,
+        action = "upload",
+        volume = record.volume,
+        path = record.path.as_str(),
+        "upload cancelled"
+    );
     Ok(StatusCode::NO_CONTENT)
 }
 

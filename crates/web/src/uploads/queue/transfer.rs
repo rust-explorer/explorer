@@ -137,7 +137,7 @@ impl Queue {
                     && code != UPLOAD_NOT_FOUND
                     && !resumable
                 {
-                    effects.push(Effect::Delete { url });
+                    effects.push(Effect::Delete { key: item.key, url });
                 }
                 self.finish(index, Status::Failed(failure), now_ms, effects);
             }

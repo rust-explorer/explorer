@@ -51,8 +51,21 @@ impl Queue {
             effects.push(Effect::Abort { key });
         }
         if let Some(url) = item.upload_url.clone() {
-            effects.push(Effect::Delete { url });
+            effects.push(Effect::Delete { key, url });
         }
         self.finish(index, Status::Cancelled, now_ms, effects);
+    }
+
+    /// The upload was complete on the server before the cancel reached it.
+    pub(super) fn cancel_too_late(&mut self, key: ItemKey, now_ms: i64, effects: &mut Vec<Effect>) {
+        let Some(index) = self
+            .index(key)
+            .filter(|&index| self.items[index].status == Status::Cancelled)
+        else {
+            return;
+        };
+        let item = &mut self.items[index];
+        item.sent = item.size();
+        self.finish(index, Status::Done, now_ms, effects);
     }
 }
