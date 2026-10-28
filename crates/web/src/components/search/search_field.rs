@@ -19,9 +19,10 @@ pub fn SearchField(volume: String) -> Element {
     let mut generation = use_signal(|| 0_u64);
     let mut input = use_signal(|| None::<Rc<MountedData>>);
 
-    // Navigation clears the query: the field follows, and a pending keystroke is dropped.
+    // Navigation clears the query: the field follows, and a pending keystroke is dropped. Spaces
+    // alone are no query and stay as typed.
     use_effect(move || {
-        if query.read().is_empty() && !text.peek().is_empty() {
+        if query.read().is_empty() && !text.peek().trim().is_empty() {
             generation.with_mut(|generation| *generation += 1);
             text.set(String::new());
         }
@@ -39,7 +40,10 @@ pub fn SearchField(volume: String) -> Element {
 
     let mut apply = move |value: &str| {
         generation.with_mut(|generation| *generation += 1);
-        query.set(value.trim().to_owned());
+        let value = value.trim();
+        if *query.peek() != value {
+            query.set(value.to_owned());
+        }
     };
     let mut clear = move || {
         text.set(String::new());
