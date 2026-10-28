@@ -44,6 +44,7 @@ impl TaskList {
                     finished_at_ms: None,
                     finished_before: false,
                     dismissed: false,
+                    deferred: false,
                     result_dropped: false,
                     cancel_failure: None,
                 });
@@ -82,6 +83,7 @@ impl TaskList {
                 finished_at_ms: None,
                 finished_before: finished_scan,
                 dismissed: finished_scan,
+                deferred: false,
                 result_dropped: false,
                 cancel_failure: None,
             });
@@ -97,7 +99,7 @@ impl TaskList {
         let Some(task) = self.task_mut(key).filter(|task| task.is_active()) else {
             return Vec::new();
         };
-        if task.conflict.is_some() {
+        if task.conflict.is_some() || task.deferred {
             self.tasks.retain(|task| task.key != key);
             self.forget_ended_batches();
             return Vec::new();

@@ -5,10 +5,10 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::Instant;
 
 use shared::api::error::ErrorBody;
-use shared::api::tasks::{TaskInfo, TaskSpec, TaskState};
+use shared::api::tasks::{MAX_ACTIVE_TASKS, TaskInfo, TaskSpec, TaskState};
 use tokio::sync::Semaphore;
 
-use super::{FINISHED_TTL, MAX_ACTIVE_PER_USER, MAX_RUNNING, MAX_USAGE_TREES};
+use super::{FINISHED_TTL, MAX_RUNNING, MAX_USAGE_TREES};
 use crate::storage::{TransferPlan, UsageTree};
 
 const ID_LEN: usize = 32;
@@ -280,7 +280,7 @@ impl Tasks {
     }
 
     /// Registers a queued task for `user`; `None` when they already have
-    /// [`MAX_ACTIVE_PER_USER`] tasks queued or running.
+    /// [`MAX_ACTIVE_TASKS`] tasks queued or running.
     pub(super) fn insert(&self, user: &str, spec: TaskSpec) -> Option<(String, TaskInfo)> {
         let mut entries = self.lock();
         let active = entries
@@ -288,7 +288,7 @@ impl Tasks {
             .values()
             .filter(|entry| entry.user == user && entry.state.is_active())
             .count();
-        if active >= MAX_ACTIVE_PER_USER {
+        if active >= MAX_ACTIVE_TASKS {
             return None;
         }
         let id = random_id();
@@ -404,7 +404,7 @@ mod tests {
     #[test]
     fn caps_the_active_tasks_of_a_user() {
         let tasks = Tasks::new();
-        let ids: Vec<String> = (0..MAX_ACTIVE_PER_USER)
+        let ids: Vec<String> = (0..MAX_ACTIVE_TASKS)
             .map(|_| tasks.insert("ada", spec("a")).unwrap().0)
             .collect();
         assert!(tasks.insert("ada", spec("a")).is_none());

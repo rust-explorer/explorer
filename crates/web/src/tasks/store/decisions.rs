@@ -1,6 +1,6 @@
 use shared::api::conflict::ConflictPolicy;
 
-use super::{Effect, Task, TaskKey, TaskList};
+use super::{Effect, TOO_MANY_TASKS, Task, TaskKey, TaskList};
 use crate::api::ApiFailure;
 use crate::conflict::Decision;
 use crate::tasks::conflict::{Conflict, policy_of, with_policy};
@@ -47,7 +47,8 @@ impl TaskList {
     }
 
     /// A copy or move refused because its destination exists waits for a decision, unless
-    /// its batch already has one; any other refusal fails the task.
+    /// its batch already has one; one refused for the task limit waits for room; any other
+    /// refusal fails the task.
     pub(super) fn refused(&mut self, key: TaskKey, failure: ApiFailure, effects: &mut Vec<Effect>) {
         let decision = self
             .tasks
@@ -57,6 +58,14 @@ impl TaskList {
         let Some(task) = self.task_mut(key) else {
             return;
         };
+        if matches!(&failure, ApiFailure::Server(body) if body.code == TOO_MANY_TASKS) {
+            if task.cancel_requested {
+                self.tasks.retain(|task| task.key != key);
+            } else {
+                task.deferred = true;
+            }
+            return;
+        }
         let conflict =
             Conflict::of(&failure).filter(|_| policy_of(&task.spec) == Some(ConflictPolicy::Fail));
         let Some(conflict) = conflict else {

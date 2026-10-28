@@ -16,8 +16,6 @@ pub use run::TaskError;
 
 /// How many tasks run at once across all users; the others wait, queued.
 pub const MAX_RUNNING: usize = 2;
-/// Queued and running tasks a user may have at once; more are refused.
-pub const MAX_ACTIVE_PER_USER: usize = 1000;
 /// A finished task stays listed this long unless dismissed.
 pub const FINISHED_TTL: Duration = Duration::from_secs(3600);
 /// Finished usage scans whose result a user keeps; older ones answer as expired.

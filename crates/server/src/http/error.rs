@@ -6,10 +6,10 @@ use axum::response::{IntoResponse, Response};
 use serde_json::json;
 use shared::api::error::ErrorBody;
 use shared::api::favorites::MAX_FAVORITES;
+use shared::api::tasks::MAX_ACTIVE_TASKS;
 
 use crate::http::request_id::request_id;
 use crate::storage::{InvalidPath, StorageError};
-use crate::tasks::MAX_ACTIVE_PER_USER;
 
 #[derive(Debug)]
 pub struct ApiError {
@@ -131,7 +131,7 @@ impl ApiError {
         Self::new(
             StatusCode::TOO_MANY_REQUESTS,
             "too_many_tasks",
-            format!("At most {MAX_ACTIVE_PER_USER} tasks can wait or run at once"),
+            format!("At most {MAX_ACTIVE_TASKS} tasks can wait or run at once"),
         )
     }
 

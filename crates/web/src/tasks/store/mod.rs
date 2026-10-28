@@ -13,6 +13,7 @@ use crate::tasks::conflict::Conflict;
 
 pub const POLL_EVERY_MS: u32 = 1000;
 const TASK_NOT_FOUND: &str = "task_not_found";
+const TOO_MANY_TASKS: &str = "too_many_tasks";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TaskKey(pub u64);
@@ -41,6 +42,8 @@ pub struct Task {
     finished_before: bool,
     /// Cleared from the activity panel, but still known for its result.
     dismissed: bool,
+    /// Refused for the user's task limit: posted again once others finish.
+    deferred: bool,
     /// A finished scan whose result the server no longer keeps.
     result_dropped: bool,
     /// Why the last cancel request failed.
@@ -206,7 +209,7 @@ fn changes_files(spec: &TaskSpec) -> bool {
 mod tests {
     use shared::api::conflict::ConflictPolicy;
     use shared::api::error::ErrorBody;
-    use shared::api::tasks::Location;
+    use shared::api::tasks::{Location, MAX_ACTIVE_TASKS};
 
     use super::*;
     use crate::tasks::conflict::ALREADY_EXISTS;
@@ -354,6 +357,51 @@ mod tests {
         assert_eq!(list.tasks()[0].failure(), Some(server("read_only_volume")));
         assert_eq!(list.clear_finished(), []);
         assert!(list.tasks().is_empty());
+    }
+
+    #[test]
+    fn tasks_over_the_limit_wait_for_room() {
+        let mut list = TaskList::default();
+        list.start(vec![delete("a"), delete("b"), delete("c"), delete("d")]);
+        list.handle(Event::Posted {
+            key: TaskKey(0),
+            info: Box::new(info("a", "a", TaskState::Running)),
+        });
+        for key in 1..4 {
+            let effects = list.handle(Event::PostFailed {
+                key: TaskKey(key),
+                failure: server("too_many_tasks"),
+            });
+            assert_eq!(effects, []);
+        }
+        assert_eq!(states(&list)[1..], [TaskState::Queued; 3]);
+        assert_eq!(list.cancel(TaskKey(3)), []);
+        assert_eq!(list.tasks().len(), 3);
+
+        let others = |count: usize| {
+            (0..count).map(|i| info(&format!("o{i}"), "o", TaskState::Queued))
+        };
+        let full: Vec<TaskInfo> = std::iter::once(info("a", "a", TaskState::Running))
+            .chain(others(MAX_ACTIVE_TASKS - 1))
+            .collect();
+        assert_eq!(list.handle(Event::Polled(full)), [POLL]);
+
+        let room: Vec<TaskInfo> = std::iter::once(info("a", "a", TaskState::Done))
+            .chain(others(MAX_ACTIVE_TASKS - 1))
+            .collect();
+        let effects = list.handle(Event::Polled(room));
+        assert_eq!(
+            effects,
+            [
+                Effect::Refresh,
+                Effect::Post {
+                    key: TaskKey(1),
+                    spec: delete("b")
+                },
+                POLL
+            ]
+        );
+        assert_eq!(list.tasks()[2].failure(), None);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use shared::api::error::ErrorBody;
-use shared::api::tasks::{Location, TaskInfo};
+use shared::api::tasks::{Location, MAX_ACTIVE_TASKS, TaskInfo};
 
 use super::{Effect, Event, POLL_EVERY_MS, TASK_NOT_FOUND, TaskList, changes_files};
 use crate::api::ApiFailure;
@@ -41,6 +41,7 @@ impl TaskList {
                 if self.update(&infos) {
                     effects.push(Effect::Refresh);
                 }
+                self.post_deferred(&infos, &mut effects);
             }
             Event::PollFailed(failure) => {
                 self.polling = false;
@@ -80,6 +81,26 @@ impl TaskList {
         finished
     }
 
+    /// Posts again the tasks refused for the limit, as many as the user's other tasks leave
+    /// room for, in the order they were started.
+    fn post_deferred(&mut self, infos: &[TaskInfo], effects: &mut Vec<Effect>) {
+        let active = infos.iter().filter(|info| info.state.is_active()).count();
+        let posting = self
+            .tasks
+            .iter()
+            .filter(|task| task.info.is_none() && task.is_active())
+            .filter(|task| task.conflict.is_none() && !task.deferred)
+            .count();
+        let room = MAX_ACTIVE_TASKS.saturating_sub(active + posting);
+        for task in self.tasks.iter_mut().filter(|task| task.deferred).take(room) {
+            task.deferred = false;
+            effects.push(Effect::Post {
+                key: task.key,
+                spec: task.spec.clone(),
+            });
+        }
+    }
+
     pub(super) fn keep_polling(&mut self, effects: &mut Vec<Effect>) {
         if self.polling {
             return;
@@ -90,7 +111,7 @@ impl TaskList {
             .filter(|task| task.is_active())
             .filter_map(|task| task.server_id().map(str::to_owned))
             .collect();
-        if !waiting.is_empty() {
+        if !waiting.is_empty() || self.tasks.iter().any(|task| task.deferred) {
             self.polling = true;
             self.polled = waiting;
             effects.push(Effect::PollAfter { ms: POLL_EVERY_MS });
