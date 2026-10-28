@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tokio::task::JoinHandle;
 
-use super::store::{UPLOAD_TTL, Uploads};
+use super::store::{UPLOAD_TTL, UploadRecord, Uploads};
 use crate::storage::{StagedId, Volumes};
 
 pub const SWEEP_INTERVAL: Duration = Duration::from_secs(3600);
@@ -31,30 +31,8 @@ pub async fn sweep(uploads: &Uploads, volumes: &Arc<Volumes>, now: SystemTime) -
     match uploads.expired(cutoff_ms).await {
         Ok(expired) => {
             for record in expired {
-                // A request working on it keeps it alive until its next `touch`.
-                let Some(_lock) = uploads.try_lock(&record.id) else {
-                    continue;
-                };
-                if record.final_path.is_none()
-                    && let Err(err) = remove_staged(volumes, &record.volume, &record.id).await
-                {
-                    tracing::warn!(error = %err, volume = %record.volume, "cannot remove abandoned upload");
-                    continue;
-                }
-                match uploads.delete(&record.id).await {
-                    Ok(()) => {
-                        report.uploads += 1;
-                        if record.final_path.is_none() {
-                            tracing::info!(
-                                user = record.user_sub,
-                                action = "sweep",
-                                volume = record.volume,
-                                path = record.path.as_str(),
-                                "abandoned upload removed"
-                            );
-                        }
-                    }
-                    Err(err) => tracing::warn!(error = %err, "cannot delete upload record"),
+                if remove_expired(uploads, volumes, &record, cutoff_ms).await {
+                    report.uploads += 1;
                 }
             }
         }
@@ -89,6 +67,48 @@ pub async fn sweep(uploads: &Uploads, volumes: &Arc<Volumes>, now: SystemTime) -
         );
     }
     report
+}
+
+/// Removes one upload of the expired list, unless a request holds it or touched it since the
+/// list was read. Returns whether it was removed.
+async fn remove_expired(
+    uploads: &Uploads,
+    volumes: &Arc<Volumes>,
+    record: &UploadRecord,
+    cutoff_ms: i64,
+) -> bool {
+    // A request working on it keeps it alive until its next `touch`.
+    let Some(_lock) = uploads.try_lock(&record.id) else {
+        return false;
+    };
+    match uploads.idle_since(&record.id, cutoff_ms).await {
+        Ok(true) => {}
+        Ok(false) => return false,
+        Err(err) => {
+            tracing::warn!(error = %err, "cannot look up upload record");
+            return false;
+        }
+    }
+    if record.final_path.is_none()
+        && let Err(err) = remove_staged(volumes, &record.volume, &record.id).await
+    {
+        tracing::warn!(error = %err, volume = %record.volume, "cannot remove abandoned upload");
+        return false;
+    }
+    if let Err(err) = uploads.delete(&record.id).await {
+        tracing::warn!(error = %err, "cannot delete upload record");
+        return false;
+    }
+    if record.final_path.is_none() {
+        tracing::info!(
+            user = record.user_sub,
+            action = "sweep",
+            volume = record.volume,
+            path = record.path.as_str(),
+            "abandoned upload removed"
+        );
+    }
+    true
 }
 
 /// A volume that is gone or has no staging directory has nothing to remove.
@@ -152,4 +172,53 @@ pub fn spawn_sweeper(uploads: Arc<Uploads>, volumes: Arc<Volumes>) -> JoinHandle
             sweep(&uploads, &volumes, SystemTime::now()).await;
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use shared::api::conflict::ConflictPolicy;
+
+    use super::*;
+    use crate::storage::RelPath;
+
+    #[tokio::test]
+    async fn an_upload_touched_after_the_listing_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let (config, data) = (dir.path().join("config"), dir.path().join("data"));
+        std::fs::create_dir(&config).unwrap();
+        std::fs::create_dir_all(data.join("media")).unwrap();
+        let uploads = Uploads::new(crate::db::open(&config).await.unwrap());
+        let volumes = Arc::new(Volumes::discover(&data).unwrap());
+        let record = UploadRecord {
+            id: StagedId::random(),
+            user_sub: "alice".to_owned(),
+            volume: "media".to_owned(),
+            path: RelPath::parse("Film.mkv").unwrap(),
+            length: 10,
+            modified_ms: None,
+            conflict: ConflictPolicy::Fail,
+            final_path: None,
+            created_at: 1,
+            updated_at: 1,
+        };
+        uploads.insert(&record).await.unwrap();
+        volumes
+            .get("media")
+            .unwrap()
+            .staging()
+            .unwrap()
+            .create(&record.id)
+            .unwrap();
+
+        let cutoff_ms = 1000;
+        let listed = uploads.expired(cutoff_ms).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        // A PATCH resumes it between the listing and the sweep's lock.
+        uploads.touch(&record.id, 2000).await.unwrap();
+
+        assert!(!remove_expired(&uploads, &volumes, &listed[0], cutoff_ms).await);
+        assert!(uploads.get(&record.id, "alice").await.unwrap().is_some());
+        let staging = volumes.get("media").unwrap().existing_staging().unwrap();
+        assert_eq!(staging.unwrap().len(&record.id).unwrap(), Some(0));
+    }
 }

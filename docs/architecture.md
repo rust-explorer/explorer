@@ -179,7 +179,8 @@ How an upload is stored:
    filesystem than the volume. Mount such a folder as its own volume.
 
 Abandoned uploads: a record not touched for 24 hours is deleted with its staged file, and
-so is a staged file older than that without a record. The sweep runs at startup and then
+so is a staged file older than that without a record. The sweep checks each record again
+once it holds the upload's lock, so an upload resumed meanwhile is kept. The sweep runs at startup and then
 every hour; it logs each abandoned upload it removes at `info` (`action` = `sweep`), then
 a summary of what it removed.
 

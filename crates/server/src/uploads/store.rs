@@ -225,6 +225,18 @@ impl Uploads {
         .collect()
     }
 
+    /// Whether the upload still exists and was last touched before `before_ms`.
+    pub(super) async fn idle_since(&self, id: &StagedId, before_ms: i64) -> sqlx::Result<bool> {
+        Ok(
+            sqlx::query("SELECT 1 FROM uploads WHERE id = ? AND updated_at < ?")
+                .bind(id.as_str())
+                .bind(before_ms)
+                .fetch_optional(&self.pool)
+                .await?
+                .is_some(),
+        )
+    }
+
     pub(super) async fn exists(&self, id: &StagedId) -> sqlx::Result<bool> {
         Ok(sqlx::query("SELECT 1 FROM uploads WHERE id = ?")
             .bind(id.as_str())
