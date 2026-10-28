@@ -17,6 +17,10 @@ pub enum StorageError {
     IsADirectory(RelPath),
     #[error("permission denied: {}", .0.as_str())]
     PermissionDenied(RelPath),
+    #[error("already exists: {}", .0.as_str())]
+    AlreadyExists(RelPath),
+    #[error("no space left for {}", .0.as_str())]
+    NoSpace(RelPath),
     #[error("outside the volume: {}", .0.as_str())]
     OutsideVolume(RelPath),
     #[error("i/o error on {}: {source}", .path.as_str())]
@@ -29,11 +33,15 @@ impl StorageError {
         if is_escape(&err) {
             return Self::OutsideVolume(path);
         }
+        if is_no_space(&err) {
+            return Self::NoSpace(path);
+        }
         match err.kind() {
             io::ErrorKind::NotFound => Self::NotFound(path),
             io::ErrorKind::PermissionDenied => Self::PermissionDenied(path),
             io::ErrorKind::NotADirectory => Self::NotADirectory(path),
             io::ErrorKind::IsADirectory => Self::IsADirectory(path),
+            io::ErrorKind::AlreadyExists => Self::AlreadyExists(path),
             _ => Self::Io { path, source: err },
         }
     }
@@ -46,6 +54,13 @@ pub(super) fn is_escape(err: &io::Error) -> bool {
         || err
             .get_ref()
             .is_some_and(|inner| inner.to_string() == ESCAPE_MESSAGE)
+}
+
+fn is_no_space(err: &io::Error) -> bool {
+    err.kind() == io::ErrorKind::StorageFull
+        || [Errno::NOSPC, Errno::DQUOT]
+            .iter()
+            .any(|errno| err.raw_os_error() == Some(errno.raw_os_error()))
 }
 
 #[cfg(test)]
@@ -75,6 +90,10 @@ mod tests {
             StorageError::IsADirectory(_)
         ));
         assert!(matches!(
+            map(io::Error::from_raw_os_error(Errno::EXIST.raw_os_error())),
+            StorageError::AlreadyExists(_)
+        ));
+        assert!(matches!(
             map(io::Error::from_raw_os_error(Errno::IO.raw_os_error())),
             StorageError::Io { .. }
         ));
@@ -96,6 +115,20 @@ mod tests {
         assert!(matches!(
             map(io::Error::new(io::ErrorKind::PermissionDenied, "other")),
             StorageError::PermissionDenied(_)
+        ));
+    }
+
+    #[test]
+    fn maps_no_space() {
+        for errno in [Errno::NOSPC, Errno::DQUOT] {
+            assert!(matches!(
+                map(io::Error::from_raw_os_error(errno.raw_os_error())),
+                StorageError::NoSpace(_)
+            ));
+        }
+        assert!(matches!(
+            map(io::Error::from(io::ErrorKind::StorageFull)),
+            StorageError::NoSpace(_)
         ));
     }
 }

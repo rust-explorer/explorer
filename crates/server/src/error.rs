@@ -106,6 +106,21 @@ impl ApiError {
                 "Permission denied on ",
                 path,
             ),
+            StorageError::AlreadyExists(path) => (
+                StatusCode::CONFLICT,
+                "already_exists",
+                "Already exists: ",
+                path,
+            ),
+            StorageError::NoSpace(path) => {
+                tracing::warn!(volume, path = path.as_str(), "not enough space");
+                return Self::new(
+                    StatusCode::INSUFFICIENT_STORAGE,
+                    "insufficient_storage",
+                    format!("Not enough space on {volume}"),
+                )
+                .with_details(json!({ "volume": volume, "path": path.as_str() }));
+            }
             StorageError::OutsideVolume(path) => {
                 tracing::warn!(
                     volume,
