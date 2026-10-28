@@ -2,6 +2,7 @@ mod common;
 
 use std::fs;
 use std::io::Cursor;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 
 use axum::body::Body;
@@ -203,7 +204,6 @@ async fn unreadable_source_is_permission_denied() {
     if rustix::process::geteuid().is_root() {
         return;
     }
-    use std::os::unix::fs::PermissionsExt as _;
     let mut s = setup().await;
     s.write_photo(&png(64, 64));
     let photo = s.data.join("Photos/a.png");
