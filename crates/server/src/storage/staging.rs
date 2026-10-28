@@ -5,6 +5,7 @@ use std::time::SystemTime;
 
 use cap_std::fs::{Dir, OpenOptions, OpenOptionsExt};
 use rustix::fs::OFlags;
+use rustix::io::Errno;
 
 use super::{RelPath, StorageError};
 
@@ -62,7 +63,7 @@ impl Staging {
     }
 
     pub fn open_append(&self, id: &StagedId) -> Result<(std::fs::File, u64), StorageError> {
-        let mut file = self.open_staged(id).map_err(map_err)?;
+        let mut file = self.open_staged(id, &RelPath::root())?;
         let len = file.seek(SeekFrom::End(0)).map_err(map_err)?;
         Ok((file, len))
     }
@@ -103,17 +104,34 @@ impl Staging {
 
     /// Opens a staged file for writing; anything but a regular file with a single link is
     /// refused, so data never lands in a file reachable from elsewhere.
-    pub(super) fn open_staged(&self, id: &StagedId) -> io::Result<std::fs::File> {
+    /// I/O errors are reported against `path`.
+    pub(super) fn open_staged(
+        &self,
+        id: &StagedId,
+        path: &RelPath,
+    ) -> Result<std::fs::File, StorageError> {
         let mut options = OpenOptions::new();
         options
             .write(true)
             .custom_flags(OFlags::NOFOLLOW.bits().cast_signed());
-        let file = self.dir.open_with(id.as_str(), &options)?.into_std();
-        let meta = file.metadata()?;
+        // A symlink fails with ELOOP, or as an escape when it points outside the folder.
+        let file = match self.dir.open_with(id.as_str(), &options) {
+            Ok(file) => file.into_std(),
+            Err(err) if err.raw_os_error() == Some(Errno::LOOP.raw_os_error()) => {
+                return Err(StorageError::InvalidUpload);
+            }
+            Err(err) => {
+                return Err(match StorageError::from_io(path, err) {
+                    StorageError::OutsideVolume(_) => StorageError::InvalidUpload,
+                    other => other,
+                });
+            }
+        };
+        let meta = file
+            .metadata()
+            .map_err(|err| StorageError::from_io(path, err))?;
         if !meta.is_file() || meta.nlink() != 1 {
-            return Err(io::Error::other(
-                "staged upload is not a regular file with a single link",
-            ));
+            return Err(StorageError::InvalidUpload);
         }
         Ok(file)
     }

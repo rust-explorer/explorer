@@ -216,7 +216,7 @@ impl Volume {
 
         let dest = parent.join(name)?;
         let staged_err = |err| StorageError::from_io(&dest, err);
-        let file = staging.open_staged(id).map_err(staged_err)?;
+        let file = staging.open_staged(id, &dest)?;
         if let Some(modified) = modified {
             file.set_modified(modified).map_err(staged_err)?;
         }

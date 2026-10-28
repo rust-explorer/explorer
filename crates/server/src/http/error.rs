@@ -278,6 +278,12 @@ impl ApiError {
             }
             // The caller picks the source volume for it, see [`ApiError::from_transfer`].
             StorageError::Source(inner) => return Self::map_storage(volume, *inner, log),
+            StorageError::InvalidUpload => {
+                if log {
+                    tracing::warn!(volume, "staged upload is not a regular file with a single link");
+                }
+                return Self::invalid_upload("The staged upload can't be used");
+            }
             StorageError::Cancelled => {
                 return Self::internal("a cancellation reported as an error");
             }
@@ -406,6 +412,13 @@ mod tests {
             err.details,
             Some(json!({ "volume": "media", "path": "Mounted/a.txt" }))
         );
+    }
+
+    #[test]
+    fn odd_staged_upload_is_a_client_error() {
+        let err = ApiError::from_storage("media", StorageError::InvalidUpload);
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+        assert_eq!(err.code, "invalid_upload");
     }
 
     #[test]

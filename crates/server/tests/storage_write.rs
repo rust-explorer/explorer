@@ -261,9 +261,15 @@ fn commit_refuses_a_linked_staged_file() {
 
     for (id, dest) in [(&hard, "a.txt"), (&symbolic, "b.txt")] {
         let result = media.commit_staged(&staging, id, &rel(dest), ConflictPolicy::Replace, None);
-        assert!(result.is_err(), "{dest}: {result:?}");
+        assert!(
+            matches!(result, Err(StorageError::InvalidUpload)),
+            "{dest}: {result:?}"
+        );
         assert!(!fixture.media_path().join(dest).exists(), "{dest}");
-        assert!(staging.open_append(id).is_err(), "{dest}");
+        assert!(
+            matches!(staging.open_append(id), Err(StorageError::InvalidUpload)),
+            "{dest}"
+        );
     }
     assert_eq!(
         fs::read(fixture.media_path().join("target.txt")).unwrap(),
