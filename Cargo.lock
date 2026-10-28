@@ -1549,6 +1549,7 @@ dependencies = [
  "tower-sessions-sqlx-store",
  "tracing",
  "tracing-subscriber",
+ "unicode-normalization",
  "url",
  "zip",
 ]

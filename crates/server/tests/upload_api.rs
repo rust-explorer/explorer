@@ -1118,7 +1118,15 @@ async fn staging_is_unreachable_through_a_symlink_to_the_root() {
     let names: Vec<String> = (0..archive.len())
         .map(|i| archive.by_index(i).unwrap().name().unwrap().into_owned())
         .collect();
-    assert_eq!(names, ["a.txt"]);
+    // The symlink to the root inside it is listed as skipped, not followed.
+    assert_eq!(names, ["a.txt", "explorer-skipped.txt"]);
+    let mut list = String::new();
+    std::io::Read::read_to_string(
+        &mut archive.by_name("explorer-skipped.txt").unwrap(),
+        &mut list,
+    )
+    .unwrap();
+    assert!(!list.contains(".explorer-uploads"), "{list}");
 
     assert_eq!(staged_count(&s), 1);
     assert_eq!(fs::read(s.staging().join(id.as_str())).unwrap(), b"ab");

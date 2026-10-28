@@ -1,15 +1,17 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
+use dioxus_i18n::t;
 use shared::api::browse::{Entry, EntryKind};
+use shared::api::downloads::ZipSelectionCreated;
 use shared::api::tasks::Location;
 
 use super::file_row::download_href;
 use super::row_menu::{MenuRequest, RowMenu};
-use super::selection_bar::selection_href;
+use super::selection_bar::{SelectionDownload, selection_download};
 use crate::actions::RowAction;
-use crate::api;
-use crate::components::common::FocusTarget;
+use crate::api::{self, ApiFailure};
+use crate::components::common::{FailureNote, FocusTarget};
 use crate::components::{DeleteDialog, RenameDialog, TransferDialog, TransferMode};
 use crate::routes::{Segment, Segments};
 use crate::selection::Selection;
@@ -66,6 +68,7 @@ pub struct EntryActions {
     deleting: Signal<Option<Deleting>>,
     transferring: Signal<Option<Transferring>>,
     focus_menu_of: Signal<Option<FocusRequest>>,
+    download_failed: Signal<Option<ApiFailure>>,
 }
 
 pub fn use_entry_actions() -> EntryActions {
@@ -75,6 +78,7 @@ pub fn use_entry_actions() -> EntryActions {
         deleting: use_signal(|| None),
         transferring: use_signal(|| None),
         focus_menu_of: use_signal(|| None),
+        download_failed: use_signal(|| None),
     }
 }
 
@@ -120,8 +124,22 @@ impl EntryActions {
                     .iter()
                     .map(|(name, kind)| (name.as_str(), *kind))
                     .collect();
-                if let Some(href) = selection_href(volume, dir, &chosen) {
-                    api::download(&href);
+                match selection_download(volume, dir, &chosen) {
+                    Some(SelectionDownload::Href(href)) => api::download(&href),
+                    Some(SelectionDownload::Zip(selection)) => {
+                        self.download_failed.set(None);
+                        let mut failed = self.download_failed;
+                        spawn(async move {
+                            let stored: Result<ZipSelectionCreated, _> =
+                                api::post_json_body(api::ZIP_SELECTIONS_URL, &selection).await;
+                            match stored {
+                                Ok(created) => api::download(&api::zip_selection_url(&created.id)),
+                                Err(failure) if failure.is_unauthenticated() => {}
+                                Err(failure) => failed.set(Some(failure)),
+                            }
+                        });
+                    }
+                    None => {}
                 }
             }
             RowAction::Delete => self.deleting.set(Some(Deleting {
@@ -213,6 +231,7 @@ pub fn EntryActionsLayer(
         mut deleting,
         mut transferring,
         mut focus_menu_of,
+        mut download_failed,
     } = actions;
     let (dialog_volume, dialog_parent) = (volume.as_str().to_owned(), path.joined());
     let transfer_parent = path.clone();
@@ -276,6 +295,24 @@ pub fn EntryActionsLayer(
     };
 
     rsx! {
+        if let Some(failure) = download_failed() {
+            div {
+                role: "alert",
+                class: "fixed inset-x-4 bottom-4 z-40 flex items-start gap-3 rounded-md border border-red-200 bg-white p-3 shadow-lg sm:left-auto sm:w-96 dark:border-red-900 dark:bg-slate-900",
+                div { class: "min-w-0 flex-1",
+                    p { class: "text-sm font-medium text-slate-900 dark:text-white",
+                        {t!("selection-download-failed")}
+                    }
+                    FailureNote { failure }
+                }
+                button {
+                    r#type: "button",
+                    class: "rounded-md px-2 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-indigo-600 dark:text-slate-200 dark:hover:bg-slate-800",
+                    onclick: move |_| download_failed.set(None),
+                    {t!("selection-download-dismiss")}
+                }
+            }
+        }
         if let Some(request) = menu() {
             RowMenu {
                 request,

@@ -11,6 +11,7 @@ use axum::http::Request;
 use explorer_server::auth::oidc::Oidc;
 use explorer_server::config::Config;
 use explorer_server::db;
+use explorer_server::downloads::Downloads;
 use explorer_server::favorites::Favorites;
 use explorer_server::http::{AppState, router};
 use explorer_server::storage::Volumes;
@@ -68,6 +69,7 @@ pub async fn state_with_volumes(web_dir: &Path, volumes: &[&str]) -> (AppState, 
         volumes: Arc::new(volumes),
         tasks: Arc::new(Tasks::new()),
         thumbnails: Arc::new(Thumbnails::new(web_dir.join(thumbnails::CACHE_DIR)).unwrap()),
+        downloads: Arc::new(Downloads::new()),
     };
     (state, fake)
 }

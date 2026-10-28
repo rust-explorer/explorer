@@ -81,6 +81,8 @@ error-too_many_patches = Trop d'uploads sont envoyés en même temps depuis vos 
 error-upload_committed = Cet upload était déjà terminé, il n'a pas pu être annulé.
 error-changed_during_move = { $path } a été modifié pendant le déplacement : il a été conservé à son ancien emplacement en plus de sa copie au nouvel emplacement.
 error-too_many_entries = { $path } contient trop de fichiers et de dossiers pour être copié ou déplacé d’un coup (un million au plus). Copiez ou déplacez ses sous-dossiers un par un.
+error-too_many_zips = Trop de zips sont en cours de téléchargement. Réessayez dans un instant.
+error-selection_expired = Ce téléchargement a expiré. Sélectionnez de nouveau les éléments et téléchargez-les.
 upload = Uploader
 upload-open = Uploader des fichiers ou un dossier
 upload-files = Fichiers…
@@ -139,6 +141,8 @@ selection-count =
        *[other] { $count } sélectionnés
     }
 selection-clear = Désélectionner
+selection-download-failed = Le téléchargement n'a pas pu démarrer.
+selection-download-dismiss = Fermer
 rename-title = Renommer { $name }
 rename-name = Nouveau nom
 rename-save = Enregistrer

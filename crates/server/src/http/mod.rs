@@ -25,7 +25,7 @@ use crate::auth::oidc::Oidc;
 use crate::auth::{self, csrf, session};
 use crate::browse;
 use crate::config::Config;
-use crate::downloads;
+use crate::downloads::{self, Downloads};
 use crate::favorites::{self, Favorites};
 use crate::search;
 use crate::storage::Volumes;
@@ -43,6 +43,7 @@ pub struct AppState {
     pub tasks: Arc<Tasks>,
     pub favorites: Arc<Favorites>,
     pub thumbnails: Arc<Thumbnails>,
+    pub downloads: Arc<Downloads>,
 }
 
 pub async fn router(state: AppState) -> Result<Router, sqlx::Error> {

@@ -10,6 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use axum::http::{StatusCode, header};
 use axum::response::Response;
 use common::client::{Client, json};
+use explorer_server::downloads::{SKIPPED_LIST, ZIP_CONCURRENCY};
 use explorer_server::http::router;
 use http_body_util::BodyExt;
 use shared::api::error::ErrorBody;
@@ -23,7 +24,7 @@ struct Setup {
     client: Client,
     data: PathBuf,
     dir: TempDir,
-    _fake: common::fake_oidc::FakeOidc,
+    fake: common::fake_oidc::FakeOidc,
 }
 
 async fn setup() -> Setup {
@@ -36,7 +37,7 @@ async fn setup() -> Setup {
         client,
         data,
         dir,
-        _fake: fake,
+        fake,
     }
 }
 
@@ -163,10 +164,18 @@ async fn escaping_symlink_is_not_followed() {
     let body = res.into_body().collect().await.unwrap().to_bytes().to_vec();
     assert!(!body.windows(16).any(|w| w == b"top-secret-bytes"));
     let mut archive = ZipArchive::new(Cursor::new(body)).unwrap();
-    assert_eq!(
-        entries(&mut archive).into_keys().collect::<Vec<_>>(),
-        ["a.txt"]
+    let entries = entries(&mut archive);
+    assert_eq!(entries.keys().collect::<Vec<_>>(), ["a.txt", SKIPPED_LIST]);
+    let list = String::from_utf8(entries[SKIPPED_LIST].clone().unwrap()).unwrap();
+    assert!(
+        list.contains("escape.txt: symbolic link that is broken"),
+        "{list}"
     );
+    assert!(
+        list.contains("escape-dir: symbolic link that is broken"),
+        "{list}"
+    );
+    assert!(!list.contains("secret"), "{list}");
 }
 
 #[tokio::test]
@@ -182,30 +191,9 @@ async fn missing_folder_is_json_error_before_streaming() {
     );
 }
 
+/// The zip goes on without what it cannot read, and lists it.
 #[tokio::test]
-async fn unreadable_subfolder_is_permission_denied() {
-    use std::os::unix::fs::PermissionsExt;
-
-    if rustix::process::geteuid().is_root() {
-        return;
-    }
-    let mut s = setup().await;
-    let locked = s.data.join("media/Docs/locked");
-    fs::create_dir_all(&locked).unwrap();
-    fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
-    let res = s.client.get("/files/zip?volume=media&path=Docs").await;
-    fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
-    let body = error_of(res, StatusCode::FORBIDDEN).await;
-    assert_eq!(body.code, "permission_denied");
-    assert!(
-        body.message.contains("media/Docs/locked"),
-        "{}",
-        body.message
-    );
-}
-
-#[tokio::test]
-async fn unreadable_file_mid_stream_fails_the_body() {
+async fn unreadable_entries_are_listed_not_fatal() {
     use std::os::unix::fs::PermissionsExt;
 
     if rustix::process::geteuid().is_root() {
@@ -213,13 +201,96 @@ async fn unreadable_file_mid_stream_fails_the_body() {
     }
     let mut s = setup().await;
     let docs = s.data.join("media/Docs");
-    fs::create_dir(&docs).unwrap();
+    fs::create_dir_all(docs.join("locked")).unwrap();
     write_file(&docs.join("a.txt"), b"alpha");
     write_file(&docs.join("b.txt"), b"beta");
     fs::set_permissions(docs.join("b.txt"), fs::Permissions::from_mode(0o000)).unwrap();
+    fs::set_permissions(docs.join("locked"), fs::Permissions::from_mode(0o000)).unwrap();
     let res = s.client.get("/files/zip?volume=media&path=Docs").await;
-    assert_eq!(res.status(), StatusCode::OK);
-    assert!(res.into_body().collect().await.is_err());
+    let mut archive = archive_of(res).await;
+    let locked = s
+        .client
+        .get("/files/zip?volume=media&path=Docs/locked")
+        .await;
+    fs::set_permissions(docs.join("locked"), fs::Permissions::from_mode(0o755)).unwrap();
+
+    let entries = entries(&mut archive);
+    assert_eq!(entries.keys().collect::<Vec<_>>(), ["a.txt", SKIPPED_LIST]);
+    let list = String::from_utf8(entries[SKIPPED_LIST].clone().unwrap()).unwrap();
+    assert!(list.contains("b.txt: cannot be read"), "{list}");
+    assert!(list.contains("locked: cannot be read"), "{list}");
+
+    let body = error_of(locked, StatusCode::FORBIDDEN).await;
+    assert_eq!(body.code, "permission_denied");
+}
+
+/// Names that are no valid path for the API are archived all the same, made safe.
+#[tokio::test]
+async fn odd_names_are_archived_under_safe_names() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let mut s = setup().await;
+    let docs = s.data.join("media/Docs");
+    fs::create_dir(&docs).unwrap();
+    write_file(&docs.join("line\nbreak.txt"), b"one");
+    write_file(&docs.join("line_break.txt"), b"two");
+    write_file(&docs.join("tab\there"), b"three");
+    // APFS refuses names that are not UTF-8; ext4 takes them.
+    let latin1 = docs.join(std::ffi::OsStr::from_bytes(b"caf\xe9.txt"));
+    let has_latin1 = fs::write(&latin1, b"four").is_ok();
+
+    let res = s.client.get("/files/zip?volume=media&path=Docs").await;
+    let mut archive = archive_of(res).await;
+    let entries = entries(&mut archive);
+    let mut expected = BTreeMap::from([
+        ("line_break (2).txt".to_owned(), Some(b"two".to_vec())),
+        ("line_break.txt".to_owned(), Some(b"one".to_vec())),
+        ("tab_here".to_owned(), Some(b"three".to_vec())),
+    ]);
+    if has_latin1 {
+        expected.insert("caf\u{fffd}.txt".to_owned(), Some(b"four".to_vec()));
+    }
+    assert_eq!(entries, expected);
+}
+
+/// Past 4096 bytes of path, which no API path can name, the zip still goes down.
+#[tokio::test]
+async fn deep_paths_are_archived() {
+    use rustix::fs::{Mode, OFlags};
+
+    let mut s = setup().await;
+    let component = "d".repeat(250);
+    let mut fd = rustix::fs::open(
+        s.data.join("media"),
+        OFlags::RDONLY | OFlags::DIRECTORY,
+        Mode::empty(),
+    )
+    .unwrap();
+    for _ in 0..70 {
+        rustix::fs::mkdirat(&fd, component.as_str(), Mode::from_raw_mode(0o755)).unwrap();
+        fd = rustix::fs::openat(
+            &fd,
+            component.as_str(),
+            OFlags::RDONLY | OFlags::DIRECTORY,
+            Mode::empty(),
+        )
+        .unwrap();
+    }
+    let file = rustix::fs::openat(
+        &fd,
+        "deep.txt",
+        OFlags::WRONLY | OFlags::CREATE,
+        Mode::from_raw_mode(0o644),
+    )
+    .unwrap();
+    rustix::io::write(&file, b"down here").unwrap();
+
+    let res = s.client.get("/files/zip?volume=media&path=").await;
+    let mut archive = archive_of(res).await;
+    let entries = entries(&mut archive);
+    let deep = format!("{}deep.txt", format!("{component}/").repeat(70));
+    assert_eq!(entries.len(), 71);
+    assert_eq!(entries[&deep], Some(b"down here".to_vec()));
 }
 
 #[tokio::test]
@@ -502,4 +573,130 @@ async fn cross_site_requests_are_refused() {
         }
         assert_eq!(s.client.send(request(&[])).await.status(), StatusCode::OK);
     }
+}
+
+/// A zip holds a slot while it streams; once all are taken the next one is refused, and a
+/// client that leaves gives its slot back.
+#[tokio::test]
+async fn zips_are_limited_and_free_their_slot_when_dropped() {
+    let mut s = setup().await;
+    write_file(&s.data.join("media/big.bin"), &vec![7u8; 4 * 1024 * 1024]);
+    let mut open = Vec::new();
+    for _ in 0..ZIP_CONCURRENCY {
+        let res = s.client.get("/files/zip?volume=media&path=").await;
+        assert_eq!(res.status(), StatusCode::OK);
+        open.push(res);
+    }
+    let res = s.client.get("/files/zip?volume=media&path=").await;
+    let body = error_of(res, StatusCode::TOO_MANY_REQUESTS).await;
+    assert_eq!(body.code, "too_many_zips");
+
+    drop(open.pop());
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let res = s.client.get("/files/zip?volume=media&path=").await;
+        if res.status() == StatusCode::OK {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the slot never came back"
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+const ORIGIN: &str = "https://files.example.com";
+
+async fn create_selection(client: &mut Client, body: serde_json::Value) -> Response {
+    let req = axum::http::Request::post("/files/zip/selections")
+        .header(header::ORIGIN, ORIGIN)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(axum::body::Body::from(body.to_string()))
+        .unwrap();
+    client.send(req).await
+}
+
+/// More names than a URL can carry go in a body first; the zip is then a short GET.
+#[tokio::test]
+async fn zip_of_a_stored_selection() {
+    let mut s = setup().await;
+    let docs = s.data.join("media/Docs");
+    fs::create_dir(&docs).unwrap();
+    let names: Vec<String> = (0..5000).map(|i| format!("IMG_2024_{i:05}.jpg")).collect();
+    for name in &names {
+        write_file(&docs.join(name), b"x");
+    }
+    write_file(&docs.join("unselected.txt"), b"no");
+
+    let res = create_selection(
+        &mut s.client,
+        serde_json::json!({ "volume": "media", "path": "Docs", "names": names }),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let created: shared::api::downloads::ZipSelectionCreated = json(res).await;
+    let uri = format!("/files/zip?selection={}", created.id);
+    let res = s.client.get(&uri).await;
+    assert!(header_of(&res, header::CONTENT_DISPOSITION).contains("filename=\"Docs.zip\""));
+    let mut archive = archive_of(res).await;
+    let zipped = entries(&mut archive);
+    assert_eq!(zipped.len(), names.len());
+    assert!(!zipped.contains_key("unselected.txt"));
+
+    let res = s.client.get("/files/zip?selection=0123").await;
+    assert_eq!(
+        error_of(res, StatusCode::NOT_FOUND).await.code,
+        "selection_expired"
+    );
+}
+
+#[tokio::test]
+async fn stored_selections_are_checked_and_private() {
+    let mut s = setup().await;
+    write_file(&s.data.join("media/a.txt"), b"alpha");
+    for (body, code) in [
+        (
+            serde_json::json!({ "volume": "media", "path": "", "names": [] }),
+            "invalid_path",
+        ),
+        (
+            serde_json::json!({ "volume": "media", "path": "", "names": ["a/b"] }),
+            "invalid_path",
+        ),
+        (
+            serde_json::json!({ "volume": "media", "path": "../x", "names": ["a"] }),
+            "invalid_path",
+        ),
+        (
+            serde_json::json!({ "volume": "nope", "path": "", "names": ["a"] }),
+            "volume_not_found",
+        ),
+    ] {
+        let res = create_selection(&mut s.client, body.clone()).await;
+        assert!(res.status().is_client_error(), "{body}");
+        assert_eq!(json::<ErrorBody>(res).await.code, code, "{body}");
+    }
+
+    let res = create_selection(
+        &mut s.client,
+        serde_json::json!({ "volume": "media", "path": "", "names": ["a.txt"] }),
+    )
+    .await;
+    let created: shared::api::downloads::ZipSelectionCreated = json(res).await;
+    s.fake.claims(serde_json::json!({ "sub": "other-user" }));
+    let app = s.client.app.clone();
+    let mut other = Client::signed_in(app, &s.fake).await;
+    let res = other
+        .get(&format!("/files/zip?selection={}", created.id))
+        .await;
+    assert_eq!(
+        error_of(res, StatusCode::NOT_FOUND).await.code,
+        "selection_expired"
+    );
+    let res = s
+        .client
+        .get(&format!("/files/zip?selection={}", created.id))
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
 }

@@ -167,6 +167,16 @@ impl Volume {
 
     /// Like [`Volume::walk`], with the number of entries it skipped.
     pub fn walk_counting(&self, dir: &RelPath) -> Result<(Vec<WalkItem>, u64), StorageError> {
+        self.walk_counting_while(dir, &|| true)
+    }
+
+    /// Like [`Volume::walk_counting`], failing with `Cancelled` as soon as `go_on` answers
+    /// `false`; it is asked before each entry.
+    pub fn walk_counting_while(
+        &self,
+        dir: &RelPath,
+        go_on: &dyn Fn() -> bool,
+    ) -> Result<(Vec<WalkItem>, u64), StorageError> {
         self.refuse_reserved(dir)?;
         let start = self.metadata(dir)?;
         if !start.is_dir() {
@@ -174,7 +184,7 @@ impl Volume {
         }
         let mut pending = Vec::new();
         let mut skipped = 0;
-        self.push_children(dir, &mut pending, &mut skipped)?;
+        self.push_children(dir, &mut pending, &mut skipped, go_on)?;
         let mut items = Vec::new();
         while let Some((path, meta)) = pending.pop() {
             if meta.kind == EntryKind::File {
@@ -184,29 +194,11 @@ impl Volume {
                     modified: meta.modified,
                 });
             } else {
-                self.push_children(&path, &mut pending, &mut skipped)?;
+                self.push_children(&path, &mut pending, &mut skipped, go_on)?;
                 items.push(WalkItem::Dir(path));
             }
         }
         Ok((items, skipped))
-    }
-
-    /// What zipping the named entry `path` includes: a file alone, a folder and its walk.
-    pub fn walk_entry(&self, path: &RelPath) -> Result<Vec<WalkItem>, StorageError> {
-        let meta = self.stat(path)?;
-        match meta.kind {
-            EntryKind::File => Ok(vec![WalkItem::File {
-                path: path.clone(),
-                size: meta.size.unwrap_or(0),
-                modified: meta.modified,
-            }]),
-            EntryKind::Dir => {
-                let mut items = vec![WalkItem::Dir(path.clone())];
-                items.extend(self.walk(path)?);
-                Ok(items)
-            }
-            EntryKind::Other => Err(StorageError::NotFound(path.clone())),
-        }
     }
 
     pub fn space(&self) -> io::Result<Space> {
@@ -350,8 +342,9 @@ impl Volume {
         dir: &RelPath,
         pending: &mut Vec<(RelPath, EntryMeta)>,
         skipped: &mut u64,
+        go_on: &dyn Fn() -> bool,
     ) -> Result<(), StorageError> {
-        for entry in self.entries(dir)?.into_iter().rev() {
+        for entry in self.entries_while(dir, go_on)?.into_iter().rev() {
             match entry.path {
                 Some(path)
                     if entry.meta.kind == EntryKind::File

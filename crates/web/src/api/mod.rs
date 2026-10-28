@@ -6,8 +6,9 @@ use shared::api::error::ErrorBody;
 mod urls;
 
 pub use urls::{
-    FAVORITES_URL, download_url, encode_component, entries_url, favorite_url, folders_url,
-    rename_url, search_url, thumbnail_url, upload_url, usage_url, zip_selection_url, zip_url,
+    FAVORITES_URL, ZIP_SELECTIONS_URL, download_url, encode_component, entries_url, favorite_url,
+    folders_url, rename_url, search_url, thumbnail_url, upload_url, usage_url, zip_selection_url,
+    zip_url,
 };
 #[cfg_attr(not(target_arch = "wasm32"), allow(unused_imports))]
 pub use urls::{TASKS_URL, task_url};

@@ -1,4 +1,6 @@
+use std::fs::File;
 use std::sync::Arc;
+use std::time::SystemTime;
 
 use axum::body::Body;
 use axum::extract::rejection::QueryRejection;
@@ -13,7 +15,7 @@ use crate::auth::{Action, CurrentUser};
 use crate::http::AppState;
 use crate::http::access::{VolumeQuery, authorize, blocking_volume, invalid_query};
 use crate::http::error::ApiError;
-use crate::storage::StorageError;
+use crate::storage::{EntryKind, RelPath, StorageError, Volumes};
 
 const CACHE_CONTROL: &str = "private, max-age=604800";
 
@@ -32,21 +34,24 @@ pub async fn thumbnail(
         return Err(ApiError::thumbnail_unavailable());
     }
 
-    let (file, meta) = blocking_volume(&state.volumes, &volume, {
+    // Only a stat: the source is opened once a render permit is granted, so requests queued
+    // behind the permits hold no descriptor.
+    let meta = blocking_volume(&state.volumes, &volume, {
         let path = path.clone();
-        move |vol| vol.open_file(&path)
+        move |vol| vol.stat(&path)
     })
     .await?
     .map_err(|err| match err {
-        StorageError::NotFound(_) | StorageError::IsADirectory(_) => {
-            ApiError::thumbnail_unavailable()
-        }
+        StorageError::NotFound(_) => ApiError::thumbnail_unavailable(),
         // A folder of unreadable images would log one warning per tile.
         err => {
             tracing::debug!(volume, path = path.as_str(), error = %err, "thumbnail source unreadable");
             ApiError::from_logged_storage(&volume, err)
         }
     })?;
+    if meta.kind != EntryKind::File {
+        return Err(ApiError::thumbnail_unavailable());
+    }
     let size = meta.size.unwrap_or_default();
     if size > MAX_SOURCE_BYTES {
         return Err(ApiError::thumbnail_unavailable());
@@ -77,9 +82,18 @@ pub async fn thumbnail(
         thumbnail
     } else {
         let thumbnails = Arc::clone(&state.thumbnails);
-        bounded(&state.thumbnails, move || generate(&thumbnails, &key, file))
-            .await?
-            .ok_or_else(ApiError::thumbnail_unavailable)?
+        let source = Source {
+            volumes: Arc::clone(&state.volumes),
+            volume: volume.clone(),
+            path: path.clone(),
+            size,
+            modified: meta.modified,
+        };
+        bounded(&state.thumbnails, move || {
+            generate(&thumbnails, &key, &source)
+        })
+        .await?
+        .ok_or_else(ApiError::thumbnail_unavailable)?
     };
     tracing::debug!(
         user = user.sub,
@@ -142,13 +156,39 @@ async fn bounded<T: Send + 'static>(
     .map_err(ApiError::internal)
 }
 
+/// The file a thumbnail is asked for, as it was when its cache key was made.
+struct Source {
+    volumes: Arc<Volumes>,
+    volume: String,
+    path: RelPath,
+    size: u64,
+    modified: Option<SystemTime>,
+}
+
+impl Source {
+    /// `None` if the file is gone or changed since the key was made.
+    fn open(&self) -> Option<File> {
+        let opened = self.volumes.get(&self.volume)?.open_file(&self.path);
+        match opened {
+            Ok((file, meta)) if meta.size == Some(self.size) && meta.modified == self.modified => {
+                Some(file)
+            }
+            Ok(_) => None,
+            Err(err) => {
+                tracing::debug!(volume = self.volume, path = self.path.as_str(), error = %err, "thumbnail source unreadable");
+                None
+            }
+        }
+    }
+}
+
 /// Renders and caches the thumbnail, unless a concurrent request already did. `None` when the
-/// file can't be decoded.
-fn generate(thumbnails: &Thumbnails, key: &str, file: std::fs::File) -> Option<Thumbnail> {
+/// file changed or can't be decoded.
+fn generate(thumbnails: &Thumbnails, key: &str, source: &Source) -> Option<Thumbnail> {
     if let Ok(Some(thumbnail)) = thumbnails.cached(key) {
         return Some(thumbnail);
     }
-    let thumbnail = match render(file) {
+    let thumbnail = match render(source.open()?) {
         Ok(thumbnail) => thumbnail,
         Err(err) => {
             tracing::debug!(error = %err, "no thumbnail");

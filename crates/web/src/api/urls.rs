@@ -46,13 +46,12 @@ pub fn zip_url(volume: &str, path: &str) -> String {
     files_url("zip", volume, path)
 }
 
-pub fn zip_selection_url(volume: &str, dir: &str, names: &[&str]) -> String {
-    let mut url = files_url("zip", volume, dir);
-    for name in names {
-        url.push_str("&name=");
-        url.push_str(&encode_component(name));
-    }
-    url
+/// Where a selection of entries is stored before it is zipped: names don't fit in a URL.
+pub const ZIP_SELECTIONS_URL: &str = "/files/zip/selections";
+
+/// The zip of a stored selection.
+pub fn zip_selection_url(id: &str) -> String {
+    format!("/files/zip?selection={}", encode_component(id))
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -130,10 +129,7 @@ mod tests {
             download_url("a&b", "c&d=1"),
             "/files/download?volume=a%26b&path=c%26d%3D1"
         );
-        assert_eq!(
-            zip_selection_url("media", "Films/é", &["a b", "c&d"]),
-            "/files/zip?volume=media&path=Films%2F%C3%A9&name=a%20b&name=c%26d"
-        );
+        assert_eq!(zip_selection_url("0a&b"), "/files/zip?selection=0a%26b");
         assert_eq!(
             search_url("my media", "a b&c é"),
             "/api/volumes/my%20media/search?q=a%20b%26c%20%C3%A9"
