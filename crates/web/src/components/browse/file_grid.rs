@@ -121,7 +121,6 @@ pub fn FileGrid(
             } else {
                 VirtualList {
                     role: "list",
-                    aria_label: t!("table-label"),
                     class: "min-h-0 flex-1 overflow-y-auto px-3 pt-3 [scrollbar-gutter:stable]",
                     total: total.div_ceil(columns),
                     row_height,
