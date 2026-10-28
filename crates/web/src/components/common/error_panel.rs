@@ -3,6 +3,7 @@ use dioxus_i18n::{t, te};
 use shared::api::error::ErrorBody;
 
 use crate::api::ApiFailure;
+use crate::favorites::MAX_FAVORITES;
 use crate::routes::{Route, Segments};
 
 const BUTTON_CLASS: &str =
@@ -27,6 +28,9 @@ pub fn error_message(failure: &ApiFailure) -> String {
     match failure {
         ApiFailure::Network => t!("load-failed"),
         ApiFailure::Http(_) => t!("error-unknown"),
+        ApiFailure::Server(body) if body.code == "favorites_full" => {
+            t!("error-favorites_full", max: MAX_FAVORITES)
+        }
         ApiFailure::Server(body) => te!(&format!("error-{}", body.code), path: detail_path(body))
             .ok()
             .or_else(|| (!body.message.is_empty()).then(|| body.message.clone()))
