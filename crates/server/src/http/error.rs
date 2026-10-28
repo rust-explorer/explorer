@@ -280,7 +280,10 @@ impl ApiError {
             StorageError::Source(inner) => return Self::map_storage(volume, *inner, log),
             StorageError::InvalidUpload => {
                 if log {
-                    tracing::warn!(volume, "staged upload is not a regular file with a single link");
+                    tracing::warn!(
+                        volume,
+                        "staged upload is not a regular file with a single link"
+                    );
                 }
                 return Self::invalid_upload("The staged upload can't be used");
             }
