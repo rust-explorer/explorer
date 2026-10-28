@@ -27,7 +27,8 @@ impl Volume {
 
     /// The parent folder of `path`, opened through symlinks and checked, with the last
     /// component and its metadata; `None` for the root, or when the last component is a
-    /// symlink or missing, which the caller resolves from the root.
+    /// symlink, which the caller resolves from the root. A missing last component is not
+    /// found: resolved again from the root, the path could lead elsewhere by then.
     pub(super) fn in_checked_parent<'a>(
         &self,
         path: &'a RelPath,
@@ -41,8 +42,9 @@ impl Volume {
             .map_err(|err| StorageError::from_io(&parent, err))?;
         self.refuse_staging_in(&dir, name, path)?;
         match dir.symlink_metadata(name) {
-            Ok(meta) if !meta.is_symlink() => Ok(Some((dir, name, meta))),
-            _ => Ok(None),
+            Ok(meta) if meta.is_symlink() => Ok(None),
+            Ok(meta) => Ok(Some((dir, name, meta))),
+            Err(err) => Err(StorageError::from_io(path, err)),
         }
     }
 

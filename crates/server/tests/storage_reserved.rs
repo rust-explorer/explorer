@@ -58,7 +58,7 @@ fn a_case_variant_of_the_staging_name_is_reserved() {
 /// Flips `R` between a plain folder and a symlink to the volume root while `probe` runs, and
 /// fails if `probe` ever reaches the staging area.
 fn race(media: &Path, probe: impl Fn() -> bool + Sync) {
-    fs::create_dir(media.join("plain")).unwrap();
+    fs::create_dir_all(media.join("plain")).unwrap();
     symlink(".", media.join("link")).unwrap();
     let stop = AtomicBool::new(false);
     let leaked = std::thread::scope(|scope| {
@@ -114,4 +114,28 @@ fn a_racing_rename_never_reaches_the_staging_area() {
     });
     assert!(media.join(STAGING_DIR).join(id.as_str()).is_file());
     assert!(!media.join(STAGING_DIR).join("made").exists());
+}
+
+/// A plain folder may hold its own `.explorer-uploads`, which has no `<id>`: missing there, the
+/// path must not be looked up again from the root once `R` leads to it.
+#[test]
+fn a_missing_name_is_not_resolved_again_after_a_racing_rename() {
+    let data = tempfile::tempdir().unwrap();
+    let media = data.path().join("media");
+    fs::create_dir_all(media.join("plain").join(STAGING_DIR)).unwrap();
+    let volumes = Volumes::discover(data.path()).unwrap();
+    let volume = volumes.get("media").unwrap();
+    let id = StagedId::random();
+    volume
+        .staging()
+        .unwrap()
+        .create(&id)
+        .unwrap()
+        .write_all(b"secret partial upload")
+        .unwrap();
+    let staged = rel(&format!("R/{STAGING_DIR}/{}", id.as_str()));
+
+    race(&media, || {
+        volume.stat(&staged).is_ok() || volume.open_file(&staged).is_ok()
+    });
 }
