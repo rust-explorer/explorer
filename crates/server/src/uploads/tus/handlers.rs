@@ -61,6 +61,7 @@ pub(super) async fn create(
         length,
         modified_ms,
         conflict,
+        fingerprint,
         ..
     } = creation;
 
@@ -94,6 +95,7 @@ pub(super) async fn create(
         length,
         modified_ms,
         conflict,
+        fingerprint,
         final_path: None,
         created_at: now,
         updated_at: now,

@@ -139,7 +139,8 @@ Names that are not valid UTF-8 are skipped with a warning.
   no-replace semantics for `fail` and `keep_both`, so a file created while the upload was
   running is never replaced; only an explicit `replace` overwrites, and never a folder.
   The client's `modified` time is applied to the final file; nothing else from the client's
-  metadata is trusted.
+  metadata is trusted. The `fingerprint` is only stored and returned to its owner, who uses it
+  to avoid resuming an upload with another file's data.
 - **Limits.** A user has at most 1000 unfinished uploads; more are refused with 429
   `too_many_uploads` until some finish, are cancelled or are swept. The declared
   `Upload-Length` is checked at creation against the volume's free space less the bytes

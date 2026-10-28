@@ -197,6 +197,7 @@ mod tests {
             length: 10,
             modified_ms: None,
             conflict: ConflictPolicy::Fail,
+            fingerprint: None,
             final_path: None,
             created_at: 1,
             updated_at: 1,

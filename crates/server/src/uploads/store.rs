@@ -20,14 +20,16 @@ pub struct UploadRecord {
     pub length: u64,
     pub modified_ms: Option<i64>,
     pub conflict: ConflictPolicy,
+    /// The client's [`shared::tus::fingerprint`] of the file.
+    pub fingerprint: Option<String>,
     /// Set once the upload is committed.
     pub final_path: Option<RelPath>,
     pub created_at: i64,
     pub updated_at: i64,
 }
 
-const COLUMNS: &str = "id, user_sub, volume, path, length, modified_ms, conflict, final_path, \
-                       created_at, updated_at";
+const COLUMNS: &str = "id, user_sub, volume, path, length, modified_ms, conflict, fingerprint, \
+                       final_path, created_at, updated_at";
 
 /// Locked uploads, each with whether a cancel arrived while it was held.
 type Locks = Arc<Mutex<HashMap<StagedId, bool>>>;
@@ -108,6 +110,7 @@ fn record(row: &SqliteRow) -> sqlx::Result<UploadRecord> {
         length: u64::try_from(length).map_err(|_| corrupt("length"))?,
         modified_ms: row.try_get("modified_ms")?,
         conflict: ConflictPolicy::parse(&conflict).ok_or_else(|| corrupt("conflict"))?,
+        fingerprint: row.try_get("fingerprint")?,
         final_path: final_path
             .map(|p| RelPath::parse(&p).map_err(|_| corrupt("final_path")))
             .transpose()?,
@@ -130,7 +133,7 @@ impl Uploads {
     pub async fn insert(&self, record: &UploadRecord) -> sqlx::Result<()> {
         let length = i64::try_from(record.length).map_err(|_| corrupt("length"))?;
         sqlx::query(&format!(
-            "INSERT INTO uploads ({COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO uploads ({COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         ))
         .bind(record.id.as_str())
         .bind(&record.user_sub)
@@ -139,6 +142,7 @@ impl Uploads {
         .bind(length)
         .bind(record.modified_ms)
         .bind(record.conflict.as_str())
+        .bind(record.fingerprint.as_deref())
         .bind(record.final_path.as_ref().map(RelPath::as_str))
         .bind(record.created_at)
         .bind(record.updated_at)

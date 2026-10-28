@@ -310,6 +310,11 @@ async fn creation_requires_length_and_metadata() {
             ("path", "a.txt"),
             ("conflict", "merge"),
         ]),
+        encode_metadata(&[
+            ("volume", "media"),
+            ("path", "a.txt"),
+            ("fingerprint", "not hex"),
+        ]),
     ] {
         let req = tus(Method::POST, "/files/uploads")
             .header("upload-length", "3")
@@ -742,7 +747,11 @@ async fn pending_list_shows_unfinished_uploads_only() {
         &mut s.client,
         "Album/partial.jpg",
         10,
-        &[("modified", "1700000000000")],
+        &[
+            ("modified", "1700000000000"),
+            ("conflict", "replace"),
+            ("fingerprint", "0123456789abcdef"),
+        ],
     )
     .await;
     assert_eq!(
@@ -768,6 +777,8 @@ async fn pending_list_shows_unfinished_uploads_only() {
             length: 10,
             offset: 3,
             modified_ms: Some(1_700_000_000_000),
+            conflict: ConflictPolicy::Replace,
+            fingerprint: Some("0123456789abcdef".to_owned()),
         }]
     );
 
@@ -1126,6 +1137,7 @@ async fn unfinished_uploads_are_capped_per_user() {
             length: 10,
             modified_ms: None,
             conflict: ConflictPolicy::Fail,
+            fingerprint: None,
             final_path: None,
             created_at: 1,
             updated_at: 1,

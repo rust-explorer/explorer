@@ -120,6 +120,7 @@ mod browser {
     use super::Uploads;
     use crate::api::{self, ApiFailure};
     use crate::format::now_ms;
+    use crate::uploads::queue::may_resume;
     use crate::uploads::transport::{self, Patch};
     use crate::uploads::{
         BatchPlan, Effect, Event, ItemKey, Kind, PickedFile, Queue, plan_batch, retry_delay_ms,
@@ -181,6 +182,12 @@ mod browser {
                 let picked = picked.into_iter().map(|(_, picked)| picked).collect();
                 let mut plan = plan_batch(&volume, &base, picked, empty_dirs);
                 plan.unreadable = unreadable;
+                // Only files that may resume a pending upload are read now; the others when created.
+                for (spec, file) in plan.files.iter_mut().zip(&kept) {
+                    if pending.iter().any(|upload| may_resume(upload, spec)) {
+                        spec.fingerprint = transport::fingerprint(file).await;
+                    }
+                }
                 uploads.add(plan, &pending, kept);
             });
         }
@@ -210,12 +217,20 @@ mod browser {
                     }),
                     Effect::Create {
                         key,
-                        spec,
+                        mut spec,
                         conflict,
-                    } => self.request(key, async move {
-                        let url = transport::create(&spec, conflict).await?;
-                        Ok(Event::Created { key, url })
-                    }),
+                    } => {
+                        let file = self.files.read().get(&key).cloned();
+                        self.request(key, async move {
+                            if spec.fingerprint.is_none()
+                                && let Some(file) = &file
+                            {
+                                spec.fingerprint = transport::fingerprint(file).await;
+                            }
+                            let url = transport::create(&spec, conflict).await?;
+                            Ok(Event::Created { key, url })
+                        });
+                    }
                     Effect::Head { key, url } => self.request(key, async move {
                         let offset = transport::head(&url).await?;
                         Ok(Event::HeadDone { key, offset })

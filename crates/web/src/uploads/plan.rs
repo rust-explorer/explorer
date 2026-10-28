@@ -26,6 +26,8 @@ pub struct FileSpec {
     pub path: String,
     pub size: u64,
     pub modified_ms: Option<i64>,
+    /// The file's [`shared::tus::fingerprint`], once read.
+    pub fingerprint: Option<String>,
 }
 
 /// Destinations for files and empty folders dropped into `base` of `volume`.
@@ -44,6 +46,7 @@ pub fn plan_batch(
                 path: join(base, &relative),
                 size: file.size,
                 modified_ms: file.modified_ms,
+                fingerprint: None,
             }),
             None => skipped += 1,
         }
@@ -132,6 +135,7 @@ mod tests {
                 path: "Films/Album/a.jpg".into(),
                 size: 1,
                 modified_ms: Some(5),
+                fingerprint: None,
             }
         );
 

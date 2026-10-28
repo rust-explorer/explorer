@@ -109,11 +109,11 @@ reload or a laptop going to sleep. The server never holds a whole file in memory
 | Route | Purpose |
 |---|---|
 | `OPTIONS /files/uploads` | Discovery: `Tus-Version` and `Tus-Extension: creation,termination`. |
-| `POST /files/uploads` | Creates an upload. `Upload-Length` is required (no deferred length, no body). `Upload-Metadata` carries `volume` and `path` (the destination file path, including the file name), and optionally `modified` (the file's `lastModified`, integer milliseconds) and `conflict` (`fail`, the default, `replace` or `keep_both`); values are base64, unknown keys are ignored. Answers 201 with `Location: /files/uploads/{id}` and `Upload-Offset: 0`. |
+| `POST /files/uploads` | Creates an upload. `Upload-Length` is required (no deferred length, no body). `Upload-Metadata` carries `volume` and `path` (the destination file path, including the file name), and optionally `modified` (the file's `lastModified`, integer milliseconds) `conflict` (`fail`, the default, `replace` or `keep_both`) and `fingerprint` (16 lowercase hex digits, see below); values are base64, unknown keys are ignored. Answers 201 with `Location: /files/uploads/{id}` and `Upload-Offset: 0`. |
 | `HEAD /files/uploads/{id}` | The current `Upload-Offset` and `Upload-Length`, with `Cache-Control: no-store`. |
 | `PATCH /files/uploads/{id}` | Appends the body at `Upload-Offset` (`Content-Type: application/offset+octet-stream`). Answers 204 with the new offset. |
 | `DELETE /files/uploads/{id}` | Cancels the upload and removes its staged data. Answers 204, or 409 `upload_committed` when the upload was already complete (the file stays in place). |
-| `GET /api/uploads` | The signed-in user's unfinished uploads (`id`, `volume`, `path`, `length`, `offset`, `modified_ms`), so a reloaded page can resume them. |
+| `GET /api/uploads` | The signed-in user's unfinished uploads (`id`, `volume`, `path`, `length`, `offset`, `modified_ms`, `conflict`, `fingerprint`), so a reloaded page can resume them. |
 | `POST /api/volumes/{volume}/folders` | Body `{"path": "..."}`. Creates a folder and its missing parents; an existing folder is fine. Answers 204. Used to upload folder trees, including empty folders. |
 
 `Tus-Resumable: 1.0.0` is required on every request under `/files/uploads` except
@@ -152,7 +152,7 @@ How an upload is stored:
    is a file, an existing file with `conflict=fail`, a folder with `replace`) and the free
    space less the bytes the volume's unfinished uploads still owe, creates the staged file and
    inserts a record in the `uploads` table of `explorer.db` (id, owner `sub`, volume, path,
-   length, `modified`, conflict policy, timestamps).
+   length, `modified`, conflict policy, fingerprint, timestamps).
 2. Data is written to `.explorer-uploads/<id>` at the root of the volume. The directory is
    created on first upload with mode `0700`, the file with `0666` less the umask, both owned
    by the container user; the final file keeps that mode, like any file the container
@@ -402,7 +402,11 @@ browser. The engine lives in `crates/web/src/uploads`:
 - A file is cut into 16 MiB chunks, each sent as one `PATCH`; at most 3 files upload at
   once. Before creating an upload, the client resumes a pending one (from `GET /api/uploads`)
   whose volume, path, size and modification time all match, so reloading and picking the
-  same file again continues from the server's offset.
+  same file again continues from the server's offset. It resumes only an upload created with
+  the `fail` policy, so that a new batch still asks before overwriting, and only when the
+  fingerprints match: a 64-bit FNV-1a hash of the file's first and last 64 KiB
+  (`shared::tus::fingerprint`), sent at creation. A different file with the same name, size
+  and date is uploaded anew rather than appended to the first one's data.
 - After a transient failure (network error, a 5xx answer that is not an API error, such as a
   proxy's 502, `internal`, `upload_busy`, `offset_mismatch`, `too_many_patches`) the item asks the server for its offset and retries after
   `min(1 s x 2^(attempt-1), 30 s)`, until the user cancels. A `PATCH` that reports no

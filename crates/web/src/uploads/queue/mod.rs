@@ -10,7 +10,7 @@ use shared::api::conflict::ConflictPolicy;
 use shared::api::uploads::PendingUpload;
 
 use super::MAX_PARALLEL;
-use super::plan::BatchPlan;
+use super::plan::{BatchPlan, FileSpec};
 use crate::api;
 use crate::conflict::Decision;
 
@@ -46,10 +46,9 @@ impl Queue {
         });
         let files = plan.files.into_iter().map(|spec| {
             let resumed = pending.iter().find(|upload| {
-                upload.volume == spec.volume
-                    && upload.path == spec.path
-                    && upload.length == spec.size
-                    && upload.modified_ms == spec.modified_ms
+                may_resume(upload, &spec)
+                    && upload.fingerprint.is_some()
+                    && upload.fingerprint == spec.fingerprint
             });
             let url = resumed.map(|upload| api::upload_url(&upload.id));
             let sent = resumed.map_or(0, |upload| upload.offset);
@@ -238,6 +237,16 @@ impl Queue {
     }
 }
 
+/// Whether `upload` may continue `spec` if their fingerprints match: the same destination, size
+/// and date, and the policy a new item starts with, so that the user is still asked on a conflict.
+pub fn may_resume(upload: &PendingUpload, spec: &FileSpec) -> bool {
+    upload.volume == spec.volume
+        && upload.path == spec.path
+        && upload.length == spec.size
+        && upload.modified_ms == spec.modified_ms
+        && upload.conflict == ConflictPolicy::Fail
+}
+
 #[cfg(test)]
 mod tests {
     use shared::api::error::ErrorBody;
@@ -245,9 +254,9 @@ mod tests {
     use super::*;
     use crate::api::ApiFailure;
     use crate::uploads::CHUNK_SIZE;
-    use crate::uploads::plan::FileSpec;
 
     const MIB: u64 = 1024 * 1024;
+    const FINGERPRINT: &str = "0123456789abcdef";
 
     fn spec(path: &str, size: u64) -> FileSpec {
         FileSpec {
@@ -255,6 +264,7 @@ mod tests {
             path: path.into(),
             size,
             modified_ms: Some(1000),
+            fingerprint: Some(FINGERPRINT.into()),
         }
     }
 
@@ -515,6 +525,8 @@ mod tests {
             length: 40 * MIB,
             offset: 16 * MIB,
             modified_ms,
+            conflict: ConflictPolicy::Fail,
+            fingerprint: Some(FINGERPRINT.into()),
         }
     }
 
@@ -566,6 +578,42 @@ mod tests {
         );
         assert_eq!(effects, [create(&queue, 0, ConflictPolicy::Fail)]);
         assert_eq!(queue.items()[0].upload_url, None);
+    }
+
+    #[test]
+    fn upload_started_with_another_policy_is_not_resumed() {
+        let mut queue = Queue::default();
+        let replace = PendingUpload {
+            conflict: ConflictPolicy::Replace,
+            ..pending(Some(1000))
+        };
+        let effects = queue.add(plan(vec![spec("a.bin", 40 * MIB)]), &[replace], 0);
+        assert_eq!(effects, [create(&queue, 0, ConflictPolicy::Fail)]);
+        assert_eq!(queue.items()[0].upload_url, None);
+    }
+
+    #[test]
+    fn other_content_is_not_resumed() {
+        let other = PendingUpload {
+            fingerprint: Some("fedcba9876543210".into()),
+            ..pending(Some(1000))
+        };
+        let unknown = PendingUpload {
+            fingerprint: None,
+            ..pending(Some(1000))
+        };
+        for upload in [other, unknown] {
+            let mut queue = Queue::default();
+            let effects = queue.add(plan(vec![spec("a.bin", 40 * MIB)]), &[upload], 0);
+            assert_eq!(effects, [create(&queue, 0, ConflictPolicy::Fail)]);
+        }
+        let mut queue = Queue::default();
+        let unread = FileSpec {
+            fingerprint: None,
+            ..spec("a.bin", 40 * MIB)
+        };
+        let effects = queue.add(plan(vec![unread]), &[pending(Some(1000))], 0);
+        assert_eq!(effects, [create(&queue, 0, ConflictPolicy::Fail)]);
     }
 
     #[test]
