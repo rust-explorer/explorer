@@ -1,5 +1,6 @@
 use std::rc::Rc;
 
+use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
 use dioxus_i18n::t;
 use shared::api::browse::{Entry, EntryKind, Rename, Renamed};
@@ -56,10 +57,18 @@ pub fn RenameDialog(
         let url = url.clone();
         busy.set(true);
         problem.set(None);
-        spawn(async move {
-            match api::post_json_body::<_, Renamed>(&url, &body).await {
+        // Runs to its end even if the dialog closes meanwhile, then refreshes the listing.
+        spawn_forever(async move {
+            let result = api::post_json_body::<_, Renamed>(&url, &body).await;
+            let closed = busy.try_peek().is_err();
+            if result.is_ok() || closed {
+                *revision.write() += 1;
+            }
+            if closed {
+                return;
+            }
+            match result {
                 Ok(renamed) => {
-                    *revision.write() += 1;
                     on_close.call(());
                     on_renamed.call(final_name(&renamed.path).to_owned());
                 }
@@ -102,13 +111,8 @@ pub fn RenameDialog(
     });
 
     // A request can hang (a stalled network or mount): closing stays possible, and the listing
-    // is refreshed since the request's outcome is then unknown.
-    let mut close = move |()| {
-        if busy() {
-            *revision.write() += 1;
-        }
-        on_close.call(());
-    };
+    // is refreshed once the request ends.
+    let close = move |()| on_close.call(());
 
     rsx! {
         Modal { labelled_by: TITLE_ID, on_close: close, return_focus,
