@@ -10,7 +10,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use axum::http::{StatusCode, header};
 use axum::response::Response;
 use common::client::{Client, json};
-use explorer_server::downloads::{SKIPPED_LIST, ZIP_CONCURRENCY};
+use explorer_server::downloads::{SKIPPED_LIST, ZIP_CONCURRENCY, ZIP_CONCURRENCY_PER_USER};
 use explorer_server::http::router;
 use http_body_util::BodyExt;
 use shared::api::error::ErrorBody;
@@ -575,14 +575,14 @@ async fn cross_site_requests_are_refused() {
     }
 }
 
-/// A zip holds a slot while it streams; once all are taken the next one is refused, and a
-/// client that leaves gives its slot back.
+/// A zip holds a slot while it streams; once all are taken, or the user's, the next one is
+/// refused, and a client that leaves gives its slot back.
 #[tokio::test]
 async fn zips_are_limited_and_free_their_slot_when_dropped() {
     let mut s = setup().await;
     write_file(&s.data.join("media/big.bin"), &vec![7u8; 4 * 1024 * 1024]);
     let mut open = Vec::new();
-    for _ in 0..ZIP_CONCURRENCY {
+    for _ in 0..ZIP_CONCURRENCY_PER_USER {
         let res = s.client.get("/files/zip?volume=media&path=").await;
         assert_eq!(res.status(), StatusCode::OK);
         open.push(res);
@@ -591,10 +591,26 @@ async fn zips_are_limited_and_free_their_slot_when_dropped() {
     let body = error_of(res, StatusCode::TOO_MANY_REQUESTS).await;
     assert_eq!(body.code, "too_many_zips");
 
+    let mut user = 0;
+    while open.len() < ZIP_CONCURRENCY {
+        user += 1;
+        s.fake
+            .claims(serde_json::json!({ "sub": format!("user{user}") }));
+        let mut other = Client::signed_in(s.client.app.clone(), &s.fake).await;
+        let res = other.get("/files/zip?volume=media&path=").await;
+        assert_eq!(res.status(), StatusCode::OK);
+        open.push(res);
+    }
+    s.fake.claims(serde_json::json!({ "sub": "late" }));
+    let mut late = Client::signed_in(s.client.app.clone(), &s.fake).await;
+    let res = late.get("/files/zip?volume=media&path=").await;
+    let body = error_of(res, StatusCode::TOO_MANY_REQUESTS).await;
+    assert_eq!(body.code, "too_many_zips");
+
     drop(open.pop());
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
-        let res = s.client.get("/files/zip?volume=media&path=").await;
+        let res = late.get("/files/zip?volume=media&path=").await;
         if res.status() == StatusCode::OK {
             break;
         }

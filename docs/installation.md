@@ -249,8 +249,8 @@ network can be resumed by the browser, as files support `Range` requests.
 If a download is cut at a fixed time or size, check the reverse proxy's timeouts and
 buffering limits. A zip download is also aborted when the client stops reading for 60
 seconds. `/files/zip` requires the `path` parameter; an empty `path` downloads the whole
-volume. At most 4 zips stream at once across all users; a fifth gets `too_many_zips` until
-one ends.
+volume. At most 4 zips stream at once across all users, and 2 per user; one more gets
+`too_many_zips` until one ends, which the browser shows as a failed download.
 
 ## Updating
 

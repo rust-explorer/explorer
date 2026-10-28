@@ -88,7 +88,7 @@ All of them require a signed-in user. Failures use the JSON error shape with the
 | `is_a_directory` | 400 | A download of a folder; use `/files/zip`. |
 | `permission_denied` | 403 | The container user cannot read it. |
 | `outside_volume` | 403 | The path resolves outside the volume (symlink escape). |
-| `too_many_zips` | 429 | 4 zips are already streaming on the server; try again when one ends. |
+| `too_many_zips` | 429 | 4 zips are already streaming on the server, or 2 for this user; try again when one ends. The web app starts zips with `<a download>`, which cannot read this answer: the browser shows a failed download (often "server problem") and the app shows nothing. |
 | `selection_expired` | 404 | No stored selection with this id for this user: it expired, was replaced by newer ones, or never existed. |
 | `range_not_satisfiable` | 416 | The requested range cannot be satisfied (it starts past the end of the file, the file is empty, or the range is `bytes=-0`). |
 
@@ -100,8 +100,11 @@ there is no size limit and no temporary file. The folder is checked and listed b
 first byte is sent, so a missing or unreadable folder is a normal JSON error; the rest of
 the tree is walked while the archive streams, one folder listing per level in memory, so the
 first bytes leave at once and memory does not grow with the tree. At most 4 zips stream at
-once across all users (`too_many_zips` beyond); a zip stops, and frees its slot, as soon as
-the client goes away.
+once across all users, and 2 per user so that one user cannot take every slot
+(`too_many_zips` beyond); a zip stops, and frees its slot, as soon as the client goes away
+or stops reading for 60 seconds. The web app hands the zip URL to the browser as a
+download, so it never sees a refusal: the browser lists the download as failed. Checking for
+a free slot first would not help, since it could be taken before the download starts.
 
 Nothing is left out silently. Entries are reached by their names on disk, so a name that is
 not UTF-8, holds a control character or lies under a path longer than 4096 bytes is

@@ -10,7 +10,9 @@ use axum::routing::{get, post};
 use crate::http::AppState;
 
 pub use file::{attachment_headers, content_disposition};
-pub use state::{Downloads, MAX_SELECTIONS_PER_USER, SELECTION_TTL, ZIP_CONCURRENCY};
+pub use state::{
+    Downloads, MAX_SELECTIONS_PER_USER, SELECTION_TTL, ZIP_CONCURRENCY, ZIP_CONCURRENCY_PER_USER,
+};
 pub use zip::SKIPPED_LIST;
 
 pub fn routes() -> Router<AppState> {

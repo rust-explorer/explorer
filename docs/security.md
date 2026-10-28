@@ -284,7 +284,8 @@ action reach outside its volume.
   is still the one that was listed (device and inode). Symlinks to files are resolved from
   the volume root and confined like any path; symlinks to folders are not followed. Folders
   more than 64 levels down don't keep a descriptor open while they are walked. At most 4
-  zips stream at once; each stops when its client goes away.
+  zips stream at once, 2 per user, so one signed-in user cannot hold every slot; each stops
+  when its client goes away or stops reading for 60 seconds.
 - **Logs.** A new folder, rename, delete and finished copy or move are logged at `info`
   with the user's `sub`, `action`, `volume`, `path` (and `dest_volume` and `final_path`);
   failures, refused ones included, once at `warn` with the same fields and the error. A

@@ -81,7 +81,8 @@ pub async fn zip(
 }
 
 /// Checks the request, then streams the archive while it walks the tree. Each zip holds one
-/// of [`super::ZIP_CONCURRENCY`] slots until it ends, and stops when the client goes away.
+/// of [`super::ZIP_CONCURRENCY`] slots, and of the user's [`super::ZIP_CONCURRENCY_PER_USER`],
+/// until it ends, and stops when the client goes away or stops reading.
 async fn stream_zip(
     state: AppState,
     user: CurrentUser,
@@ -100,7 +101,7 @@ async fn stream_zip(
         .collect::<Result<Vec<_>, _>>()?;
     let permit = state
         .downloads
-        .try_zip()
+        .try_zip(&user.sub)
         .ok_or_else(ApiError::too_many_zips)?;
 
     let walk = blocking_volume(&state.volumes, &volume, {

@@ -9,7 +9,7 @@ use shared::api::favorites::MAX_FAVORITES;
 use shared::api::tasks::MAX_ACTIVE_TASKS;
 use shared::api::uploads::{MAX_PATCHES_PER_USER, MAX_PENDING_UPLOADS};
 
-use crate::downloads::ZIP_CONCURRENCY;
+use crate::downloads::{ZIP_CONCURRENCY, ZIP_CONCURRENCY_PER_USER};
 
 use crate::http::request_id::request_id;
 use crate::storage::{InvalidPath, RelPath, StorageError};
@@ -154,7 +154,10 @@ impl ApiError {
         Self::new(
             StatusCode::TOO_MANY_REQUESTS,
             "too_many_zips",
-            format!("At most {ZIP_CONCURRENCY} zips can be downloaded at once"),
+            format!(
+                "At most {ZIP_CONCURRENCY} zips can be downloaded at once, \
+                 {ZIP_CONCURRENCY_PER_USER} per user"
+            ),
         )
     }
 

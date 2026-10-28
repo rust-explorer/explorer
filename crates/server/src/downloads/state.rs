@@ -7,6 +7,8 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 /// Zips streaming at once, across all users.
 pub const ZIP_CONCURRENCY: usize = 4;
+/// Zips streaming at once for one user, so that one user cannot take every slot.
+pub const ZIP_CONCURRENCY_PER_USER: usize = 2;
 /// How long a stored selection can be zipped.
 pub const SELECTION_TTL: Duration = Duration::from_secs(10 * 60);
 /// Selections a user keeps; a new one beyond this drops the oldest.
@@ -15,7 +17,33 @@ pub const MAX_SELECTIONS_PER_USER: usize = 16;
 /// What the download routes share: the zip slots and the stored selections.
 pub struct Downloads {
     zips: Arc<Semaphore>,
+    zips_by_user: ZipsByUser,
     selections: Mutex<Selections>,
+}
+
+/// Zips streaming per user.
+type ZipsByUser = Arc<Mutex<HashMap<String, usize>>>;
+
+/// A zip slot, held until the archive ends; released on drop.
+pub struct ZipSlot {
+    _permit: OwnedSemaphorePermit,
+    sub: String,
+    zips_by_user: ZipsByUser,
+}
+
+impl Drop for ZipSlot {
+    fn drop(&mut self) {
+        let mut zips = self
+            .zips_by_user
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(count) = zips.get_mut(&self.sub) {
+            *count -= 1;
+            if *count == 0 {
+                zips.remove(&self.sub);
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -42,14 +70,30 @@ impl Downloads {
     pub fn new() -> Self {
         Self {
             zips: Arc::new(Semaphore::new(ZIP_CONCURRENCY)),
+            zips_by_user: Arc::default(),
             selections: Mutex::new(Selections::default()),
         }
     }
 
-    /// A zip slot, held until the archive ends; `None` when all are taken.
+    /// A zip slot for user `sub`; `None` when all are taken, or when the user already holds
+    /// [`ZIP_CONCURRENCY_PER_USER`].
     #[must_use]
-    pub fn try_zip(&self) -> Option<OwnedSemaphorePermit> {
-        Arc::clone(&self.zips).try_acquire_owned().ok()
+    pub fn try_zip(&self, sub: &str) -> Option<ZipSlot> {
+        let mut zips = self
+            .zips_by_user
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let count = zips.get(sub).copied().unwrap_or_default();
+        if count >= ZIP_CONCURRENCY_PER_USER {
+            return None;
+        }
+        let permit = Arc::clone(&self.zips).try_acquire_owned().ok()?;
+        zips.insert(sub.to_owned(), count + 1);
+        Some(ZipSlot {
+            _permit: permit,
+            sub: sub.to_owned(),
+            zips_by_user: Arc::clone(&self.zips_by_user),
+        })
     }
 
     /// Stores `selection` for user `sub` and returns its id.
@@ -145,10 +189,32 @@ mod tests {
     fn zip_slots_run_out_and_come_back() {
         let downloads = Downloads::new();
         let held: Vec<_> = (0..ZIP_CONCURRENCY)
-            .map(|_| downloads.try_zip().unwrap())
+            .map(|i| downloads.try_zip(&format!("user{}", i / ZIP_CONCURRENCY_PER_USER)))
+            .map(Option::unwrap)
             .collect();
-        assert!(downloads.try_zip().is_none());
+        assert!(downloads.try_zip("someone else").is_none());
         drop(held);
-        assert!(downloads.try_zip().is_some());
+        assert!(downloads.try_zip("someone else").is_some());
+    }
+
+    #[test]
+    fn a_user_holds_a_few_zip_slots_at_most() {
+        let downloads = Downloads::new();
+        let held: Vec<_> = (0..ZIP_CONCURRENCY_PER_USER)
+            .map(|_| downloads.try_zip("alice").unwrap())
+            .collect();
+        assert!(downloads.try_zip("alice").is_none());
+        let bob = downloads.try_zip("bob");
+        assert!(bob.is_some());
+        drop(held);
+        assert!(downloads.try_zip("alice").is_some());
+        assert!(
+            downloads
+                .zips_by_user
+                .lock()
+                .unwrap()
+                .get("alice")
+                .is_none()
+        );
     }
 }
