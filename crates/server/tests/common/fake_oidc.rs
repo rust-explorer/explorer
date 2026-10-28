@@ -62,6 +62,8 @@ struct Inner {
     next_userinfo: Option<Value>,
     sign_next_with_rogue_key: bool,
     discovery_outage: VecDeque<Outage>,
+    rotated_key: Option<(String, RsaPrivateKey)>,
+    jwks_requests: usize,
 }
 
 /// What a reverse proxy typically answers while the provider behind it restarts.
@@ -145,6 +147,20 @@ impl FakeOidc {
         self.shared.lock().sign_next_with_rogue_key = true;
     }
 
+    /// Replaces the signing key with a new one under a new key id, as a provider's key rotation
+    /// does: the JWKS then publishes only the new key, and every later ID token uses it.
+    pub fn rotate_key(&self) {
+        let key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).expect("generate rotated key");
+        let kid = format!("fake-oidc-key-{}", random_token());
+        self.shared.lock().rotated_key = Some((kid, key));
+    }
+
+    /// How many times the JWKS has been fetched.
+    #[must_use]
+    pub fn jwks_requests(&self) -> usize {
+        self.shared.lock().jwks_requests
+    }
+
     /// Claims added to the next userinfo response (which always carries `sub`).
     /// A `null` value removes the claim.
     pub fn next_userinfo(&self, claims: Value) {
@@ -213,12 +229,13 @@ impl Shared {
         if let Some(nonce) = &authorization.nonce {
             claims["nonce"] = json!(nonce);
         }
-        let (persistent, next, rogue) = {
+        let (persistent, next, rogue, rotated) = {
             let mut inner = self.lock();
             (
                 inner.claims.clone(),
                 inner.next_claims.take(),
                 std::mem::take(&mut inner.sign_next_with_rogue_key),
+                inner.rotated_key.clone(),
             )
         };
         for overrides in [persistent, next].into_iter().flatten() {
@@ -227,9 +244,12 @@ impl Shared {
         if rogue {
             let key =
                 RsaPrivateKey::new(&mut rand::thread_rng(), 2048).expect("generate rogue key");
-            return sign(&claims, &key);
+            return sign(&claims, &key, KEY_ID);
         }
-        sign(&claims, generate_key())
+        match &rotated {
+            Some((kid, key)) => sign(&claims, key, kid),
+            None => sign(&claims, generate_key(), KEY_ID),
+        }
     }
 }
 
@@ -269,14 +289,21 @@ async fn discovery(State(shared): State<Arc<Shared>>) -> Response {
     .into_response()
 }
 
-async fn jwks() -> Json<Value> {
-    let public = RsaPublicKey::from(generate_key());
+async fn jwks(State(shared): State<Arc<Shared>>) -> Json<Value> {
+    let (kid, public) = {
+        let mut inner = shared.lock();
+        inner.jwks_requests += 1;
+        match &inner.rotated_key {
+            Some((kid, key)) => (kid.clone(), RsaPublicKey::from(key)),
+            None => (KEY_ID.to_owned(), RsaPublicKey::from(generate_key())),
+        }
+    };
     Json(json!({
         "keys": [{
             "kty": "RSA",
             "use": "sig",
             "alg": "RS256",
-            "kid": KEY_ID,
+            "kid": kid,
             "n": URL_SAFE_NO_PAD.encode(public.n().to_bytes_be()),
             "e": URL_SAFE_NO_PAD.encode(public.e().to_bytes_be()),
         }]
@@ -407,8 +434,8 @@ fn merge(claims: &mut Value, overrides: Value) {
     }
 }
 
-fn sign(claims: &Value, key: &RsaPrivateKey) -> String {
-    let header = json!({ "alg": "RS256", "typ": "JWT", "kid": KEY_ID });
+fn sign(claims: &Value, key: &RsaPrivateKey, kid: &str) -> String {
+    let header = json!({ "alg": "RS256", "typ": "JWT", "kid": kid });
     let encode = |v: &Value| URL_SAFE_NO_PAD.encode(serde_json::to_vec(v).expect("serialize JWT"));
     let signing_input = format!("{}.{}", encode(&header), encode(claims));
     let signature = SigningKey::<Sha256>::new(key.clone()).sign(signing_input.as_bytes());

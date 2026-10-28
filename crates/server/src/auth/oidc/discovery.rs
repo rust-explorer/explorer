@@ -1,4 +1,5 @@
 use std::error::Error as StdError;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use openidconnect::{
@@ -80,22 +81,35 @@ impl Oidc {
         let redirect = public_url
             .join(CALLBACK_PATH)
             .expect("public_url is an absolute base URL");
-        let client = Client::from_provider_metadata(
-            metadata,
-            ClientId::new(cfg.client_id.clone()),
-            Some(ClientSecret::new(
-                cfg.client_secret.expose_secret().to_owned(),
-            )),
-        )
-        .set_redirect_uri(RedirectUrl::from_url(redirect));
+        let client_secret = ClientSecret::new(cfg.client_secret.expose_secret().to_owned());
+        let redirect = RedirectUrl::from_url(redirect);
+        let client = build_client(&metadata, &cfg.client_id, &client_secret, &redirect);
         Ok(Self {
-            client,
+            client: RwLock::new(Arc::new(client)),
+            metadata,
+            client_secret,
+            redirect,
+            keys_fetched_at: tokio::sync::Mutex::new(None),
             http: http.clone(),
             end_session_endpoint,
             client_id: cfg.client_id.clone(),
             groups_claim: cfg.groups_claim.clone(),
         })
     }
+}
+
+pub(super) fn build_client(
+    metadata: &ProviderMetadataWithLogout,
+    client_id: &str,
+    client_secret: &ClientSecret,
+    redirect: &RedirectUrl,
+) -> Client {
+    Client::from_provider_metadata(
+        metadata.clone(),
+        ClientId::new(client_id.to_owned()),
+        Some(client_secret.clone()),
+    )
+    .set_redirect_uri(redirect.clone())
 }
 
 fn http_client() -> Result<reqwest::Client, OidcError> {

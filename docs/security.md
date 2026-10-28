@@ -23,6 +23,10 @@ with PKCE (S256), `state` and `nonce`, and verifies the ID token (signature, iss
 audience, expiry, nonce, access token hash). Access and refresh tokens are never sent to
 the browser, and no token is logged. The browser only holds a session cookie.
 
+The provider's signing keys (JWKS) are fetched at startup. When an ID token names a key
+Explorer does not know, as after a key rotation at the provider, Explorer fetches the keys
+again, at most once a minute, and verifies the token once more; no restart is needed.
+
 The one exception is signing out: the ID token is kept in the session and sent once, as
 `id_token_hint` in the provider's end-session URL, so that the provider can end its own
 session and redirect back without asking. That URL passes through the browser, so the ID

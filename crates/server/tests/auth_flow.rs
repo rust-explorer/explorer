@@ -362,6 +362,37 @@ async fn token_signed_with_an_unpublished_key_is_invalid_token() {
 }
 
 #[tokio::test]
+async fn provider_key_rotation_is_picked_up_without_restart() {
+    let h = Harness::new().await;
+    let fetched = h.fake.jwks_requests();
+    h.fake.rotate_key();
+    let mut jar = Jar::default();
+
+    let (res, _) = h.sign_in(&mut jar, json!({})).await;
+
+    assert_eq!(location(&res), "/");
+    assert_eq!(h.me_status(&mut jar).await, StatusCode::OK);
+    assert_eq!(h.fake.jwks_requests(), fetched + 1);
+}
+
+#[tokio::test]
+async fn provider_keys_are_refetched_at_most_once_a_minute() {
+    let h = Harness::new().await;
+    h.fake.rotate_key();
+    let (res, _) = h.sign_in(&mut Jar::default(), json!({})).await;
+    assert_eq!(location(&res), "/");
+    let fetched = h.fake.jwks_requests();
+
+    h.fake.rotate_key();
+    let mut jar = Jar::default();
+    let (res, _) = h.sign_in(&mut jar, json!({})).await;
+
+    assert_signin_error(&res, "invalid_token");
+    assert_eq!(h.me_status(&mut jar).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(h.fake.jwks_requests(), fetched);
+}
+
+#[tokio::test]
 async fn unknown_code_is_exchange_failed() {
     let h = Harness::new().await;
     let mut jar = Jar::default();
