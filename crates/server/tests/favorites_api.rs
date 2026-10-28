@@ -155,6 +155,33 @@ async fn add_list_remove() {
 }
 
 #[tokio::test]
+async fn remove_normalises_the_path() {
+    let mut s = setup().await;
+    fs::create_dir_all(s.data.join("media/Films/2026")).unwrap();
+    put(&mut s.client, "media", "Films/2026").await;
+
+    assert_eq!(
+        remove(&mut s.client, "media", "Films//2026/")
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(list(&mut s.client).await.is_empty());
+    error_of(
+        remove(&mut s.client, "media", "Films/../x").await,
+        StatusCode::BAD_REQUEST,
+        "invalid_path",
+    )
+    .await;
+    assert!(
+        !s.store
+            .remove(SUBJECT, "media", "Films/2026")
+            .await
+            .unwrap()
+    );
+}
+
+#[tokio::test]
 async fn adding_twice_keeps_one() {
     let mut s = setup().await;
     fs::create_dir(s.data.join("media/Films")).unwrap();

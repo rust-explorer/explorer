@@ -74,13 +74,16 @@ impl Favorites {
         })
     }
 
-    pub async fn remove(&self, user: &str, volume: &str, path: &str) -> sqlx::Result<()> {
-        sqlx::query("DELETE FROM favorites WHERE user_sub = ? AND volume = ? AND path = ?")
-            .bind(user)
-            .bind(volume)
-            .bind(path)
-            .execute(&self.pool)
-            .await?;
-        Ok(())
+    /// Whether there was such a favorite.
+    pub async fn remove(&self, user: &str, volume: &str, path: &str) -> sqlx::Result<bool> {
+        let removed =
+            sqlx::query("DELETE FROM favorites WHERE user_sub = ? AND volume = ? AND path = ?")
+                .bind(user)
+                .bind(volume)
+                .bind(path)
+                .execute(&self.pool)
+                .await?
+                .rows_affected();
+        Ok(removed > 0)
     }
 }
