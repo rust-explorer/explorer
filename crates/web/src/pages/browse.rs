@@ -5,15 +5,21 @@ use dioxus_i18n::t;
 use shared::api::{Listing, Me, VolumeInfo};
 
 use crate::api;
-use crate::components::{Breadcrumb, ErrorPanel, FileTable, Shell, Sidebar};
+use crate::components::{Breadcrumb, ErrorPanel, FileTable, Shell, Sidebar, UploadButton};
 use crate::routes::{Segment, Segments};
+use crate::uploads::Revision;
 
 #[component]
 pub fn Browse(volume: Segment, path: Segments) -> Element {
+    let Revision(revision) = use_context();
     let mut me = use_resource(|| api::get_json::<Me>("/api/me"));
-    let mut volumes = use_resource(|| api::get_json::<Vec<VolumeInfo>>("/api/volumes"));
+    let mut volumes = use_resource(move || {
+        revision();
+        api::get_json::<Vec<VolumeInfo>>("/api/volumes")
+    });
     let url = api::entries_url(volume.as_str(), &path.joined());
     let mut listing = use_resource(use_reactive!(|url| async move {
+        revision();
         let result = api::get_json::<Listing>(&url)
             .await
             .map(|listing| Rc::new(listing.entries));
@@ -34,6 +40,18 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
             };
         }
     };
+
+    let read_only = volumes
+        .read()
+        .as_ref()
+        .and_then(|volumes| volumes.as_ref().ok())
+        .and_then(|volumes| volumes.iter().find(|info| info.name == volume.as_str()))
+        .map(|info| info.read_only);
+    let actions = read_only.map(|read_only| {
+        rsx! {
+            UploadButton { volume: volume.as_str().to_owned(), path: path.joined(), read_only }
+        }
+    });
 
     let sidebar = match volumes.read().clone() {
         Some(Ok(volumes)) => rsx! {
@@ -70,7 +88,7 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
     };
 
     rsx! {
-        Shell { user, sidebar,
+        Shell { user, sidebar, actions,
             div { class: "flex h-full min-h-0 flex-col gap-4",
                 Breadcrumb { volume: volume.clone(), path: path.clone() }
                 {content}
@@ -79,11 +97,15 @@ pub fn Browse(volume: Segment, path: Segments) -> Element {
     }
 }
 
-/// The fetched result, once the fetch has finished and was for `url`: after navigation the
-/// resource still holds the previous folder until the new one arrives.
-fn current_result<T: Clone>(fetched: Option<&(String, T)>, url: &str, ready: bool) -> Option<T> {
+/// The fetched result when it was for `url`: after navigation the resource still holds the
+/// previous folder until the new one arrives. A refetch of the same folder keeps showing it.
+fn current_result<T: Clone, E: Clone>(
+    fetched: Option<&(String, Result<T, E>)>,
+    url: &str,
+    ready: bool,
+) -> Option<Result<T, E>> {
     fetched
-        .filter(|(fetched_url, _)| ready && fetched_url == url)
+        .filter(|(fetched_url, result)| fetched_url == url && (ready || result.is_ok()))
         .map(|(_, result)| result.clone())
 }
 
@@ -91,20 +113,32 @@ fn current_result<T: Clone>(fetched: Option<&(String, T)>, url: &str, ready: boo
 mod tests {
     use super::*;
 
+    const URL: &str = "/api/volumes/media/entries?path=a";
+    const OTHER: &str = "/api/volumes/media/entries?path=a%2Fb";
+
+    fn fetched(result: Result<i32, &'static str>) -> (String, Result<i32, &'static str>) {
+        (URL.to_owned(), result)
+    }
+
     #[test]
     fn current_result_ignores_a_previous_or_pending_fetch() {
-        let fetched = ("/api/volumes/media/entries?path=a".to_owned(), 1);
-        let url = fetched.0.clone();
-        assert_eq!(current_result(Some(&fetched), &url, true), Some(1));
-        assert_eq!(current_result(Some(&fetched), &url, false), None);
+        let ok = fetched(Ok(1));
+        assert_eq!(current_result(Some(&ok), URL, true), Some(Ok(1)));
+        assert_eq!(current_result(Some(&ok), OTHER, true), None);
+        assert_eq!(current_result(Some(&ok), OTHER, false), None);
+        assert_eq!(current_result::<i32, &str>(None, URL, true), None);
+    }
+
+    #[test]
+    fn current_result_keeps_stale_listing_while_refreshing() {
         assert_eq!(
-            current_result(
-                Some(&fetched),
-                "/api/volumes/media/entries?path=a%2Fb",
-                true
-            ),
+            current_result(Some(&fetched(Ok(1))), URL, false),
+            Some(Ok(1))
+        );
+        assert_eq!(
+            current_result(Some(&fetched(Err("gone"))), URL, false),
             None
         );
-        assert_eq!(current_result::<i32>(None, &url, true), None);
+        assert_eq!(current_result(Some(&fetched(Ok(1))), OTHER, false), None);
     }
 }

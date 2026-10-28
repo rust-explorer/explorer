@@ -56,12 +56,12 @@ pub fn zip_url(volume: &str, path: &str) -> String {
     files_url("zip", volume, path)
 }
 
-#[allow(dead_code)]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn upload_url(id: &str) -> String {
     format!("/files/uploads/{}", encode_component(id))
 }
 
-#[allow(dead_code)]
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn folders_url(volume: &str) -> String {
     format!("/api/volumes/{}/folders", encode_component(volume))
 }
@@ -104,20 +104,23 @@ async fn send<T: DeserializeOwned>(
     if response.ok() {
         return response.json().await.map_err(|_| ApiFailure::Network);
     }
-    if response.status() == 401 {
+    let body = response.text().await.unwrap_or_default();
+    Err(failure(response.status(), &body))
+}
+
+/// The failure an error response stands for; a 401 also sends the browser to sign-in.
+#[cfg(target_arch = "wasm32")]
+pub fn failure(status: u16, body: &str) -> ApiFailure {
+    if status == 401 {
         navigate(&login_url(&current_path_and_query()));
-        return Err(ApiFailure::Server(ErrorBody {
+        return ApiFailure::Server(ErrorBody {
             code: UNAUTHENTICATED.to_owned(),
             message: String::new(),
             details: None,
             request_id: None,
-        }));
+        });
     }
-    let status = response.status();
-    match response.json().await {
-        Ok(body) => Err(ApiFailure::Server(body)),
-        Err(_) => Err(ApiFailure::Http(status)),
-    }
+    serde_json::from_str(body).map_or(ApiFailure::Http(status), ApiFailure::Server)
 }
 
 #[cfg(target_arch = "wasm32")]

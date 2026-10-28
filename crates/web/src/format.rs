@@ -32,6 +32,10 @@ pub fn format_size(bytes: u64, locale: &LanguageIdentifier) -> String {
     unreachable!("the last unit always returns")
 }
 
+pub fn format_speed(bytes_per_sec: u64, locale: &LanguageIdentifier) -> String {
+    format!("{}/s", format_size(bytes_per_sec, locale))
+}
+
 #[cfg(target_arch = "wasm32")]
 pub fn now_ms() -> i64 {
     #[expect(
@@ -150,6 +154,12 @@ mod tests {
         assert_eq!(format_size(999_500, &en), "1 MB");
         assert_eq!(format_size(2_500_000_000_000_000, &en), "2500 TB");
         assert_eq!(format_size(u64::MAX, &en), "18446744 TB");
+    }
+
+    #[test]
+    fn format_speed_by_locale() {
+        assert_eq!(format_speed(48_000_000, &langid!("en-US")), "48 MB/s");
+        assert_eq!(format_speed(48_000_000, &langid!("fr-FR")), "48 Mo/s");
     }
 
     #[test]
