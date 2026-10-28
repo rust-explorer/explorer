@@ -130,7 +130,8 @@ New error codes (JSON error shape as above):
 |---|---|---|
 | `already_exists` | 409 | The destination exists and `conflict` is `fail` (or no free "keep both" name was found up to `(999)`). |
 | `read_only_volume` | 403 | The volume is read-only. |
-| `insufficient_storage` | 507 | `Upload-Length` is larger than the volume's free space, or the disk filled up while writing. |
+| `insufficient_storage` | 507 | `Upload-Length` is larger than the volume's free space less what its unfinished uploads still have to receive, or the disk filled up while writing. |
+| `too_many_uploads` | 429 | The user already has 1000 unfinished uploads (`MAX_PENDING_UPLOADS`). |
 | `upload_not_found` | 404 | Unknown id, another user's upload, or an upload whose staged file is gone. |
 | `offset_mismatch` | 409 | `Upload-Offset` is not the server's offset; `details.offset` carries the right one. |
 | `upload_busy` | 423 | Another request is writing or finishing this upload. |
@@ -145,8 +146,9 @@ An empty destination path (the volume root) is `invalid_path`; `is_a_directory`,
 
 How an upload is stored:
 
-1. Creation checks the destination (a parent that is a file, an existing file with
-   `conflict=fail`, a folder with `replace`) and the free space, creates the staged file and
+1. Creation checks the user's count of unfinished uploads, the destination (a parent that
+   is a file, an existing file with `conflict=fail`, a folder with `replace`) and the free
+   space less the bytes the volume's unfinished uploads still owe, creates the staged file and
    inserts a record in the `uploads` table of `explorer.db` (id, owner `sub`, volume, path,
    length, `modified`, conflict policy, timestamps).
 2. Data is written to `.explorer-uploads/<id>` at the root of the volume. The directory is

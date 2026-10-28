@@ -76,6 +76,7 @@ error-task_not_found = Esta tarea ya no existe en el servidor.
 error-favorites_full = No puedes tener más de { $max } favoritos. Quita uno primero.
 error-thumbnail_unavailable = No hay vista previa disponible para este archivo.
 error-too_many_tasks = Hay demasiadas tareas en espera. Inténtalo de nuevo cuando terminen algunas.
+error-too_many_uploads = Tienes demasiadas subidas sin terminar. Cancela algunas o espera un día a que se borren las abandonadas.
 upload = Subir
 upload-open = Subir archivos o una carpeta
 upload-files = Archivos…

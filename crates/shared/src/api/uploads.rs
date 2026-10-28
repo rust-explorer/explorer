@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+/// Unfinished uploads a user may have at once; more are refused with `too_many_uploads`.
+pub const MAX_PENDING_UPLOADS: usize = 1000;
+
 /// An upload of the current user that is not finished yet.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct PendingUpload {

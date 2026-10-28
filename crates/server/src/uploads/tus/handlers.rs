@@ -6,6 +6,7 @@ use axum::http::header::{self, HeaderMap};
 use axum::response::{IntoResponse, Response};
 use shared::tus::TUS_VERSION;
 
+use super::admit::{check_pending_count, check_space};
 use super::commit::{commit, now_ms, write_and_commit};
 use super::protocol::{
     Creation, EXTENSIONS, OFFSET_STREAM, TUS_EXTENSION, TUS_VERSION_HEADER, UPLOAD_LENGTH,
@@ -62,26 +63,18 @@ pub(super) async fn create(
         ..
     } = creation;
 
+    let admission = state.uploads.admission().await;
+    check_pending_count(&state, &user.sub).await?;
+    let pending = state
+        .uploads
+        .pending_on(&volume)
+        .await
+        .map_err(ApiError::internal)?;
     let id = StagedId::random();
     blocking_volume(&state.volumes, &volume, {
         let (id, path) = (id.clone(), path.clone());
         move |vol| {
-            match vol.space() {
-                Ok(space) if length > space.available => {
-                    tracing::warn!(
-                        volume = vol.name(),
-                        path = path.as_str(),
-                        length,
-                        available = space.available,
-                        "upload larger than the free space"
-                    );
-                    return Err(ApiError::insufficient_storage(vol.name(), path.as_str()));
-                }
-                Ok(_) => {}
-                Err(err) => {
-                    tracing::warn!(volume = vol.name(), error = %err, "cannot read free space");
-                }
-            }
+            check_space(vol, &path, length, &pending)?;
             vol.check_upload_target(&path, conflict)
                 .and_then(|()| vol.staging())
                 .and_then(|staging| staging.create(&id))
@@ -110,6 +103,7 @@ pub(super) async fn create(
         }
         return Err(ApiError::internal(err));
     }
+    drop(admission);
     tracing::info!(
         user = user.sub,
         action = "upload",

@@ -16,12 +16,13 @@ use axum::response::Response;
 use common::client::{Client, json};
 use common::fake_oidc::FakeOidc;
 use explorer_server::http::router;
-use explorer_server::storage::StagedId;
-use explorer_server::uploads::Uploads;
+use explorer_server::storage::{RelPath, StagedId};
+use explorer_server::uploads::{UploadRecord, Uploads};
 use http_body_util::BodyExt;
 use serde_json::json;
+use shared::api::conflict::ConflictPolicy;
 use shared::api::error::ErrorBody;
-use shared::api::uploads::PendingUpload;
+use shared::api::uploads::{MAX_PENDING_UPLOADS, PendingUpload};
 use shared::tus::encode_metadata;
 use sqlx::SqlitePool;
 use tempfile::TempDir;
@@ -1108,4 +1109,63 @@ async fn staging_is_unreachable_through_a_symlink_to_the_root() {
 
     assert_eq!(staged_count(&s), 1);
     assert_eq!(fs::read(s.staging().join(id.as_str())).unwrap(), b"ab");
+}
+
+#[tokio::test]
+async fn unfinished_uploads_are_capped_per_user() {
+    let mut s = setup().await;
+    let sub = me(&mut s.client).await;
+    for i in 1..MAX_PENDING_UPLOADS {
+        let record = UploadRecord {
+            id: StagedId::random(),
+            user_sub: sub.clone(),
+            volume: "media".to_owned(),
+            path: RelPath::parse(&format!("f{i}")).unwrap(),
+            length: 10,
+            modified_ms: None,
+            conflict: ConflictPolicy::Fail,
+            final_path: None,
+            created_at: 1,
+            updated_at: 1,
+        };
+        s.uploads.insert(&record).await.unwrap();
+    }
+
+    let last = created(&mut s.client, "last.txt", 3, &[]).await;
+    let res = create(&mut s.client, "over.txt", 3, &[]).await;
+    error(res, StatusCode::TOO_MANY_REQUESTS, "too_many_uploads").await;
+
+    // A finished upload no longer counts, nor does another user's.
+    assert_eq!(
+        patch(&mut s.client, &last, 0, b"abc").await.status(),
+        StatusCode::NO_CONTENT
+    );
+    created(&mut s.client, "after.txt", 3, &[]).await;
+    s.fake.claims(json!({ "sub": "other-user" }));
+    let mut other = Client::signed_in(s.app.clone(), &s.fake).await;
+    created(&mut other, "other.txt", 3, &[]).await;
+}
+
+#[tokio::test]
+async fn free_space_counts_what_pending_uploads_still_need() {
+    let mut s = setup().await;
+    let stat = rustix::fs::statvfs(s.media()).unwrap();
+    let available = stat.f_bavail * stat.f_frsize;
+    let length = available / 10 * 6;
+
+    let first = created(&mut s.client, "first.bin", length, &[]).await;
+    let res = create(&mut s.client, "second.bin", length, &[]).await;
+    error(
+        res,
+        StatusCode::INSUFFICIENT_STORAGE,
+        "insufficient_storage",
+    )
+    .await;
+    assert_eq!(staged_count(&s), 1);
+
+    assert_eq!(
+        delete(&mut s.client, &first).await.status(),
+        StatusCode::NO_CONTENT
+    );
+    created(&mut s.client, "second.bin", length, &[]).await;
 }

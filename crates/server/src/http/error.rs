@@ -7,6 +7,7 @@ use serde_json::json;
 use shared::api::error::ErrorBody;
 use shared::api::favorites::MAX_FAVORITES;
 use shared::api::tasks::MAX_ACTIVE_TASKS;
+use shared::api::uploads::MAX_PENDING_UPLOADS;
 
 use crate::http::request_id::request_id;
 use crate::storage::{InvalidPath, StorageError};
@@ -134,6 +135,15 @@ impl ApiError {
             StatusCode::TOO_MANY_REQUESTS,
             "too_many_tasks",
             format!("At most {MAX_ACTIVE_TASKS} tasks can wait or run at once"),
+        )
+    }
+
+    #[must_use]
+    pub fn too_many_uploads() -> Self {
+        Self::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too_many_uploads",
+            format!("At most {MAX_PENDING_UPLOADS} uploads can be unfinished at once"),
         )
     }
 

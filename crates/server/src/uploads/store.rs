@@ -35,6 +35,7 @@ type Locks = Arc<Mutex<HashMap<StagedId, bool>>>;
 pub struct Uploads {
     pool: SqlitePool,
     locks: Locks,
+    admission: tokio::sync::Mutex<()>,
 }
 
 /// Held while a request works on an upload; released on drop.
@@ -100,6 +101,7 @@ impl Uploads {
         Self {
             pool,
             locks: Arc::default(),
+            admission: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -149,6 +151,40 @@ impl Uploads {
         .iter()
         .map(record)
         .collect()
+    }
+
+    /// Held from the checks of a new upload until its record is inserted, so that concurrent
+    /// creations see each other.
+    pub async fn admission(&self) -> tokio::sync::MutexGuard<'_, ()> {
+        self.admission.lock().await
+    }
+
+    pub async fn count_pending(&self, user_sub: &str) -> sqlx::Result<u64> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM uploads WHERE user_sub = ? AND final_path IS NULL",
+        )
+        .bind(user_sub)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(u64::try_from(count).unwrap_or_default())
+    }
+
+    /// The id and length of every unfinished upload to `volume`, whoever started it.
+    pub async fn pending_on(&self, volume: &str) -> sqlx::Result<Vec<(StagedId, u64)>> {
+        sqlx::query("SELECT id, length FROM uploads WHERE volume = ? AND final_path IS NULL")
+            .bind(volume)
+            .fetch_all(&self.pool)
+            .await?
+            .iter()
+            .map(|row| {
+                let id: String = row.try_get("id")?;
+                let length: i64 = row.try_get("length")?;
+                Ok((
+                    StagedId::parse(&id).ok_or_else(|| corrupt("id"))?,
+                    u64::try_from(length).map_err(|_| corrupt("length"))?,
+                ))
+            })
+            .collect()
     }
 
     pub async fn touch(&self, id: &StagedId, now_ms: i64) -> sqlx::Result<()> {

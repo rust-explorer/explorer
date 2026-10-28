@@ -104,6 +104,7 @@ fn every_api_error_code_has_a_message() {
         "task_not_found",
         "favorites_full",
         "thumbnail_unavailable",
+        "too_many_uploads",
     ]
     .iter()
     .map(|code| format!("error-{code}"))
