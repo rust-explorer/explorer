@@ -47,6 +47,21 @@ const WEB_BUILD: Step = Step {
     ],
 };
 
+const WEB_CLIPPY: Step = Step {
+    name: "web clippy",
+    program: "cargo",
+    args: &[
+        "clippy",
+        "-p",
+        "explorer-web",
+        "--target",
+        "wasm32-unknown-unknown",
+        "--",
+        "-D",
+        "warnings",
+    ],
+};
+
 const DOCKER_BUILD: Step = Step {
     name: "docker build",
     program: "docker",
@@ -85,13 +100,21 @@ fn ci(docker: bool) -> ExitCode {
     }
 
     if command_exists("dx") {
-        if !run(&WEB_BUILD) {
-            return ExitCode::FAILURE;
+        for step in [&WEB_BUILD, &WEB_CLIPPY] {
+            if !run(step) {
+                return ExitCode::FAILURE;
+            }
         }
+    } else if env::var("CI").is_ok_and(|v| v == "true") {
+        eprintln!(
+            "\n==> FAILED: {}: `dx` not found but CI=true (cargo binstall dioxus-cli@0.7.10)",
+            WEB_BUILD.name
+        );
+        return ExitCode::FAILURE;
     } else {
         eprintln!(
-            "\n==> skipping {}: `dx` not found (cargo binstall dioxus-cli@0.7.10)",
-            WEB_BUILD.name
+            "\n==> skipping {} and {}: `dx` not found (cargo binstall dioxus-cli@0.7.10)",
+            WEB_BUILD.name, WEB_CLIPPY.name
         );
     }
 

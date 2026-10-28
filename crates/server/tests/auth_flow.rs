@@ -6,8 +6,8 @@ use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use axum::response::Response;
+use common::fake_oidc::{self, FakeOidc};
 use explorer_server::app::router;
-use fake_oidc::FakeOidc;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use shared::api::{ErrorBody, LogoutResponse, Me};
@@ -373,6 +373,22 @@ async fn expired_or_wrong_audience_token_is_invalid_token() {
 }
 
 #[tokio::test]
+async fn token_signed_with_an_unpublished_key_is_invalid_token() {
+    let h = Harness::new().await;
+    let mut jar = Jar::default();
+    let url = h.login(&mut jar, None).await;
+    h.fake.sign_next_with_rogue_key();
+    let code = h.fake.approve(&url).unwrap();
+
+    let res = h
+        .callback(&mut jar, &[("code", &code), ("state", &state_of(&url))])
+        .await;
+
+    assert_signin_error(&res, "invalid_token");
+    assert_eq!(h.me_status(&mut jar).await, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn unknown_code_is_exchange_failed() {
     let h = Harness::new().await;
     let mut jar = Jar::default();
@@ -423,10 +439,7 @@ async fn logout_clears_session_and_returns_end_session_url() {
     );
     let query: HashMap<String, String> = url.query_pairs().into_owned().collect();
     assert_eq!(query["id_token_hint"].split('.').count(), 3);
-    assert_eq!(
-        query["post_logout_redirect_uri"],
-        format!("{}/", common::PUBLIC_URL)
-    );
+    assert_eq!(query["post_logout_redirect_uri"], common::PUBLIC_URL);
     assert_eq!(h.me_status(&mut jar).await, StatusCode::UNAUTHORIZED);
     assert_eq!(
         h.me_status(&mut signed_in.clone()).await,

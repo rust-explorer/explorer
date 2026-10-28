@@ -44,3 +44,22 @@ async fn open_fails_clearly_on_read_only_dir() {
     assert!(message.contains(dir.path().to_str().unwrap()), "{message}");
     assert!(message.contains("check the volume mount"), "{message}");
 }
+
+#[tokio::test]
+async fn open_fails_clearly_on_read_only_database_file() {
+    if rustix::process::geteuid().is_root() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("explorer.db");
+    std::fs::write(&file, b"").unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o444)).unwrap();
+
+    let err = db::open(dir.path()).await.unwrap_err();
+
+    assert!(matches!(err, DbError::NotWritable { .. }), "{err:?}");
+    let message = err.to_string();
+    assert!(message.contains(file.to_str().unwrap()), "{message}");
+    assert!(message.contains("owner uid"), "{message}");
+    assert!(message.contains("check the volume mount"), "{message}");
+}

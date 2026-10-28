@@ -1,4 +1,4 @@
-//! In-process `OpenID Connect` provider for tests and local manual runs. Never shipped.
+//! In-process `OpenID Connect` provider for the integration tests.
 #![allow(clippy::missing_panics_doc)]
 
 use std::collections::{HashMap, VecDeque};
@@ -60,6 +60,7 @@ struct Inner {
     claims: Option<Value>,
     next_claims: Option<Value>,
     next_userinfo: Option<Value>,
+    sign_next_with_rogue_key: bool,
     discovery_outage: VecDeque<Outage>,
 }
 
@@ -139,6 +140,11 @@ impl FakeOidc {
         self.shared.lock().next_claims = Some(claims);
     }
 
+    /// Signs the next ID token with a throwaway key that the JWKS does not publish.
+    pub fn sign_next_with_rogue_key(&self) {
+        self.shared.lock().sign_next_with_rogue_key = true;
+    }
+
     /// Claims added to the next userinfo response (which always carries `sub`).
     /// A `null` value removes the claim.
     pub fn next_userinfo(&self, claims: Value) {
@@ -207,14 +213,23 @@ impl Shared {
         if let Some(nonce) = &authorization.nonce {
             claims["nonce"] = json!(nonce);
         }
-        let (persistent, next) = {
+        let (persistent, next, rogue) = {
             let mut inner = self.lock();
-            (inner.claims.clone(), inner.next_claims.take())
+            (
+                inner.claims.clone(),
+                inner.next_claims.take(),
+                std::mem::take(&mut inner.sign_next_with_rogue_key),
+            )
         };
         for overrides in [persistent, next].into_iter().flatten() {
             merge(&mut claims, overrides);
         }
-        sign(&claims)
+        if rogue {
+            let key =
+                RsaPrivateKey::new(&mut rand::thread_rng(), 2048).expect("generate rogue key");
+            return sign(&claims, &key);
+        }
+        sign(&claims, generate_key())
     }
 }
 
@@ -392,12 +407,11 @@ fn merge(claims: &mut Value, overrides: Value) {
     }
 }
 
-fn sign(claims: &Value) -> String {
+fn sign(claims: &Value, key: &RsaPrivateKey) -> String {
     let header = json!({ "alg": "RS256", "typ": "JWT", "kid": KEY_ID });
     let encode = |v: &Value| URL_SAFE_NO_PAD.encode(serde_json::to_vec(v).expect("serialize JWT"));
     let signing_input = format!("{}.{}", encode(&header), encode(claims));
-    let signature =
-        SigningKey::<Sha256>::new(generate_key().clone()).sign(signing_input.as_bytes());
+    let signature = SigningKey::<Sha256>::new(key.clone()).sign(signing_input.as_bytes());
     format!(
         "{signing_input}.{}",
         URL_SAFE_NO_PAD.encode(signature.to_bytes())

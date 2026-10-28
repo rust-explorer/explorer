@@ -15,8 +15,8 @@ browser ──HTTPS──> reverse proxy ──HTTP──> explorer container
                                             └─ /config         state (SQLite, thumbnail cache)
 ```
 
-Status: `/healthz` and the web bundle are implemented; `/api/*` and `/auth/*` currently
-return JSON 404s; the rest is planned.
+Status: `/healthz`, the web bundle and sign-in (`/auth/*`, `/api/me`) are implemented;
+the rest of `/api/*` and `/files/*` are planned.
 
 ## Crates
 
@@ -40,6 +40,21 @@ server functions, so the API stays usable by other clients.
 4. Security headers (CSP suited to a WASM app, `X-Content-Type-Options`,
    `Referrer-Policy`) are set on every response.
 
+## Authentication
+
+Explorer is a backend-for-frontend: the server is the OIDC client, the browser only holds
+an opaque session cookie. See [security.md](security.md) for the guarantees.
+
+| Route | Purpose |
+|---|---|
+| `GET /auth/login?return_to=` | Starts sign-in: stores state, nonce and PKCE verifier in the session, redirects to the provider. |
+| `GET /auth/callback` | Provider redirect (query response mode). Verifies state, exchanges the code, verifies the ID token, checks the group, then redirects to `return_to` or to `/access-denied` or `/signin-error?reason=`. |
+| `POST /auth/logout` | Flushes the session; returns JSON `{redirect_to}` (the provider's end-session URL, or `/`). |
+| `GET /api/me` | The signed-in user, or 401 `unauthenticated`. |
+
+The web app boots by calling `/api/me`; on 401 it shows a sign-in page that links to
+`/auth/login`. `/access-denied` and `/signin-error` are SPA pages.
+
 ## Server modules
 
 Implemented:
@@ -50,12 +65,17 @@ Implemented:
 - `error` — the JSON error type.
 - `telemetry` — `tracing` setup (pretty or JSON).
 - `healthcheck` — client used by `explorer healthcheck` for the Docker healthcheck.
+- `oidc` — provider discovery (retried at startup), authorization URL, code exchange, ID
+  token verification, groups, end-session URL.
+- `auth` — `/auth/*` handlers and the `CurrentUser` extractor.
+- `session` — cookie and SQLite-backed session layer.
+- `db` — SQLite pool for `/config/explorer.db` (WAL), with a writability check.
+- `csrf` — `Origin`/`Referer` check on state-changing requests.
+- `authz` — authorization policy; handlers pass the user, the volume and the action, so
+  finer rules can be added later.
 
 Planned layering:
 
-- `auth` — OIDC flow (authorization code + PKCE), sessions, `CurrentUser` extractor.
-- `authz` — authorization policy. Every handler goes through it with the user, the volume
-  and the action, so finer rules can be added later.
 - `storage` — all filesystem access: volume discovery, path resolution and confinement,
   listing, file operations. Handlers never touch the filesystem directly.
 - `uploads` — resumable uploads on top of `storage`.

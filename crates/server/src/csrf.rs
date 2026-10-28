@@ -39,6 +39,13 @@ fn is_safe(method: &Method) -> bool {
     matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
 }
 
+/// The origin of the public URL, as browsers send it in `Origin` and as the provider has it
+/// registered for post-logout redirects (no trailing slash).
+#[must_use]
+pub fn public_origin(public_url: &url::Url) -> String {
+    public_url.origin().ascii_serialization()
+}
+
 /// The serialised origin, or `None` for malformed or opaque (`null`) origins.
 fn origin_of(value: &HeaderValue) -> Option<String> {
     let url = Url::parse(value.to_str().ok()?).ok()?;

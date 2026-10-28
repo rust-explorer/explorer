@@ -41,6 +41,29 @@ cargo run -p explorer-server
 Then open <http://localhost:8080>. The server listens on port 8080; rebuild the web app
 with `dx build` after frontend changes.
 
+### Identity provider
+
+Sign in through a real PocketID (or other OIDC provider) instance. Register a client as
+described in [installation](installation.md), adding `http://localhost:8080/auth/callback`
+as a callback URL and `http://localhost:8080` as a logout callback URL, then run the server
+with your values:
+
+```sh
+set -a; . ./.env.example; set +a
+EXPLORER_PUBLIC_URL=http://localhost:8080 \
+EXPLORER_OIDC_ISSUER=https://id.example.com \
+EXPLORER_OIDC_CLIENT_ID=... \
+EXPLORER_OIDC_CLIENT_SECRET=... \
+EXPLORER_DATA_DIR=.dev/data \
+EXPLORER_CONFIG_DIR=.dev/config \
+EXPLORER_WEB_DIR=target/dx/explorer-web/release/web/public \
+cargo run -p explorer-server
+```
+
+The session cookie is `Secure`; Chrome and Firefox accept it on `localhost` over plain HTTP;
+other browsers may not. The integration tests use an in-process provider
+(`crates/server/tests/common/fake_oidc.rs`) and need no network.
+
 ## Checks
 
 These must pass before opening a pull request:
@@ -54,14 +77,15 @@ cargo test --workspace
 Or run everything in one command:
 
 ```sh
-cargo xtask ci              # the checks above, `dx build --release`, then `docker build -t explorer:ci .`
+cargo xtask ci              # the checks above, `dx build --release`, clippy for wasm32, then `docker build -t explorer:ci .`
 cargo xtask ci --no-docker  # skip the Docker build
 ```
 
-Steps run in order and stop at the first failure. The `dx build` step is skipped with a
-notice if `dx` is not installed. `dx` must run before any clippy or build of the web crate
-for the `wasm32` target, because it generates `tailwind.css`; the host-target checks above
-do not need it.
+Steps run in order and stop at the first failure. The `dx build` and wasm clippy steps are
+skipped with a notice if `dx` is not installed, except when `CI=true`, where a missing
+`dx` fails the run. `dx` must run before any clippy or build of the web crate for the
+`wasm32` target, because it generates `tailwind.css`; the host-target checks above do not
+need it.
 
 ## CI
 

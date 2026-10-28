@@ -53,12 +53,7 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
         );
 
     let session = session::layer(state.db.clone(), state.config.session_ttl).await?;
-    let origin: Arc<str> = state
-        .config
-        .public_url
-        .origin()
-        .ascii_serialization()
-        .into();
+    let origin: Arc<str> = csrf::public_origin(&state.config.public_url).into();
 
     let router = extra
         .route("/healthz", get(healthz))

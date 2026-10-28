@@ -51,6 +51,6 @@ COPY --from=server --chown=1000:1000 /out/config /config
 USER 1000:1000
 VOLUME ["/config"]
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
     CMD ["/usr/local/bin/explorer", "healthcheck"]
 ENTRYPOINT ["/usr/local/bin/explorer"]

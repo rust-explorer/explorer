@@ -17,21 +17,27 @@ See [`.env.example`](../.env.example) for a starting point.
 | `EXPLORER_OIDC_CLIENT_SECRET_FILE` | yes¹ | — | Path to a file containing the client secret (e.g. a Docker secret under `/run/secrets/`). Trailing newlines are ignored. |
 | `EXPLORER_ALLOWED_GROUP` | yes | — | Only members of this group may sign in. |
 | `EXPLORER_OIDC_GROUPS_CLAIM` | no | `groups` | ID token claim holding the user's group names. |
-| `EXPLORER_SESSION_TTL` | no | `7d` | Idle session lifetime, e.g. `12h`, `7d`, `30d`. Must be greater than zero. |
+| `EXPLORER_SESSION_TTL` | no | `7d` | Idle session lifetime, e.g. `12h`, `7d`, `30d`. Must be greater than zero; capped at 400 days. |
 | `EXPLORER_LOG` | no | `info` | Log filter: a level (`off`, `error`, `warn`, `info`, `debug`, `trace`) and/or comma-separated `target=level` directives, e.g. `warn,explorer_server=debug`. |
 | `EXPLORER_LOG_FORMAT` | no | `pretty` | `pretty` (human-readable) or `json`. |
 
 ¹ Set exactly one of `EXPLORER_OIDC_CLIENT_SECRET` and `EXPLORER_OIDC_CLIENT_SECRET_FILE`.
 
-OIDC sign-in is not implemented yet (milestone 2), but the OIDC variables are already
-validated so a configuration written today keeps working.
+Explorer requests the scopes `openid profile email groups`. The groups come from the
+claim named by `EXPLORER_OIDC_GROUPS_CLAIM` in the ID token, falling back to the userinfo
+endpoint; the claim must be an array of strings. Access requires `EXPLORER_ALLOWED_GROUP`
+to be in it. Issuer discovery is retried 10 times, 3 seconds apart, at startup; only
+configuration errors fail immediately.
+
+`EXPLORER_SESSION_TTL` is a sliding window: each request renews the session, so it
+expires after this much inactivity. Values above 400 days are capped at 400 days.
 
 ## Paths and port
 
 | Path | Purpose |
 |---|---|
 | `/data` | Each directory mounted under `/data` is a volume. |
-| `/config` | Explorer's state. Must be writable by the container user. |
+| `/config` | Explorer's state: sessions in `explorer.db` (SQLite). Must be writable by the container user; startup checks this and exits with a clear message otherwise. |
 | `/usr/share/explorer/web` | Web bundle, shipped in the image. |
 
 The server listens on `0.0.0.0:8080`. These are fixed in the image.

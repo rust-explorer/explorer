@@ -121,11 +121,11 @@ impl Oidc {
     }
 
     #[must_use]
-    pub fn end_session_url(&self, id_token: &str, post_logout_redirect: &Url) -> Option<Url> {
+    pub fn end_session_url(&self, id_token: &str, post_logout_redirect: &str) -> Option<Url> {
         let mut url = self.end_session_endpoint.clone()?;
         url.query_pairs_mut()
             .append_pair("id_token_hint", id_token)
-            .append_pair("post_logout_redirect_uri", post_logout_redirect.as_str())
+            .append_pair("post_logout_redirect_uri", post_logout_redirect)
             .append_pair("client_id", &self.client_id);
         Some(url)
     }

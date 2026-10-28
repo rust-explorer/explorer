@@ -3,11 +3,10 @@ mod common;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use common::fake_oidc::{self, FakeOidc, Outage};
 use explorer_server::oidc::{Oidc, SigninError, VerifiedIdentity};
-use fake_oidc::{FakeOidc, Outage};
 use serde_json::{Value, json};
 use tokio::net::TcpListener;
-use url::Url;
 
 #[tokio::test]
 async fn discovers_fake_provider() {
@@ -280,9 +279,10 @@ async fn codes_are_single_use() {
 #[tokio::test]
 async fn end_session_url_carries_hint_and_redirect() {
     let (oidc, fake) = discovered().await;
-    let after = Url::parse("https://files.example.com/").unwrap();
 
-    let url = oidc.end_session_url("the.id.token", &after).unwrap();
+    let url = oidc
+        .end_session_url("the.id.token", "https://files.example.com")
+        .unwrap();
 
     assert!(
         url.as_str()
@@ -292,7 +292,7 @@ async fn end_session_url_carries_hint_and_redirect() {
     assert_eq!(query["id_token_hint"], "the.id.token");
     assert_eq!(
         query["post_logout_redirect_uri"],
-        "https://files.example.com/"
+        "https://files.example.com"
     );
     assert_eq!(query["client_id"], fake_oidc::CLIENT_ID);
 }
