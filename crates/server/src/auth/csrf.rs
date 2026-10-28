@@ -38,8 +38,9 @@ pub async fn require_same_origin(
 }
 
 /// Rejects requests a browser marks as sent from another site, such as a link or an image on
-/// another site that would start a download or a zip. Sibling subdomains (`same-site`) are other
-/// apps on a NAS, so they are refused too; a link the user clicks still downloads.
+/// another site that would start a download or a zip, or a `no-cors` fetch that would keep a
+/// search busy. Sibling subdomains (`same-site`) are other apps on a NAS, so they are refused
+/// too; a link the user clicks still passes.
 pub async fn refuse_cross_site(req: Request, next: Next) -> Response {
     if !is_foreign(req.method(), req.headers()) {
         return next.run(req).await;

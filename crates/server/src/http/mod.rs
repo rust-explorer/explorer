@@ -81,7 +81,8 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
                 .merge(tasks::routes())
                 .merge(favorites::routes())
                 .merge(search::routes())
-                .fallback(not_found),
+                .fallback(not_found)
+                .layer(middleware::from_fn(csrf::refuse_cross_site)),
         )
         .nest("/auth", auth::routes().fallback(not_found))
         .nest(

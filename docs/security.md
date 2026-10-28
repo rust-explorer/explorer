@@ -57,6 +57,10 @@ domain), cannot start a download or a zip with the user's cookie. A `GET` the us
 clicking a link (`Sec-Fetch-Mode: navigate` with `Sec-Fetch-User: ?1`), such as a download link
 in a webmail, still passes. A request without these headers passes too.
 
+The JSON API under `/api` applies the same rule, reads included: the web app calls it from its
+own origin only, and a page on a sibling subdomain must not be able to keep searches or large
+listings running with the user's cookie, even though it cannot read the answers.
+
 ## Open redirects
 
 `/auth/login?return_to=` must be a path (leading `/`, no control characters, at most 2048
