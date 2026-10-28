@@ -205,6 +205,10 @@ so is a staged file older than that without a record. The sweep checks each reco
 once it holds the upload's lock, so an upload resumed meanwhile is kept. The sweep runs at startup and then
 every hour; it logs each abandoned upload it removes at `info` (`action` = `sweep`), then
 a summary of what it removed.
+A creation also removes the same user's unfinished uploads to the same volume and path
+that had no `PATCH` for 2 minutes and that no request holds (`upload superseded by a new
+upload`, `info`), since the client creates a new upload only when it does not resume them;
+otherwise an upload abandoned after a crash would keep its free space reserved for a day.
 
 Logs (`info`, with `user` = the OIDC `sub`, `action`, `volume`, `path`): upload started
 (with `length`), completed (with `bytes` and `final_path`), cancelled, folder created, and

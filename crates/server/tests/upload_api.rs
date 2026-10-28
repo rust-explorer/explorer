@@ -1213,6 +1213,73 @@ async fn free_space_counts_pending_uploads_to_volumes_on_the_same_filesystem() {
     .await;
 }
 
+/// Makes an upload look as if its last PATCH was `age` ago.
+async fn age(s: &Setup, location: &str, age: Duration) {
+    let at = i64::try_from(
+        (std::time::SystemTime::now() - age)
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis(),
+    )
+    .unwrap();
+    sqlx::query("UPDATE uploads SET updated_at = ? WHERE id = ?")
+        .bind(at)
+        .bind(id_of(location).as_str())
+        .execute(&s.db)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn new_upload_supersedes_an_idle_one_to_the_same_path() {
+    let mut s = setup().await;
+    let stat = rustix::fs::statvfs(s.media()).unwrap();
+    let length = stat.f_bavail * stat.f_frsize / 10 * 6;
+    let first = created(&mut s.client, "big.bin", length, &[("conflict", "replace")]).await;
+    assert_eq!(
+        patch(&mut s.client, &first, 0, b"ab").await.status(),
+        StatusCode::NO_CONTENT
+    );
+
+    // Recently written to: it may be running in another tab, so it keeps its space.
+    let res = create(&mut s.client, "big.bin", length, &[]).await;
+    error(
+        res,
+        StatusCode::INSUFFICIENT_STORAGE,
+        "insufficient_storage",
+    )
+    .await;
+
+    age(&s, &first, Duration::from_secs(180)).await;
+    let other = create(&mut s.client, "other.bin", length, &[]).await;
+    error(
+        other,
+        StatusCode::INSUFFICIENT_STORAGE,
+        "insufficient_storage",
+    )
+    .await;
+    let second = created(&mut s.client, "big.bin", length, &[]).await;
+
+    assert_not_found_head(&head(&mut s.client, &first).await);
+    assert_eq!(staged_count(&s), 1);
+    assert!(s.staging().join(id_of(&second).as_str()).exists());
+    let listed = pending(&mut s.client).await;
+    assert_eq!(listed.len(), 1);
+}
+
+#[tokio::test]
+async fn new_upload_does_not_supersede_another_users() {
+    let mut s = setup().await;
+    let first = created(&mut s.client, "same.bin", 3, &[]).await;
+    age(&s, &first, Duration::from_secs(180)).await;
+
+    s.fake.claims(json!({ "sub": "other-user" }));
+    let mut other = Client::signed_in(s.app.clone(), &s.fake).await;
+    created(&mut other, "same.bin", 3, &[]).await;
+
+    assert_eq!(offset_of(&head(&mut s.client, &first).await), 0);
+}
+
 #[tokio::test]
 async fn patches_in_flight_are_capped_per_user() {
     let mut s = setup().await;

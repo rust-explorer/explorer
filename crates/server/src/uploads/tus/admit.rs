@@ -1,8 +1,64 @@
+use std::time::Duration;
+
 use shared::api::uploads::MAX_PENDING_UPLOADS;
 
+use super::commit::now_ms;
+use super::staged::remove_staged;
 use crate::http::AppState;
 use crate::http::error::ApiError;
 use crate::storage::{RelPath, StagedId, Volume, Volumes};
+
+/// A pending upload with no `PATCH` for this long may be replaced by a new upload to its path.
+pub const SUPERSEDE_AFTER: Duration = Duration::from_secs(120);
+
+/// Removes the user's unfinished uploads to `path` that a new upload to it replaces: the client
+/// creates a new upload only when it does not resume the old one, which would otherwise keep its
+/// space reserved until swept. One that had a `PATCH` in the last [`SUPERSEDE_AFTER`] may still be
+/// running in another tab, and stays.
+pub(super) async fn supersede(
+    state: &AppState,
+    user_sub: &str,
+    volume: &str,
+    path: &RelPath,
+) -> Result<(), ApiError> {
+    let idle_before =
+        now_ms().saturating_sub(i64::try_from(SUPERSEDE_AFTER.as_millis()).unwrap_or(i64::MAX));
+    let pending = state
+        .uploads
+        .list_pending(user_sub)
+        .await
+        .map_err(ApiError::internal)?;
+    let stale = pending.into_iter().filter(|record| {
+        record.volume == volume && record.path == *path && record.updated_at < idle_before
+    });
+    for record in stale {
+        let Some(_lock) = state.uploads.try_lock(&record.id) else {
+            continue;
+        };
+        let still_idle = state
+            .uploads
+            .idle_since(&record.id, idle_before)
+            .await
+            .map_err(ApiError::internal)?;
+        if !still_idle {
+            continue;
+        }
+        remove_staged(state, &record).await?;
+        state
+            .uploads
+            .delete(&record.id)
+            .await
+            .map_err(ApiError::internal)?;
+        tracing::info!(
+            user = user_sub,
+            action = "upload",
+            volume,
+            path = path.as_str(),
+            "upload superseded by a new upload"
+        );
+    }
+    Ok(())
+}
 
 /// Refuses a new upload to a user who already has [`MAX_PENDING_UPLOADS`] unfinished ones.
 pub(super) async fn check_pending_count(state: &AppState, user_sub: &str) -> Result<(), ApiError> {

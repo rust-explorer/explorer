@@ -182,7 +182,12 @@ Names that are not valid UTF-8 are skipped with a warning.
   user has at most 8 `PATCH` requests in flight (429 `too_many_patches`, which the web app
   retries), so a client that trickles bytes ties up a bounded number of open files.
 - **Cleanup.** An upload untouched for 24 hours is removed with its staged file, as is a
-  stale staged file with no record. The sweep runs at startup and every hour.
+  stale staged file with no record. The sweep runs at startup and every hour. A new upload
+  replaces the same user's unfinished uploads to the same volume and path that had no
+  `PATCH` for 2 minutes: the client starts a new upload only when it will not resume the
+  old one (after a crash, with another conflict choice, or for another file), so the old
+  one's staged file and record are removed and its space is freed at once. One written to
+  more recently may still be running in another tab and is kept.
 - **Logs.** Uploads are logged at `info` with the user's `sub`, the volume and the path (and
   `bytes` and `final_path` on completion); folder creation and sweeps likewise; failures at
   `warn`. File contents are never logged.

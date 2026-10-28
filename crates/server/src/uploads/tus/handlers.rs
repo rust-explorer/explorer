@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 use shared::api::uploads::MAX_PATCHES_PER_USER;
 use shared::tus::TUS_VERSION;
 
-use super::admit::{check_pending_count, check_space};
+use super::admit::{check_pending_count, check_space, supersede};
 use super::commit::{commit, now_ms, write_and_commit};
 use super::protocol::{
     Creation, EXTENSIONS, OFFSET_STREAM, TUS_EXTENSION, TUS_VERSION_HEADER, UPLOAD_LENGTH,
@@ -68,6 +68,7 @@ pub(super) async fn create(
     } = creation;
 
     let admission = state.uploads.admission(&volume).await;
+    supersede(&state, &user.sub, &volume, &path).await?;
     check_pending_count(&state, &user.sub).await?;
     let pending = state
         .uploads
