@@ -34,6 +34,7 @@ favorites-remove-current = Remove from favorites
 breadcrumb = Breadcrumb
 browse-empty = This folder is empty.
 browse-empty-hint = Drop files here or use Upload.
+browse-empty-hint-touch = Use + to add files.
 read-only-notice = Read-only: you can browse, download and copy from this volume, not change it.
 read-only-notice-short = Read-only volume
 table-label = Folder contents

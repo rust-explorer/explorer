@@ -34,6 +34,7 @@ favorites-remove-current = Retirer des favoris
 breadcrumb = Fil d'Ariane
 browse-empty = Ce dossier est vide.
 browse-empty-hint = Déposez des fichiers ici ou utilisez Uploader.
+browse-empty-hint-touch = Utilisez + pour ajouter des fichiers.
 read-only-notice = Lecture seule : vous pouvez parcourir, télécharger et copier depuis ce volume, mais pas le modifier.
 read-only-notice-short = Volume en lecture seule
 table-label = Contenu du dossier

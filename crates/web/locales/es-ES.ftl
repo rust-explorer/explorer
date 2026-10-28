@@ -34,6 +34,7 @@ favorites-remove-current = Quitar de favoritos
 breadcrumb = Ruta de navegación
 browse-empty = Esta carpeta está vacía.
 browse-empty-hint = Suelta archivos aquí o usa Subir.
+browse-empty-hint-touch = Usa + para añadir archivos.
 read-only-notice = Solo lectura: puedes explorar, descargar y copiar desde este volumen, pero no modificarlo.
 read-only-notice-short = Volumen de solo lectura
 table-label = Contenido de la carpeta
