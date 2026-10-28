@@ -42,7 +42,18 @@ pub async fn sweep(uploads: &Uploads, volumes: &Arc<Volumes>, now: SystemTime) -
                     continue;
                 }
                 match uploads.delete(&record.id).await {
-                    Ok(()) => report.uploads += 1,
+                    Ok(()) => {
+                        report.uploads += 1;
+                        if record.final_path.is_none() {
+                            tracing::info!(
+                                user = record.user_sub,
+                                action = "sweep",
+                                volume = record.volume,
+                                path = record.path.as_str(),
+                                "abandoned upload removed"
+                            );
+                        }
+                    }
                     Err(err) => tracing::warn!(error = %err, "cannot delete upload record"),
                 }
             }

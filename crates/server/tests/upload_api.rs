@@ -18,6 +18,7 @@ use common::fake_oidc::FakeOidc;
 use explorer_server::app::router;
 use explorer_server::storage::UploadId;
 use explorer_server::uploads::Uploads;
+use http_body_util::BodyExt;
 use serde_json::json;
 use shared::api::{ErrorBody, PendingUpload};
 use shared::tus::encode_metadata;
@@ -974,4 +975,107 @@ async fn commit_succeeds_when_marking_it_done_fails() {
     let res = create(&mut s.client, "empty.txt", 0, &[]).await;
     assert_eq!(res.status(), StatusCode::CREATED);
     assert!(s.media().join("empty.txt").exists());
+}
+
+#[tokio::test]
+async fn failed_commit_is_retried_by_an_empty_patch() {
+    let mut s = setup().await;
+    let location = created(&mut s.client, "Album/a.txt", 3, &[]).await;
+    fs::write(s.media().join("Album"), "obstacle").unwrap();
+    let res = patch(&mut s.client, &location, 0, b"abc").await;
+    error(res, StatusCode::CONFLICT, "already_exists").await;
+    let res = head(&mut s.client, &location).await;
+    assert_eq!(offset_of(&res), 3);
+    assert_eq!(pending(&mut s.client).await.len(), 1);
+
+    fs::remove_file(s.media().join("Album")).unwrap();
+    let res = patch(&mut s.client, &location, 3, &[]).await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(offset_of(&res), 3);
+    assert_eq!(fs::read(s.media().join("Album/a.txt")).unwrap(), b"abc");
+    assert_eq!(staged_count(&s), 0);
+    assert!(pending(&mut s.client).await.is_empty());
+}
+
+/// The last PATCH wrote every byte, but the server failed before committing.
+#[tokio::test]
+async fn internal_failure_after_the_last_bytes_is_retried_by_an_empty_patch() {
+    let mut s = setup().await;
+    let location = created(&mut s.client, "a.txt", 3, &[]).await;
+    sqlx::query(
+        "CREATE TRIGGER no_touch BEFORE UPDATE OF updated_at ON uploads \
+         BEGIN SELECT RAISE(ABORT, 'refused'); END",
+    )
+    .execute(&s.db)
+    .await
+    .unwrap();
+    let res = patch(&mut s.client, &location, 0, b"abc").await;
+    error(res, StatusCode::INTERNAL_SERVER_ERROR, "internal").await;
+    assert!(!s.media().join("a.txt").exists());
+    let res = head(&mut s.client, &location).await;
+    assert_eq!(offset_of(&res), 3);
+
+    sqlx::query("DROP TRIGGER no_touch")
+        .execute(&s.db)
+        .await
+        .unwrap();
+    let res = patch(&mut s.client, &location, 3, &[]).await;
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(fs::read(s.media().join("a.txt")).unwrap(), b"abc");
+    assert!(pending(&mut s.client).await.is_empty());
+}
+
+#[tokio::test]
+async fn staging_is_unreachable_through_a_symlink_to_the_root() {
+    let mut s = setup_with(&["media"], |data| {
+        symlink(".", data.join("media/self")).unwrap();
+        fs::write(data.join("media/a.txt"), "a").unwrap();
+    })
+    .await;
+    let location = created(&mut s.client, "pending.bin", 4, &[]).await;
+    let id = id_of(&location);
+    patch(&mut s.client, &location, 0, b"ab").await;
+    let staged = format!("self/.explorer-uploads/{}", id.as_str());
+
+    let res = s.client.get("/api/volumes/media/entries?path=self").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let listing: shared::api::Listing = json(res).await;
+    let names: Vec<_> = listing.entries.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(names, ["a.txt", "self"]);
+
+    let res = s
+        .client
+        .get("/api/volumes/media/entries?path=self/.explorer-uploads")
+        .await;
+    plain_error(res, StatusCode::NOT_FOUND, "path_not_found").await;
+    let res = s
+        .client
+        .get(&format!("/files/download?volume=media&path={staged}"))
+        .await;
+    plain_error(res, StatusCode::NOT_FOUND, "path_not_found").await;
+
+    let res = create(&mut s.client, &staged, 4, &[("conflict", "replace")]).await;
+    error(res, StatusCode::NOT_FOUND, "path_not_found").await;
+    let res = create(&mut s.client, "self/.explorer-uploads", 1, &[]).await;
+    error(res, StatusCode::NOT_FOUND, "path_not_found").await;
+    let res = s
+        .client
+        .send(folder_request(
+            "media",
+            r#"{"path":"self/.explorer-uploads/sub"}"#,
+        ))
+        .await;
+    plain_error(res, StatusCode::NOT_FOUND, "path_not_found").await;
+
+    let res = s.client.get("/files/zip?volume=media&path=self").await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.into_body().collect().await.unwrap().to_bytes().to_vec();
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(body)).unwrap();
+    let names: Vec<String> = (0..archive.len())
+        .map(|i| archive.by_index(i).unwrap().name().unwrap().into_owned())
+        .collect();
+    assert_eq!(names, ["a.txt"]);
+
+    assert_eq!(staged_count(&s), 1);
+    assert_eq!(fs::read(s.staging().join(id.as_str())).unwrap(), b"ab");
 }

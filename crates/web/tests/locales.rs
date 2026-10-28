@@ -99,6 +99,7 @@ fn every_api_error_code_has_a_message() {
         "range_not_satisfiable",
         "internal",
         "forbidden",
+        "cross_device",
     ]
     .iter()
     .map(|code| format!("error-{code}"))

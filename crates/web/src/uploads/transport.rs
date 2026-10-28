@@ -1,4 +1,8 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use gloo_net::http::{Method, RequestBuilder, Response};
+use gloo_timers::callback::Interval;
 use shared::api::{ConflictPolicy, CreateFolder, ErrorBody};
 use shared::tus::{TUS_VERSION, encode_metadata};
 use wasm_bindgen::JsCast as _;
@@ -11,6 +15,9 @@ use crate::api::{self, ApiFailure};
 const UPLOADS_URL: &str = "/files/uploads";
 const UPLOAD_OFFSET: &str = "Upload-Offset";
 const UPLOAD_NOT_FOUND: &str = "upload_not_found";
+/// A PATCH that reports no progress for this long is a half-open connection.
+const STALL_TIMEOUT_MS: f64 = 120_000.0;
+const STALL_CHECK_MS: u32 = 5_000;
 
 fn tus(method: Method, url: &str) -> RequestBuilder {
     RequestBuilder::new(url)
@@ -99,15 +106,18 @@ pub async fn create_folder(volume: &str, path: &str) -> Result<(), ApiFailure> {
     checked(request).await.map(drop)
 }
 
-/// A PATCH of one chunk, sent with XHR for its upload progress.
+/// A PATCH of one chunk, sent with XHR for its upload progress. It is aborted, and ends as a
+/// network failure, when no progress is reported for [`STALL_TIMEOUT_MS`].
 pub struct Patch {
     xhr: XmlHttpRequest,
     done: js_sys::Promise,
     _progress: Closure<dyn FnMut(ProgressEvent)>,
+    _watchdog: Interval,
 }
 
 impl Patch {
-    /// Sends `len` bytes of `file` from `offset`; `on_progress` gets the bytes of this chunk sent.
+    /// Sends `len` bytes of `file` from `offset`, possibly none; `on_progress` gets the bytes of
+    /// this chunk sent.
     pub fn send(
         file: &File,
         url: &str,
@@ -127,13 +137,18 @@ impl Patch {
             xhr.set_request_header(name, &value)
                 .map_err(|_| ApiFailure::Network)?;
         }
-        let progress = Closure::<dyn FnMut(ProgressEvent)>::new(move |event: ProgressEvent| {
-            #[expect(
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                reason = "loaded is a whole, non-negative byte count"
-            )]
-            on_progress(event.loaded() as u64);
+        let last_progress = Rc::new(Cell::new(js_sys::Date::now()));
+        let progress = Closure::<dyn FnMut(ProgressEvent)>::new({
+            let last_progress = Rc::clone(&last_progress);
+            move |event: ProgressEvent| {
+                last_progress.set(js_sys::Date::now());
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "loaded is a whole, non-negative byte count"
+                )]
+                on_progress(event.loaded() as u64);
+            }
         });
         xhr.upload()
             .map_err(|_| ApiFailure::Network)?
@@ -148,10 +163,19 @@ impl Patch {
             .map_err(|_| ApiFailure::Network)?;
         xhr.send_with_opt_blob(Some(&chunk))
             .map_err(|_| ApiFailure::Network)?;
+        let watchdog = Interval::new(STALL_CHECK_MS, {
+            let xhr = xhr.clone();
+            move || {
+                if js_sys::Date::now() - last_progress.get() >= STALL_TIMEOUT_MS {
+                    let _ = xhr.abort();
+                }
+            }
+        });
         Ok(Self {
             xhr,
             done,
             _progress: progress,
+            _watchdog: watchdog,
         })
     }
 

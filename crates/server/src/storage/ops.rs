@@ -1,11 +1,12 @@
 use std::io;
 use std::time::SystemTime;
 
-use cap_std::fs::{Metadata, OpenOptions, OpenOptionsExt};
+use cap_std::fs::{Metadata, MetadataExt as _, OpenOptions, OpenOptionsExt};
 use rustix::fs::OFlags;
 
 use super::error::is_escape;
 use super::path::STAGING_DIR;
+use super::write::prefixes;
 use super::{RelPath, StorageError, Volume};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +43,29 @@ pub enum WalkItem {
 struct Entry {
     meta: EntryMeta,
     path: Option<RelPath>,
+}
+
+/// A directory or file by device and inode, whatever path or symlink leads to it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Identity(u64, u64);
+
+impl Identity {
+    fn of(meta: &Metadata) -> Self {
+        Self(meta.dev(), meta.ino())
+    }
+}
+
+/// What makes an entry part of the staging area: being the staging directory, or bearing its
+/// name in the volume root, however either is reached.
+struct Reserved {
+    root: Identity,
+    staging: Option<Identity>,
+}
+
+impl Reserved {
+    fn hides(&self, parent: Identity, name: &str, entry: Option<Identity>) -> bool {
+        (parent == self.root && name == STAGING_DIR) || (entry.is_some() && entry == self.staging)
+    }
 }
 
 impl EntryMeta {
@@ -83,6 +107,7 @@ pub(super) fn fs_path(path: &RelPath) -> &str {
 impl Volume {
     /// Entries sorted by name, bytewise.
     pub fn list(&self, dir: &RelPath) -> Result<Vec<EntryMeta>, StorageError> {
+        self.refuse_reserved(dir)?;
         Ok(self
             .entries(dir)?
             .into_iter()
@@ -91,6 +116,7 @@ impl Volume {
     }
 
     pub fn stat(&self, path: &RelPath) -> Result<EntryMeta, StorageError> {
+        self.refuse_reserved(path)?;
         let meta = self.metadata(path)?;
         Ok(EntryMeta::from_metadata(self.entry_name(path), &meta))
     }
@@ -105,6 +131,7 @@ impl Volume {
                 Err(StorageError::NotFound(path.clone()))
             }
         };
+        self.refuse_reserved(path)?;
         check(&self.metadata(path)?)?;
         // Non-blocking so that a FIFO swapped in after the check cannot hang the open; it has no
         // effect on regular files.
@@ -127,6 +154,7 @@ impl Volume {
     /// Depth-first, each directory before its contents. Entries that are neither files nor
     /// directories are skipped, and so are symlinks to directories, which also rules out cycles.
     pub fn walk(&self, dir: &RelPath) -> Result<Vec<WalkItem>, StorageError> {
+        self.refuse_reserved(dir)?;
         let start = self.metadata(dir)?;
         if !start.is_dir() {
             return Err(StorageError::NotADirectory(dir.clone()));
@@ -157,6 +185,47 @@ impl Volume {
         })
     }
 
+    /// Refuses, as not found, a path that leads to or into the staging directory, which a
+    /// symlink to the volume root or to the directory itself would otherwise allow.
+    pub(super) fn refuse_reserved(&self, path: &RelPath) -> Result<(), StorageError> {
+        let reserved = self.reserved()?;
+        let mut parent = reserved.root;
+        for prefix in prefixes(path) {
+            let name = prefix.file_name().unwrap_or_default();
+            let entry = self
+                .root
+                .metadata(prefix.as_str())
+                .ok()
+                .map(|m| Identity::of(&m));
+            if reserved.hides(parent, name, entry) {
+                return Err(StorageError::NotFound(path.clone()));
+            }
+            match entry {
+                Some(entry) => parent = entry,
+                // Nothing further down exists; the operation reports its own error.
+                None => return Ok(()),
+            }
+        }
+        Ok(())
+    }
+
+    fn reserved(&self) -> Result<Reserved, StorageError> {
+        let root = self
+            .root
+            .dir_metadata()
+            .map_err(|err| StorageError::from_io(&RelPath::root(), err))?;
+        let staging = self
+            .root
+            .symlink_metadata(STAGING_DIR)
+            .ok()
+            .filter(Metadata::is_dir)
+            .map(|meta| Identity::of(&meta));
+        Ok(Reserved {
+            root: Identity::of(&root),
+            staging,
+        })
+    }
+
     fn metadata(&self, path: &RelPath) -> Result<Metadata, StorageError> {
         self.root
             .metadata(fs_path(path))
@@ -170,13 +239,15 @@ impl Volume {
     fn entries(&self, dir: &RelPath) -> Result<Vec<Entry>, StorageError> {
         let map_err = |err| StorageError::from_io(dir, err);
         let handle = self.root.open_dir(fs_path(dir)).map_err(map_err)?;
+        let reserved = self.reserved()?;
+        let listed = Identity::of(&handle.dir_metadata().map_err(map_err)?);
         let mut entries = Vec::new();
         for entry in handle.entries().map_err(map_err)? {
             let file_name = entry.map_err(map_err)?.file_name();
-            if dir.is_root() && file_name == STAGING_DIR {
+            let name = file_name.to_string_lossy().into_owned();
+            if reserved.hides(listed, &name, None) {
                 continue;
             }
-            let name = file_name.to_string_lossy().into_owned();
             let resolved = file_name
                 .to_str()
                 .and_then(|name| dir.join(name).ok())
@@ -187,6 +258,11 @@ impl Volume {
                         None
                     }
                 });
+            if let Some((_, meta)) = &resolved
+                && reserved.hides(listed, &name, Some(Identity::of(meta)))
+            {
+                continue;
+            }
             let entry = match resolved {
                 Some((path, meta)) => Entry {
                     meta: EntryMeta::from_metadata(name, &meta),

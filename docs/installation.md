@@ -1,7 +1,7 @@
 # Installation
 
-> **Status: work in progress.** Sign-in, browsing and downloads work; uploads and file
-> operations arrive in later milestones.
+> **Status: work in progress.** Sign-in, browsing, downloads and uploads work; file
+> operations (rename, move, delete) arrive in a later milestone.
 
 Explorer ships as a single Docker image (`linux/amd64`). You need:
 
@@ -128,7 +128,8 @@ Edit `docker-compose.yml`:
   Label syntax: [GoDoxy — Configuring Routes](https://docs.godoxy.dev/docs/godoxy/getting-started/Configuring-Routes).
   GoDoxy must be able to reach the container (same Docker host/network). With another
   reverse proxy, remove the labels and proxy `https://files.example.com` to the
-  container's port 8080.
+  container's port 8080. Uploads need a few more things from the proxy, see
+  [Reverse proxy and uploads](#reverse-proxy-and-uploads).
 
 ## 5. First start
 
@@ -163,10 +164,53 @@ The image has a built-in healthcheck (`explorer healthcheck`, which queries
 
 Then open `https://files.example.com`: you are sent to PocketID, and back once signed in,
 then to your first volume. Click a file to download it, or a folder's download button to
-get it as a zip.
+get it as a zip. Use the Upload button (or the "+" on a phone), or drop files and folders
+on the listing, to upload.
 Explorer's session lives in `/config/explorer.db`, so `config/` must be writable by the
 container user; otherwise startup fails with a message naming the directory and the
 UID/GID.
+
+## Reverse proxy and uploads
+
+Explorer sends each file as a series of 16 MiB chunks, one `PATCH /files/uploads/<id>` per
+chunk, and an interrupted transfer resumes where the server stopped. The proxy in front of
+it must therefore:
+
+- accept request bodies of at least 16 MiB (many proxies default to 1 MiB or less; when
+  there is a configurable limit, set it to 16 MiB or more, or remove it);
+- not buffer request bodies: stream them to Explorer as they arrive. A proxy that stores a
+  whole chunk before forwarding it (to memory or to disk) delays and multiplies the work and
+  can break the idle detection below;
+- allow a few minutes per request (read, send and idle timeouts). A chunk on a slow uplink
+  takes a while: 16 MiB at 1 MB/s is about 16 s, at 100 kB/s nearly three minutes. A request
+  that is cut off is not lost, as the client resumes from the server's offset, but a timeout
+  shorter than a chunk makes a slow connection retry forever.
+
+Explorer itself closes an upload request whose body sends nothing for 60 seconds, and a zip
+download whose client stops reading for 60 seconds; a proxy should not impose a shorter
+idle limit than that. The exact setting names depend on your proxy; check its documentation
+for the maximum request body size, request buffering and read/send timeouts. The GoDoxy
+labels above do not set any of these, and this guide does not list GoDoxy-specific values.
+
+Also keep in mind:
+
+- Each writable volume gets a `.explorer-uploads` folder at its root, created by the first
+  upload (mode `0700`, owned by the container user). Incoming data is staged there and
+  moved into place when complete, so a volume needs room for the files being uploaded, and
+  the folder is hidden from listings and zips. Abandoned uploads are removed after 24 hours.
+  Do not delete or rename it while uploads are running.
+- Uploads are staged inside the volume, so the final move must stay on one filesystem. If a
+  folder inside a volume is a separate mount (another disk or dataset), uploads into it fail
+  with `cross_device` ("on another filesystem than its volume") and the log says the
+  destination is on another filesystem. Mount that folder as its own volume under `/data`
+  instead.
+- A read-only volume (`:ro` mount, or not writable by the container user) cannot receive
+  uploads; its upload controls are disabled and the server answers `read_only_volume`.
+- Uploaded files belong to the container user and get the container's umask, like any file
+  it creates (`0644` with the usual `022`). To keep them private from other host users,
+  restrict access to the volume's folder on the host.
+- The folder picker cannot see empty folders, because browsers only list files; drag and
+  drop does create them.
 
 ## Troubleshooting sign-in
 
@@ -194,7 +238,9 @@ unexpected I/O failures also show the OS error). A large download interrupted by
 network can be resumed by the browser, as files support `Range` requests.
 
 If a download is cut at a fixed time or size, check the reverse proxy's timeouts and
-buffering limits.
+buffering limits. A zip download is also aborted when the client stops reading for 60
+seconds. `/files/zip` requires the `path` parameter; an empty `path` downloads the whole
+volume.
 
 ## Updating
 

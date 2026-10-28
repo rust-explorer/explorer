@@ -36,7 +36,8 @@ pub fn UploadsPanel() -> Element {
     let queue = uploads.queue();
     let mut collapsed = use_signal(|| false);
     let queue = queue.read();
-    if queue.items().is_empty() {
+    let skipped = queue.skipped();
+    if queue.items().is_empty() && skipped == 0 {
         return rsx! {};
     }
     let active = queue
@@ -81,6 +82,11 @@ pub fn UploadsPanel() -> Element {
                         onclick: move |_| uploads.clear_finished(),
                         CloseIcon {}
                     }
+                }
+            }
+            if skipped > 0 {
+                p { class: "mt-1 text-xs text-amber-700 dark:text-amber-400",
+                    {t!("uploads-unreadable", count: skipped)}
                 }
             }
             if !collapsed() {

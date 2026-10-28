@@ -23,6 +23,9 @@ pub enum StorageError {
     NoSpace(RelPath),
     #[error("outside the volume: {}", .0.as_str())]
     OutsideVolume(RelPath),
+    /// A rename onto another filesystem: a mount nested in the volume.
+    #[error("on another filesystem than the volume: {}", .0.as_str())]
+    CrossDevice(RelPath),
     #[error("i/o error on {}: {source}", .path.as_str())]
     Io { path: RelPath, source: io::Error },
 }

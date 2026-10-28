@@ -60,6 +60,7 @@ error-upload_too_large = Este archivo es demasiado grande para subirlo.
 error-invalid_upload = El servidor ha rechazado esta subida.
 error-unsupported_tus_version = El servidor no admite esta versión del protocolo de subida.
 error-unsupported_media_type = El servidor ha rechazado el formato de esta subida.
+error-cross_device = { $path } está en otro sistema de archivos que su volumen, así que la subida no se puede guardar ahí. Un administrador puede montar esa carpeta como un volumen propio.
 upload = Subir
 upload-open = Subir archivos o una carpeta
 upload-files = Archivos…
@@ -80,6 +81,11 @@ uploads-retrying = Conexión perdida, nuevo intento en { $seconds } s
 uploads-done = Terminada
 uploads-cancelled = Cancelada
 uploads-skipped = Omitida
+uploads-unreadable =
+    { $count ->
+        [one] 1 elemento no se pudo leer y se omitió.
+       *[other] { $count } elementos no se pudieron leer y se omitieron.
+    }
 conflict-title = { $name } ya existe en { $folder }
 conflict-replace = Reemplazar
 conflict-keep-both = Conservar ambos

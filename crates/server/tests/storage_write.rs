@@ -205,10 +205,6 @@ fn staging_tracks_files_and_appends() {
     assert_eq!(staging.len(&id).unwrap(), Some(6));
     let path = fixture.media_path().join(STAGING_DIR).join(id.as_str());
     assert_eq!(fs::read(&path).unwrap(), b"abcdef");
-    assert_eq!(
-        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
-        0o600
-    );
     let files = staging.files().unwrap();
     assert_eq!(files.len(), 1);
     assert_eq!(files[0].0, id.as_str());
@@ -402,4 +398,86 @@ fn commit_to_root_is_a_directory() {
         matches!(result, Err(StorageError::IsADirectory(ref p)) if p.is_root()),
         "{result:?}"
     );
+}
+
+#[test]
+fn committed_file_mode_follows_the_umask() {
+    let fixture = Fixture::new(|_| {});
+    let media = fixture.media();
+    let staging = media.staging().unwrap();
+    let id = stage(&staging, b"x");
+    media
+        .commit_upload(&staging, &id, &rel("a.txt"), ConflictPolicy::Fail, None)
+        .unwrap();
+
+    let reference = fixture.media_path().join("reference");
+    fs::File::create(&reference).unwrap();
+    let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&fixture.media_path().join("a.txt")), mode(&reference));
+}
+
+#[test]
+fn staging_is_unreachable_through_a_symlink_to_the_root() {
+    let fixture = Fixture::new(|media| {
+        symlink(".", media.join("self")).unwrap();
+        symlink(STAGING_DIR, media.join("staged")).unwrap();
+        write(&media.join("a.txt"), b"a");
+    });
+    let media = fixture.media();
+    let staging = media.staging().unwrap();
+    let id = stage(&staging, b"pending");
+    let staged = rel(&format!("self/{STAGING_DIR}/{}", id.as_str()));
+    let not_found = |result: Result<(), StorageError>| {
+        assert!(
+            matches!(result, Err(StorageError::NotFound(_))),
+            "{result:?}"
+        );
+    };
+
+    let names = |dir: &str| -> Vec<String> {
+        media
+            .list(&rel(dir))
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect()
+    };
+    assert_eq!(names("self"), ["a.txt", "self"]);
+    assert_eq!(names("self/self"), ["a.txt", "self"]);
+    assert_eq!(names(""), ["a.txt", "self"]);
+    for dir in ["self/.explorer-uploads", "staged", "self/staged"] {
+        not_found(media.list(&rel(dir)).map(drop));
+    }
+    let walked: Vec<_> = media
+        .walk(&rel("self"))
+        .unwrap()
+        .into_iter()
+        .map(|item| match item {
+            WalkItem::Dir(path) | WalkItem::File { path, .. } => path,
+        })
+        .collect();
+    assert_eq!(walked, [rel("self/a.txt")]);
+    not_found(media.walk(&rel("staged")).map(drop));
+
+    not_found(media.stat(&staged).map(drop));
+    not_found(media.open_file(&staged).map(drop));
+    not_found(
+        media
+            .stat(&rel(&format!("staged/{}", id.as_str())))
+            .map(drop),
+    );
+    not_found(media.check_upload_target(&staged, ConflictPolicy::Replace));
+    not_found(media.check_upload_target(&rel("self/.explorer-uploads/x/y"), ConflictPolicy::Fail));
+    not_found(media.create_dir_all(&rel("self/.explorer-uploads/sub")));
+    let other = stage(&staging, b"other");
+    not_found(
+        media
+            .commit_upload(&staging, &other, &staged, ConflictPolicy::Replace, None)
+            .map(drop),
+    );
+    assert_eq!(
+        fs::read(fixture.media_path().join(STAGING_DIR).join(id.as_str())).unwrap(),
+        b"pending"
+    );
+    assert_eq!(names(""), ["a.txt", "self"]);
 }
