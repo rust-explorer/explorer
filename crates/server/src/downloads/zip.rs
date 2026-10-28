@@ -1,11 +1,11 @@
+use std::collections::HashSet;
 use std::io::{self, Read, Write};
 use std::mem;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use ::zip::write::{SimpleFileOptions, StreamWriter};
+use ::zip::write::{FullFileOptions, StreamWriter};
 use ::zip::{CompressionMethod, DateTime, ZipWriter};
 use axum::body::{Body, Bytes};
 use axum::extract::State;
@@ -13,6 +13,7 @@ use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::Response;
 use axum_extra::extract::{Query, QueryRejection};
 use serde::Deserialize;
+use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -25,9 +26,9 @@ use crate::http::error::ApiError;
 use crate::storage::{RelPath, Volume, WalkItem};
 
 const CHUNK: usize = 64 * 1024;
+const EXTENDED_TIMESTAMP: u16 = 0x5455;
 const CHANNEL_CAPACITY: usize = 8;
 const ZIP_SEND_TIMEOUT: Duration = Duration::from_secs(60);
-const SEND_POLL: Duration = Duration::from_millis(2);
 
 type Chunk = io::Result<Bytes>;
 
@@ -54,9 +55,16 @@ pub async fn zip(
     user: CurrentUser,
     query: Result<Query<ZipQuery>, QueryRejection>,
 ) -> Result<Response, ApiError> {
-    let Ok(Query(ZipQuery { volume, path, name })) = query else {
+    let Ok(Query(ZipQuery {
+        volume,
+        path,
+        mut name,
+    })) = query
+    else {
         return Err(invalid_query());
     };
+    let mut seen = HashSet::new();
+    name.retain(|name| seen.insert(name.clone()));
     let path = authorize(&state, &user, &volume, &path, Action::Read)?;
 
     let children = name
@@ -191,7 +199,8 @@ fn write_entries(
     for item in items {
         match item {
             WalkItem::Dir(path) => {
-                zip.add_directory(entry_name(root, path), SimpleFileOptions::default())
+                let modified = volume.stat(path).ok().and_then(|meta| meta.modified);
+                zip.add_directory(entry_name(root, path), entry_options(modified))
                     .map_err(|err| Failure::at(path, err))?;
             }
             WalkItem::File { path, modified, .. } => {
@@ -234,14 +243,40 @@ fn entry_name(root: &RelPath, path: &RelPath) -> String {
     relative.replace('\\', "_")
 }
 
-fn file_options(modified: Option<SystemTime>) -> SimpleFileOptions {
-    let options = SimpleFileOptions::default()
+fn file_options(modified: Option<SystemTime>) -> FullFileOptions<'static, 'static> {
+    entry_options(modified)
         .compression_method(CompressionMethod::Stored)
-        .large_file(true);
-    match modified.and_then(zip_time) {
-        Some(time) => options.last_modified_time(time),
-        None => options,
+        .large_file(true)
+}
+
+/// The DOS time of an entry is naive and in UTC; an extended timestamp gives extractors that
+/// read it the exact time, which they show in their own time zone.
+fn entry_options(modified: Option<SystemTime>) -> FullFileOptions<'static, 'static> {
+    let mut options = FullFileOptions::default();
+    let Some(modified) = modified else {
+        return options;
+    };
+    if let Some(time) = zip_time(modified) {
+        options = options.last_modified_time(time);
     }
+    if let Some(field) = extended_timestamp(modified) {
+        // The field is 5 bytes, far below the limit on extra data.
+        let _ = options.add_extra_field(EXTENDED_TIMESTAMP, field, false);
+    }
+    options
+}
+
+/// The modification time as an "UT" extra field: a flag byte, then signed Unix seconds.
+fn extended_timestamp(time: SystemTime) -> Option<[u8; 5]> {
+    let secs = match time.duration_since(UNIX_EPOCH) {
+        Ok(after) => i32::try_from(after.as_secs()).ok()?,
+        Err(before) => i32::try_from(before.duration().as_secs())
+            .ok()?
+            .checked_neg()?,
+    };
+    let mut field = [1, 0, 0, 0, 0];
+    field[1..].copy_from_slice(&secs.to_le_bytes());
+    Some(field)
 }
 
 /// Zip timestamps are naive; UTC is used. Times outside 1980..=2107 are dropped.
@@ -260,21 +295,13 @@ fn zip_time(time: SystemTime) -> Option<DateTime> {
 }
 
 /// Fails with `TimedOut` when the channel stays full for `timeout`, so a stalled client cannot
-/// hold the blocking thread forever.
-fn send_timeout(tx: &mpsc::Sender<Chunk>, mut chunk: Chunk, timeout: Duration) -> io::Result<()> {
-    let deadline = Instant::now() + timeout;
-    loop {
-        match tx.try_send(chunk) {
-            Ok(()) => return Ok(()),
-            Err(mpsc::error::TrySendError::Closed(_)) => {
-                return Err(io::ErrorKind::BrokenPipe.into());
-            }
-            Err(mpsc::error::TrySendError::Full(back)) => chunk = back,
-        }
-        if Instant::now() >= deadline {
-            return Err(io::ErrorKind::TimedOut.into());
-        }
-        thread::sleep(SEND_POLL);
+/// hold the blocking thread forever. Runs on a blocking thread of the runtime.
+fn send_timeout(tx: &mpsc::Sender<Chunk>, chunk: Chunk, timeout: Duration) -> io::Result<()> {
+    let sent = Handle::current().block_on(tokio::time::timeout(timeout, tx.send(chunk)));
+    match sent {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(_)) => Err(io::ErrorKind::BrokenPipe.into()),
+        Err(_) => Err(io::ErrorKind::TimedOut.into()),
     }
 }
 
@@ -340,6 +367,11 @@ mod tests {
 
     use super::*;
 
+    /// The writer blocks on the runtime it runs under, as on a blocking thread of the server.
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Runtime::new().unwrap()
+    }
+
     fn writer(capacity: usize) -> (ChannelWriter, mpsc::Receiver<Chunk>) {
         let (tx, rx) = mpsc::channel(capacity);
         (ChannelWriter::new(tx), rx)
@@ -364,6 +396,8 @@ mod tests {
     /// fill a chunk and be sent unless the abort comes first.
     #[test]
     fn failure_mid_file_sends_no_footer_then_an_error() {
+        let rt = runtime();
+        let _entered = rt.enter();
         for short in 0..512 {
             let (tx, mut rx) = mpsc::channel(64);
             let path = RelPath::parse("big.bin").unwrap();
@@ -389,6 +423,8 @@ mod tests {
 
     #[test]
     fn client_gone_mid_file_aborts_the_writer() {
+        let rt = runtime();
+        let _entered = rt.enter();
         let (tx, rx) = mpsc::channel(1);
         drop(rx);
         let path = RelPath::parse("big.bin").unwrap();
@@ -405,6 +441,8 @@ mod tests {
 
     #[test]
     fn writer_sends_full_chunks_then_the_rest_on_flush() {
+        let rt = runtime();
+        let _entered = rt.enter();
         let (mut writer, mut rx) = writer(4);
         writer.write_all(&vec![7; CHUNK + 10]).unwrap();
         writer.flush().unwrap();
@@ -417,6 +455,8 @@ mod tests {
 
     #[test]
     fn writer_fails_once_the_receiver_is_gone() {
+        let rt = runtime();
+        let _entered = rt.enter();
         let (mut writer, rx) = writer(1);
         drop(rx);
         let err = writer.write_all(&vec![0; CHUNK]).unwrap_err();
@@ -425,6 +465,8 @@ mod tests {
 
     #[test]
     fn stalled_client_times_out() {
+        let rt = runtime();
+        let _entered = rt.enter();
         let (tx, _rx) = mpsc::channel(1);
         let mut writer = ChannelWriter::new(tx).with_send_timeout(Duration::from_millis(50));
         writer.write_all(&vec![0; CHUNK]).unwrap();
@@ -454,5 +496,20 @@ mod tests {
         assert!(zip_time(UNIX_EPOCH).is_none());
         let time = zip_time(UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000)).unwrap();
         assert_eq!((time.year(), time.month(), time.day()), (2023, 11, 14));
+    }
+
+    #[test]
+    fn extended_timestamp_holds_signed_unix_seconds() {
+        let after = UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        assert_eq!(extended_timestamp(after), Some([1, 0x00, 0xf1, 0x53, 0x65]));
+        let before = UNIX_EPOCH - Duration::from_secs(1);
+        assert_eq!(
+            extended_timestamp(before),
+            Some([1, 0xff, 0xff, 0xff, 0xff])
+        );
+        assert_eq!(
+            extended_timestamp(UNIX_EPOCH + Duration::from_secs(1 << 31)),
+            None
+        );
     }
 }

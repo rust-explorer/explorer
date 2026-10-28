@@ -177,7 +177,12 @@ async fn oversized_suffix_is_clamped() {
 #[tokio::test]
 async fn multi_range_is_never_unsatisfiable() {
     let mut s = setup().await;
-    for range in ["bytes=0-1,100-200", "bytes=4-5,0-1", "bytes=0-5,3-8"] {
+    for range in [
+        "bytes=0-1,100-200",
+        "bytes=4-5,0-1",
+        "bytes=0-5,3-8",
+        "bytes=0-1,-0",
+    ] {
         let res = ranged(&mut s.client, range).await;
         assert_eq!(res.status(), StatusCode::OK, "{range}");
         assert_eq!(body_of(res).await, CONTENT);
@@ -187,24 +192,28 @@ async fn multi_range_is_never_unsatisfiable() {
 #[tokio::test]
 async fn reversed_range_is_ignored() {
     let mut s = setup().await;
-    let res = ranged(&mut s.client, "bytes=5-2").await;
-    assert_eq!(res.status(), StatusCode::OK);
-    assert_eq!(body_of(res).await, CONTENT);
+    for range in ["bytes=5-2", "bytes=100-50"] {
+        let res = ranged(&mut s.client, range).await;
+        assert_eq!(res.status(), StatusCode::OK, "{range}");
+        assert_eq!(body_of(res).await, CONTENT);
+    }
 }
 
 #[tokio::test]
-async fn empty_file_with_range_is_416() {
+async fn empty_file_with_a_range_is_416_unless_a_suffix() {
     let mut s = setup().await;
     fs::write(s.data.join("media/empty"), b"").unwrap();
     let uri = "/files/download?volume=media&path=empty";
-    for range in ["bytes=0-", "bytes=-5"] {
-        let res = get_with(&mut s.client, uri, &[(header::RANGE, range)]).await;
-        assert_eq!(header_of(&res, header::CONTENT_RANGE), "bytes */0");
-        assert_eq!(
-            error_of(res, StatusCode::RANGE_NOT_SATISFIABLE).await.code,
-            "range_not_satisfiable"
-        );
-    }
+    let res = get_with(&mut s.client, uri, &[(header::RANGE, "bytes=0-")]).await;
+    assert_eq!(header_of(&res, header::CONTENT_RANGE), "bytes */0");
+    assert_eq!(
+        error_of(res, StatusCode::RANGE_NOT_SATISFIABLE).await.code,
+        "range_not_satisfiable"
+    );
+    // RFC 9110: a non-zero suffix is satisfiable, even on an empty file.
+    let res = get_with(&mut s.client, uri, &[(header::RANGE, "bytes=-5")]).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(body_of(res).await.is_empty());
     let res = s.client.get(uri).await;
     assert_eq!(res.status(), StatusCode::OK);
     assert!(body_of(res).await.is_empty());

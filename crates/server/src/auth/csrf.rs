@@ -37,6 +37,25 @@ pub async fn require_same_origin(
     ApiError::csrf_rejected().into_response()
 }
 
+/// Rejects requests a browser marks as sent from another site, such as a link or an image on
+/// another site that would start a download or a zip.
+pub async fn refuse_cross_site(req: Request, next: Next) -> Response {
+    let cross_site = req
+        .headers()
+        .get("sec-fetch-site")
+        .is_some_and(|value| value.as_bytes().eq_ignore_ascii_case(b"cross-site"));
+    if !cross_site {
+        return next.run(req).await;
+    }
+    tracing::warn!(
+        request_id = request_id(req.headers()),
+        method = %req.method(),
+        path = req.uri().path(),
+        "cross-site request rejected"
+    );
+    ApiError::csrf_rejected().into_response()
+}
+
 fn is_safe(method: &Method) -> bool {
     matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS)
 }

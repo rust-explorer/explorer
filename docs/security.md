@@ -49,6 +49,10 @@ task (`POST /api/tasks`, `DELETE /api/tasks/{id}`), and adding or removing a fav
 changes nothing. Uploads use same-origin `XHR` and
 `fetch`, so the browser sends an `Origin` the check accepts.
 
+Everything under `/files` (downloads, zips, thumbnails, uploads) also refuses, with 403
+`csrf_rejected`, a request the browser marks `Sec-Fetch-Site: cross-site`, so that a link or an
+image on another site cannot start a download or a zip with the user's cookie.
+
 ## Open redirects
 
 `/auth/login?return_to=` must be a path (leading `/`, no control characters, at most 2048

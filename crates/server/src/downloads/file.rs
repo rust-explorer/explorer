@@ -171,7 +171,8 @@ fn range_not_satisfiable(volume: &str, path: &RelPath, size: u64) -> Response {
 struct Unsatisfiable;
 
 /// `Ok(None)` serves the whole file. A malformed or reversed `Range`, a multi-range and a stale
-/// `If-Range` all fall back to the full file, as RFC 9110 allows.
+/// `If-Range` all fall back to the full file, as RFC 9110 allows; so does a suffix range of an
+/// empty file, which RFC 9110 counts as satisfiable.
 fn select_range(
     headers: &HeaderMap,
     size: u64,
@@ -190,22 +191,24 @@ fn select_range(
     }
     let parsed = match http_range_header::parse_range_header(range) {
         Ok(parsed) => parsed,
-        Err(RangeUnsatisfiableError::ZeroSuffix) => return Err(Unsatisfiable),
+        Err(RangeUnsatisfiableError::ZeroSuffix) if !range.contains(',') => {
+            return Err(Unsatisfiable);
+        }
         Err(_) => return Ok(None),
     };
     let [spec] = parsed.ranges.as_slice() else {
         return Ok(None);
     };
-    if size == 0 {
-        return Err(Unsatisfiable);
-    }
-    let last = size - 1;
+    let last = size.checked_sub(1);
     match (spec.start, spec.end) {
-        (StartPosition::FromLast(n), _) => Ok(Some(size.saturating_sub(n)..=last)),
-        (StartPosition::Index(first), _) if first >= size => Err(Unsatisfiable),
         (StartPosition::Index(first), EndPosition::Index(end)) if end < first => Ok(None),
-        (StartPosition::Index(first), EndPosition::Index(end)) => Ok(Some(first..=end.min(last))),
-        (StartPosition::Index(first), EndPosition::LastByte) => Ok(Some(first..=last)),
+        (StartPosition::FromLast(_), _) if size == 0 => Ok(None),
+        (StartPosition::Index(first), _) if first >= size => Err(Unsatisfiable),
+        (StartPosition::FromLast(n), _) => Ok(last.map(|last| size.saturating_sub(n)..=last)),
+        (StartPosition::Index(first), EndPosition::Index(end)) => {
+            Ok(last.map(|last| first..=end.min(last)))
+        }
+        (StartPosition::Index(first), EndPosition::LastByte) => Ok(last.map(|last| first..=last)),
     }
 }
 
@@ -311,5 +314,30 @@ mod tests {
         let now = UNIX_EPOCH + Duration::from_secs(1_000);
         let validators = Validators::at(1, Some(now + Duration::from_secs(60)), now);
         assert_eq!(validators.modified, Some(now));
+    }
+
+    fn range(header: &str, size: u64) -> Result<Option<RangeInclusive<u64>>, ()> {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::RANGE, HeaderValue::from_str(header).unwrap());
+        select_range(
+            &headers,
+            size,
+            &Validators::at(size, None, SystemTime::now()),
+        )
+        .map_err(|Unsatisfiable| ())
+    }
+
+    #[test]
+    fn range_edge_cases() {
+        assert_eq!(range("bytes=0-1", 10), Ok(Some(0..=1)));
+        assert_eq!(range("bytes=-3", 10), Ok(Some(7..=9)));
+        assert_eq!(range("bytes=5-", 10), Ok(Some(5..=9)));
+        assert_eq!(range("bytes=0-1,-0", 10), Ok(None));
+        assert_eq!(range("bytes=-0", 10), Err(()));
+        assert_eq!(range("bytes=100-50", 10), Ok(None));
+        assert_eq!(range("bytes=10-", 10), Err(()));
+        assert_eq!(range("bytes=-5", 0), Ok(None));
+        assert_eq!(range("bytes=0-", 0), Err(()));
+        assert_eq!(range("bytes=0-1,4-5", 10), Ok(None));
     }
 }

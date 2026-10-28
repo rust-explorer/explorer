@@ -73,7 +73,7 @@ absolute or host path. See [security.md](security.md) for how paths are confined
 | `GET /api/volumes` | The volumes: name, `read_only`, and free space (`space`, `null` when it cannot be read). |
 | `GET /api/volumes/{volume}/entries?path=` | The entries of a folder, sorted by name: `name`, `kind` (`dir`, `file` or `other`), `size` (files only), `modified_ms`. |
 | `GET`, `HEAD /files/download?volume=&path=` | One file, as an attachment. Supports a single `Range`, a strong `ETag` and `If-Range`. |
-| `GET /files/zip?volume=&path=` | A folder as a zip, streamed. `path` is required: pass it empty for the whole volume. Repeat `name=` to archive only those entries of the folder (files or folders, each one a single name, as stored in the zip under that name). |
+| `GET /files/zip?volume=&path=` | A folder as a zip, streamed. `path` is required: pass it empty for the whole volume. Repeat `name=` to archive only those entries of the folder (files or folders, each one a single name, as stored in the zip under that name; a repeated name counts once). Entries carry their modification time, in UTC in the DOS field and exactly in an extended timestamp. |
 
 All of them require a signed-in user. Failures use the JSON error shape with these codes
 (`details` carries `volume` and `path` when they concern a path):

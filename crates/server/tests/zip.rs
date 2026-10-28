@@ -416,3 +416,73 @@ async fn zips_file_over_4gib() {
     // Reading to the end checks the CRC stored in the archive against the data.
     assert_eq!(io::copy(&mut entry, &mut io::sink()).unwrap(), SIZE);
 }
+
+#[tokio::test]
+async fn duplicate_names_are_zipped_once() {
+    let mut s = setup().await;
+    write_file(&s.data.join("media/a.txt"), b"alpha");
+    let res = s
+        .client
+        .get("/files/zip?volume=media&path=&name=a.txt&name=a.txt")
+        .await;
+    let mut archive = archive_of(res).await;
+    assert_eq!(
+        entries(&mut archive),
+        BTreeMap::from([("a.txt".to_owned(), Some(b"alpha".to_vec()))])
+    );
+}
+
+#[tokio::test]
+async fn entries_carry_their_dates_and_an_extended_timestamp() {
+    let mut s = setup().await;
+    let docs = s.data.join("media/Docs");
+    fs::create_dir_all(docs.join("sub")).unwrap();
+    write_file(&docs.join("sub/b.txt"), b"beta");
+    fs::File::open(docs.join("sub"))
+        .unwrap()
+        .set_modified(UNIX_EPOCH + Duration::from_secs(MTIME_SECS))
+        .unwrap();
+
+    let mut archive = archive_of(s.client.get("/files/zip?volume=media&path=Docs").await).await;
+    for name in ["sub/", "sub/b.txt"] {
+        let entry = archive.by_name(name).unwrap();
+        let modified = entry.last_modified().unwrap();
+        assert_eq!(
+            (modified.year(), modified.month(), modified.day()),
+            (2023, 11, 14),
+            "{name}"
+        );
+        let unix = entry.extra_data_fields().find_map(|field| match field {
+            zip::extra_fields::ExtraField::ExtendedTimestamp(ts) => ts.mod_time(),
+            _ => None,
+        });
+        assert_eq!(unix, Some(u32::try_from(MTIME_SECS).unwrap()), "{name}");
+    }
+}
+
+#[tokio::test]
+async fn cross_site_requests_are_refused() {
+    let mut s = setup().await;
+    write_file(&s.data.join("media/a.txt"), b"alpha");
+    for uri in [
+        "/files/zip?volume=media&path=",
+        "/files/download?volume=media&path=a.txt",
+    ] {
+        let mut req = common::get(uri);
+        req.headers_mut()
+            .insert("sec-fetch-site", "cross-site".parse().unwrap());
+        let body = error_of(s.client.send(req).await, StatusCode::FORBIDDEN).await;
+        assert_eq!(body.code, "csrf_rejected", "{uri}");
+
+        for site in ["same-origin", "none"] {
+            let mut req = common::get(uri);
+            req.headers_mut()
+                .insert("sec-fetch-site", site.parse().unwrap());
+            assert_eq!(
+                s.client.send(req).await.status(),
+                StatusCode::OK,
+                "{uri} {site}"
+            );
+        }
+    }
+}
