@@ -68,8 +68,8 @@ impl TaskList {
                 finished |= !info.state.is_active() && changes_files(&task.spec);
                 task.info = Some(info.clone());
             } else if self.polled.contains(&current.id) {
-                // Lost with a server restart.
-                task.lost = Some(ApiFailure::Server(ErrorBody {
+                // Cleared from another tab, expired or lost with a server restart.
+                task.forgotten(ApiFailure::Server(ErrorBody {
                     code: TASK_NOT_FOUND.to_owned(),
                     message: String::new(),
                     details: None,

@@ -162,6 +162,12 @@ task-files-done =
     }
 task-done = Terminada
 task-cancelled = Cancelada
+task-vanished = El servidor ya no sigue esta tarea: revisa la carpeta para ver cómo terminó.
+task-more =
+    { $count ->
+        [one] y 1 tarea más
+       *[other] y { $count } tareas más
+    }
 delete-title =
     { $count ->
         [one] ¿Eliminar { $name }?

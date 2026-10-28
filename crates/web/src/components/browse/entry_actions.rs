@@ -121,7 +121,7 @@ impl EntryActions {
                     .map(|(name, kind)| (name.as_str(), *kind))
                     .collect();
                 if let Some(href) = selection_href(volume, dir, &chosen) {
-                    api::navigate(&href);
+                    api::download(&href);
                 }
             }
             RowAction::Delete => self.deleting.set(Some(Deleting {
@@ -243,7 +243,7 @@ pub fn EntryActionsLayer(
                 if let Some(href) =
                     download_href(volume.as_str(), &path.child(&entry.name), entry.kind)
                 {
-                    api::navigate(&href);
+                    api::download(&href);
                 }
                 refocus(trigger);
             }
@@ -292,6 +292,7 @@ pub fn EntryActionsLayer(
         }
         if let Some(Renaming { entry, trigger }) = renaming() {
             RenameDialog {
+                key: "{entry.name}",
                 volume: dialog_volume.clone(),
                 parent: dialog_parent.clone(),
                 entry,

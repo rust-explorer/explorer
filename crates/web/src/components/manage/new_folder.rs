@@ -35,6 +35,7 @@ pub fn NewFolderButton(volume: String, path: String, read_only: bool) -> Element
 }
 
 /// Asks for a name and creates that folder inside `path`; the dialog stays open on an error.
+/// The folder is the one shown when the dialog opened, even if the browser navigates meanwhile.
 #[component]
 pub fn NewFolderDialog(
     volume: String,
@@ -42,6 +43,7 @@ pub fn NewFolderDialog(
     on_close: EventHandler<()>,
     #[props(default)] return_focus: Option<FocusTarget>,
 ) -> Element {
+    let (volume, path) = use_hook(move || (volume, path));
     let Revision(mut revision) = use_context();
     let mut name = use_signal(String::new);
     let mut problem = use_signal(|| None::<Problem>);
@@ -88,14 +90,17 @@ pub fn NewFolderDialog(
 
     let message = problem.read().as_ref().map(Problem::message);
 
+    // A request can hang (a stalled network or mount): closing stays possible, and the listing
+    // is refreshed since the request's outcome is then unknown.
+    let mut close = move |()| {
+        if busy() {
+            *revision.write() += 1;
+        }
+        on_close.call(());
+    };
+
     rsx! {
-        Modal { labelled_by: TITLE_ID, on_close: move |()| {
-                // Closing would drop the request's outcome: the listing would not refresh.
-                if !busy() {
-                    on_close.call(());
-                }
-            },
-            return_focus,
+        Modal { labelled_by: TITLE_ID, on_close: close, return_focus,
             form { onsubmit: submit,
                 h2 {
                     id: TITLE_ID,
@@ -134,8 +139,7 @@ pub fn NewFolderDialog(
                     button {
                         r#type: "button",
                         class: BUTTON,
-                        disabled: busy(),
-                        onclick: move |_| on_close.call(()),
+                        onclick: move |_| close(()),
                         {t!("cancel")}
                     }
                     button { r#type: "submit", class: PRIMARY, disabled: busy(), {t!("new-folder-create")} }

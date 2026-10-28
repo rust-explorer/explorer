@@ -187,6 +187,30 @@ pub fn navigate(url: &str) {
     }
 }
 
+/// Downloads `url` like an `<a download>` link: no navigation, so the app and running uploads
+/// stay, and an error response ends as a failed download rather than replacing the page.
+#[cfg(target_arch = "wasm32")]
+pub fn download(url: &str) {
+    use wasm_bindgen::JsCast as _;
+
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    let link = document
+        .create_element("a")
+        .ok()
+        .and_then(|element| element.dyn_into::<web_sys::HtmlAnchorElement>().ok());
+    let (Some(link), Some(body)) = (link, document.body()) else {
+        return;
+    };
+    link.set_href(url);
+    link.set_download("");
+    if body.append_child(&link).is_ok() {
+        link.click();
+        link.remove();
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_json<T: DeserializeOwned>(_: &str) -> std::future::Ready<Result<T, ApiFailure>> {
     std::future::ready(Err(ApiFailure::Network))
@@ -246,6 +270,9 @@ pub fn delete_json<T: DeserializeOwned>(_: &str) -> std::future::Ready<Result<T,
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn navigate(_: &str) {}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn download(_: &str) {}
 
 #[cfg(test)]
 mod tests {

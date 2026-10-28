@@ -42,6 +42,7 @@ web-sys = { workspace = true, features = [
     "FileSystemEntry",
     "FileSystemFileEntry",
     "FocusEvent",
+    "HtmlAnchorElement",
     "HtmlDialogElement",
     "HtmlElement",
     "HtmlInputElement",

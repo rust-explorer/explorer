@@ -234,8 +234,9 @@ Signing in successfully but landing on `/access-denied` means the user is not in
 
 ## Troubleshooting downloads
 
-A download that fails after it started cannot show an error page: the browser lists it as
-failed in its download list. The reason is in the server log (`zip aborted` names the
+A download never leaves the app, so a failed one cannot show an error page: the browser
+lists it as failed in its download list. This includes a download started after the
+session expired; reloading the page signs in again. The reason is in the server log (`zip aborted` names the
 path that failed; storage failures show the code, the volume and the path; only
 unexpected I/O failures also show the OS error). A large download interrupted by the
 network can be resumed by the browser, as files support `Range` requests.

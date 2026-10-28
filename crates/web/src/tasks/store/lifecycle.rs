@@ -156,7 +156,7 @@ impl TaskList {
         }
     }
 
-    /// A task the server no longer knows is lost; any other failure is shown on its row, and
+    /// A task the server no longer knows is over; any other failure is shown on its row, and
     /// the task goes on until the user cancels again.
     pub(super) fn cancel_failed(&mut self, id: &str, failure: ApiFailure) {
         if failure.is_unauthenticated() {
@@ -171,7 +171,7 @@ impl TaskList {
             return;
         };
         if matches!(&failure, ApiFailure::Server(body) if body.code == TASK_NOT_FOUND) {
-            task.lost = Some(failure);
+            task.forgotten(failure);
         } else {
             task.cancel_failure = Some(failure);
         }

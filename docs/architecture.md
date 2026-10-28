@@ -366,11 +366,15 @@ choose a read-only one. A rename, move or copy that hits an existing name opens 
 both or Cancel prompt as uploads, with "apply to all"; Replace is only offered for a file over
 a file. Delete, Move and Copy become tasks that appear in the activity panel (with the uploads)
 with their progress, a cancel or dismiss button and, for a task that skipped entries, how many.
+One action shows at most 20 task rows there, then a count of the others (a delete of thousands
+of entries is one task per entry).
 The tab polls `GET /api/tasks` every second while one of its tasks is queued or running, and
 refreshes the listing and the free space when one finishes. A tab shows the tasks it started;
 on load it also lists the user's queued and running tasks once and adopts them, so a reload
 keeps showing them until they finish (an adopted task never asks about a conflict, it is past
-that step).
+that step). A file task that drops out of the poll (another tab cleared it, it expired while
+the tab slept, or the server restarted) is shown as no longer tracked, with an unknown outcome,
+not as failed.
 
 Polish: a refresh button next to the breadcrumb reloads the listing, the free space and the
 favorites. The star next to the folder name adds or removes a favorite; favorites are listed
