@@ -10,7 +10,7 @@ use super::super::path::STAGING_DIR;
 use super::super::read::fs_path;
 use super::folder::{Measured, Source};
 use super::hard_links::{HardLink, HardLinks, Offered};
-use super::{USAGE_THREADS, USAGE_TOP_FILES, UsageNode};
+use super::{USAGE_THREADS, USAGE_TOP_FILES, UsageLimits, UsageNode};
 use crate::storage::{RelPath, StorageError, TransferProgress, Volume};
 
 /// Walks `path` with [`USAGE_THREADS`] workers and returns its folders with their own counts.
@@ -18,7 +18,7 @@ pub(super) fn scan(
     volume: &Volume,
     path: &RelPath,
     progress: &(dyn TransferProgress + Sync),
-    max_dirs: usize,
+    limits: UsageLimits,
 ) -> Result<Vec<UsageNode>, StorageError> {
     volume.refuse_reserved(path)?;
     let start: OwnedFd = volume
@@ -41,7 +41,7 @@ pub(super) fn scan(
         dev: start_stat.dev,
         root_id: volume_root.id(),
         staging,
-        max_dirs,
+        limits,
         progress,
         state: Mutex::new(State {
             jobs: vec![Job {
@@ -55,6 +55,7 @@ pub(super) fn scan(
             cancelled: false,
             failed: false,
             hard_links: HardLinks::default(),
+            named_files: 0,
             nodes: vec![UsageNode {
                 bytes: start_stat.bytes,
                 ..UsageNode::default()
@@ -107,6 +108,8 @@ struct State {
     failed: bool,
     nodes: Vec<UsageNode>,
     hard_links: HardLinks,
+    /// File names kept in all the nodes' `top_files`.
+    named_files: usize,
 }
 
 struct Scan<'a> {
@@ -114,7 +117,7 @@ struct Scan<'a> {
     dev: u64,
     root_id: (u64, u64),
     staging: Option<(u64, u64)>,
-    max_dirs: usize,
+    limits: UsageLimits,
     progress: &'a (dyn TransferProgress + Sync),
     state: Mutex<State>,
     wake: Condvar,
@@ -267,6 +270,7 @@ impl Scan<'_> {
 
     fn merge(&self, state: &mut State, job: &Job, read: Read) {
         let target = job.node;
+        let names_left = state.named_files < self.limits.max_named_files;
         let node = &mut state.nodes[target];
         node.incomplete |= read.incomplete;
         let (unnamed_files, unnamed_bytes) = read.unnamed;
@@ -276,11 +280,17 @@ impl Scan<'_> {
         if job.unnamed && !job.collapsed {
             node.other_files += read.files.len() as u64 + unnamed_files;
             node.other_bytes += named_bytes + unnamed_bytes;
+        } else if !job.collapsed && !names_left {
+            node.other_files += read.files.len() as u64 + unnamed_files;
+            node.other_bytes += named_bytes + unnamed_bytes;
         } else if !job.collapsed {
             node.other_files += unnamed_files;
             node.other_bytes += unnamed_bytes;
+            let kept = node.top_files.len();
             node.top_files.extend(read.files);
             keep_biggest(node);
+            let added = node.top_files.len() - kept;
+            state.named_files += added;
         }
         for (name, stat) in read.hard_links {
             let mut path = job.path.clone();
@@ -315,7 +325,7 @@ impl Scan<'_> {
             let unnamed = job.unnamed || name.is_none();
             let job = match name {
                 Some(name)
-                    if !job.unnamed && !job.collapsed && state.nodes.len() < self.max_dirs =>
+                    if !job.unnamed && !job.collapsed && state.nodes.len() < self.limits.max_dirs =>
                 {
                     let index = state.nodes.len();
                     state.nodes.push(UsageNode {

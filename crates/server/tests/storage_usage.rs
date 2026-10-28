@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use explorer_server::storage::{
     RelPath, STAGING_DIR, StorageError, TransferProgress, USAGE_TOP_FILES, UsageNodeView,
-    UsageTree, Volumes, usage, usage_with_max_dirs,
+    UsageLimits, UsageTree, Volumes, usage, usage_with_limits,
 };
 use shared::api::usage::{UsageItem, UsageKind};
 use tempfile::TempDir;
@@ -326,11 +326,14 @@ fn usage_collapses_beyond_the_folder_limit() {
     for name in ["A", "B", "C", "D"] {
         total += allocated_all(&media.join(name), &["", "x.bin", "Inner", "Inner/y.bin"]);
     }
-    let tree = usage_with_max_dirs(
+    let tree = usage_with_limits(
         fixture.volumes.get("media").unwrap(),
         &RelPath::root(),
         &Counter::default(),
-        3,
+        UsageLimits {
+            max_dirs: 3,
+            ..UsageLimits::default()
+        },
     )
     .unwrap();
     assert_eq!(tree.totals(), (total, 8, 8));
@@ -349,6 +352,40 @@ fn usage_collapses_beyond_the_folder_limit() {
         assert_eq!(inner.dirs, 1);
         assert!(inner.items.iter().all(|item| item.kind != UsageKind::Dir));
     }
+}
+
+#[test]
+fn usage_stops_keeping_file_names_at_the_limit() {
+    let fixture = Fixture::new(|media| {
+        for name in ["A", "B"] {
+            for i in 0..5 {
+                write(&media.join(format!("{name}/f{i}.bin")), 1_000);
+            }
+        }
+    });
+    let tree = usage_with_limits(
+        fixture.volumes.get("media").unwrap(),
+        &RelPath::root(),
+        &Counter::default(),
+        UsageLimits {
+            max_named_files: 5,
+            ..UsageLimits::default()
+        },
+    )
+    .unwrap();
+    let (mut named, mut other) = (0, 0);
+    for name in ["A", "B"] {
+        let folder = view(&tree, name);
+        assert_eq!(folder.files, 5);
+        for item in &folder.items {
+            match item.kind {
+                UsageKind::File => named += 1,
+                UsageKind::OtherFiles => other += item.files,
+                UsageKind::Dir => panic!("no sub-folder"),
+            }
+        }
+    }
+    assert_eq!((named, other), (5, 5));
 }
 
 #[test]

@@ -328,8 +328,11 @@ How a scan counts:
 - `.explorer-uploads` is skipped, so staged data is not counted.
 - A folder it cannot read is skipped and marks itself and every folder above it as
   `incomplete`: its total is a lower bound.
-- A volume is walked by 4 threads. It keeps at most 1,000,000 folders as nodes; beyond that
+- A volume is walked by 4 threads. It keeps at most 200,000 folders as nodes; beyond that
   the deeper sub-folders are counted into their last listed ancestor and `collapsed` is set.
+- It keeps at most 200,000 file names in all (the biggest files of the folders read first,
+  usually the shallow ones); the folders read after that show their files as `other_files`
+  only. Together these bound a tree to roughly 50 MB of memory.
 - Folders are opened without following symlinks and checked against the inode seen when they
   were listed, so a folder swapped for a symlink meanwhile is not entered.
 - Folders waiting to be read more than 64 levels down don't keep their parent open; they are
