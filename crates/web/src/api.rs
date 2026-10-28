@@ -9,6 +9,8 @@ const UNAUTHENTICATED: &str = "unauthenticated";
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub enum ApiFailure {
     Network,
+    /// An error status whose body isn't an `ErrorBody`.
+    Http(u16),
     Server(ErrorBody),
 }
 
@@ -22,16 +24,48 @@ impl ApiFailure {
 /// The sign-in URL that brings the user back to `path_and_query` afterwards.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 pub fn login_url(path_and_query: &str) -> String {
-    let mut url = String::from("/auth/login?return_to=");
-    // Same character set as `encodeURIComponent`.
-    for byte in path_and_query.bytes() {
+    format!("/auth/login?return_to={}", encode_component(path_and_query))
+}
+
+/// Same character set as `encodeURIComponent`.
+pub fn encode_component(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || b"-_.!~*'()".contains(&byte) {
-            url.push(char::from(byte));
+            encoded.push(char::from(byte));
         } else {
-            let _ = write!(url, "%{byte:02X}");
+            let _ = write!(encoded, "%{byte:02X}");
         }
     }
-    url
+    encoded
+}
+
+pub fn entries_url(volume: &str, path: &str) -> String {
+    format!(
+        "/api/volumes/{}/entries?path={}",
+        encode_component(volume),
+        encode_component(path)
+    )
+}
+
+pub fn download_url(volume: &str, path: &str) -> String {
+    files_url("download", volume, path)
+}
+
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "Task 8 adds the folder download links")
+)]
+pub fn zip_url(volume: &str, path: &str) -> String {
+    files_url("zip", volume, path)
+}
+
+fn files_url(action: &str, volume: &str, path: &str) -> String {
+    format!(
+        "/files/{action}?volume={}&path={}",
+        encode_component(volume),
+        encode_component(path)
+    )
 }
 
 /// Ends the session here and at the provider when it supports it.
@@ -73,8 +107,11 @@ async fn send<T: DeserializeOwned>(
             request_id: None,
         }));
     }
-    let body = response.json().await.map_err(|_| ApiFailure::Network)?;
-    Err(ApiFailure::Server(body))
+    let status = response.status();
+    match response.json().await {
+        Ok(body) => Err(ApiFailure::Server(body)),
+        Err(_) => Err(ApiFailure::Http(status)),
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -120,6 +157,30 @@ mod tests {
         assert_eq!(
             login_url("/a-b_c.d~e"),
             "/auth/login?return_to=%2Fa-b_c.d~e"
+        );
+    }
+
+    #[test]
+    fn urls_percent_encode() {
+        assert_eq!(
+            entries_url("media", "é #?%/x"),
+            "/api/volumes/media/entries?path=%C3%A9%20%23%3F%25%2Fx"
+        );
+        assert_eq!(
+            download_url("media", "é #?%/x"),
+            "/files/download?volume=media&path=%C3%A9%20%23%3F%25%2Fx"
+        );
+        assert_eq!(
+            zip_url("media", "é #?%/x"),
+            "/files/zip?volume=media&path=%C3%A9%20%23%3F%25%2Fx"
+        );
+        assert_eq!(
+            entries_url("my files&?", ""),
+            "/api/volumes/my%20files%26%3F/entries?path="
+        );
+        assert_eq!(
+            download_url("a&b", "c&d=1"),
+            "/files/download?volume=a%26b&path=c%26d%3D1"
         );
     }
 }

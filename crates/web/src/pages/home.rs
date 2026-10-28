@@ -1,38 +1,43 @@
 use dioxus::prelude::*;
 use dioxus_i18n::t;
-use shared::api::Me;
+use shared::api::{Me, VolumeInfo};
 
 use crate::api;
-use crate::components::Shell;
+use crate::components::{ErrorPanel, Notice, Shell};
+use crate::routes::{Route, Segments};
 
+/// `/` opens the first volume, or explains that there is none.
 #[component]
-pub fn Home(segments: Vec<String>) -> Element {
-    let _ = segments;
-    let mut me = use_resource(|| api::get_json::<Me>("/api/me"));
+pub fn Home() -> Element {
+    let navigator = navigator();
+    let me = use_resource(|| api::get_json::<Me>("/api/me"));
+    let mut volumes = use_resource(move || async move {
+        let volumes = api::get_json::<Vec<VolumeInfo>>("/api/volumes").await;
+        if let Ok(Some(first)) = volumes.as_ref().map(|volumes| volumes.first()) {
+            navigator.replace(Route::Browse {
+                volume: first.name.clone().into(),
+                path: Segments::default(),
+            });
+        }
+        volumes
+    });
 
-    let result = me.read().clone();
+    let user = me.read().clone().and_then(Result::ok);
+    let result = volumes.read().clone();
     match result {
-        Some(Ok(user)) => rsx! {
+        Some(Ok(list)) if list.is_empty() => rsx! {
             Shell { user,
-                p { class: "text-sm text-slate-500 dark:text-slate-400", {t!("app-tagline")} }
+                Notice { title: t!("no-volumes-title"), message: t!("no-volumes-message") }
             }
         },
         Some(Err(failure)) if !failure.is_unauthenticated() => rsx! {
-            Shell {
-                div { class: "flex flex-col items-center gap-3",
-                    p { role: "alert", class: "text-sm text-slate-600 dark:text-slate-400", {t!("load-failed")} }
-                    button {
-                        r#type: "button",
-                        class: "rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500",
-                        onclick: move |_| me.restart(),
-                        {t!("try-again")}
-                    }
-                }
+            Shell { user,
+                ErrorPanel { failure, on_retry: move |()| volumes.restart() }
             }
         },
-        // Still loading, or already redirecting to the sign-in page.
+        // Loading, redirecting to the first volume, or to the sign-in page.
         _ => rsx! {
-            Shell {
+            Shell { user,
                 p { class: "text-sm text-slate-500 dark:text-slate-400", {t!("loading")} }
             }
         },
