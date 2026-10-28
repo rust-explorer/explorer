@@ -3,8 +3,9 @@ use super::{Effect, Queue, Status};
 use crate::uploads::REFRESH_EVERY_MS;
 
 impl Queue {
-    /// Ends an item and refreshes its volume's listing when completions are due; a throttled
-    /// completion schedules the refresh for when the throttle ends.
+    /// Ends an item, and its batch's conflict answer with its last item. Refreshes its volume's
+    /// listing when completions are due; a throttled completion schedules the refresh for when
+    /// the throttle ends.
     pub(super) fn finish(
         &mut self,
         index: usize,
@@ -16,7 +17,14 @@ impl Queue {
         let item = &mut self.items[index];
         item.status = status;
         item.phase = Phase::Idle;
-        let volume = item.volume().to_owned();
+        let (batch, volume) = (item.batch, item.volume().to_owned());
+        if !self
+            .items
+            .iter()
+            .any(|item| item.batch == batch && item.status.is_active())
+        {
+            self.decisions.remove(&batch);
+        }
         let first_unrefreshed = done && self.unrefreshed.insert(volume.clone());
         if !self.unrefreshed.contains(&volume) {
             return;

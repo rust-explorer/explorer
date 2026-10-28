@@ -98,6 +98,7 @@ impl TaskList {
         };
         if task.conflict.is_some() {
             self.tasks.retain(|task| task.key != key);
+            self.forget_ended_batches();
             return Vec::new();
         }
         task.cancel_failure = None;
@@ -126,6 +127,7 @@ impl TaskList {
             false
         });
         self.drop_stale_scans();
+        self.forget_ended_batches();
         effects
     }
 

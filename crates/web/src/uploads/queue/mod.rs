@@ -663,6 +663,27 @@ mod tests {
     }
 
     #[test]
+    fn batch_decision_is_forgotten_with_the_batch() {
+        let mut queue = Queue::default();
+        queue.add(files(2, 10), &[], 0);
+        fail(&mut queue, 0, server("already_exists"), 1);
+        decide(&mut queue, 0, Decision::Replace, true);
+        assert_eq!(queue.decisions.len(), 1);
+        fail(&mut queue, 0, server("permission_denied"), 20);
+        assert_eq!(queue.decisions.len(), 1);
+        let key1 = key(&queue, 1);
+        queue.handle(Event::Cancel { key: key1 }, 21);
+        assert!(queue.decisions.is_empty());
+
+        queue.add(files(2, 10), &[], 30);
+        for i in 2..4 {
+            fail(&mut queue, i, server("already_exists"), 31);
+        }
+        decide(&mut queue, 2, Decision::Cancel, true);
+        assert!(queue.decisions.is_empty());
+    }
+
+    #[test]
     fn cancel_decision_skips() {
         let mut queue = Queue::default();
         queue.add(files(3, 10), &[], 0);

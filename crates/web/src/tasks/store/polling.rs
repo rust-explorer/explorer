@@ -51,6 +51,7 @@ impl TaskList {
             }
             Event::DeleteFailed { id, failure } => self.cancel_failed(&id, failure),
         }
+        self.forget_ended_batches();
         self.keep_polling(&mut effects);
         effects
     }

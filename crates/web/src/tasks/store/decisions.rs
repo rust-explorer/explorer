@@ -32,7 +32,18 @@ impl TaskList {
         for key in keys {
             self.apply(key, decision, &mut effects);
         }
+        self.forget_ended_batches();
         effects
+    }
+
+    /// Drops the answers of batches with no task left to answer for.
+    pub(super) fn forget_ended_batches(&mut self) {
+        let tasks = &self.tasks;
+        self.decisions.retain(|&batch, _| {
+            tasks
+                .iter()
+                .any(|task| task.batch == batch && task.is_active())
+        });
     }
 
     /// A copy or move refused because its destination exists waits for a decision, unless

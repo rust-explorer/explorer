@@ -677,6 +677,25 @@ mod tests {
     }
 
     #[test]
+    fn batch_answers_are_forgotten_once_the_batch_ends() {
+        let mut list = copies();
+        refuse(&mut list, 0, exists("a", "file"));
+        list.decide(TaskKey(0), Decision::KeepBoth, true);
+        assert_eq!(list.decisions.len(), 1);
+        for key in 0..3 {
+            refuse(&mut list, key, server("invalid_destination"));
+        }
+        assert!(list.decisions.is_empty());
+
+        let mut list = copies();
+        for key in 0..3 {
+            refuse(&mut list, key, exists("a", "file"));
+        }
+        list.decide(TaskKey(0), Decision::Cancel, true);
+        assert!(list.decisions.is_empty());
+    }
+
+    #[test]
     fn cancelling_a_waiting_task_drops_it() {
         let mut list = copies();
         refuse(&mut list, 0, exists("a", "file"));
