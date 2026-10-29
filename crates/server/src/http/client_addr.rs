@@ -40,6 +40,19 @@ impl FromStr for Cidr {
                 .filter(|p| *p <= max)
                 .ok_or_else(|| format!("`{s}`: the prefix length must be 0 to {max}"))?,
         };
+        // Peers are matched as IPv4, so an IPv4-mapped network becomes the IPv4 one.
+        let (addr, prefix) = match addr {
+            IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+                Some(v4) if prefix >= 96 => (IpAddr::V4(v4), prefix - 96),
+                Some(_) => {
+                    return Err(format!(
+                        "`{s}`: an IPv4-mapped network needs a prefix length of 96 to 128"
+                    ));
+                }
+                None => (addr, prefix),
+            },
+            IpAddr::V4(_) => (addr, prefix),
+        };
         Ok(Self {
             network: mask(addr, prefix),
             prefix,
@@ -129,6 +142,18 @@ mod tests {
         let all: Cidr = "0.0.0.0/0".parse().unwrap();
         assert!(all.contains(ip("8.8.8.8")));
         assert!(!all.contains(ip("::1")));
+    }
+
+    #[test]
+    fn ipv4_mapped_networks_match_ipv4_peers() {
+        let net: Cidr = "::ffff:10.0.0.0/104".parse().unwrap();
+        assert_eq!(net, "10.0.0.0/8".parse().unwrap());
+        assert!(net.contains(ip("10.1.2.3")));
+        assert!(net.contains(ip("::ffff:10.1.2.3")));
+        assert!(!net.contains(ip("11.0.0.1")));
+        let one: Cidr = "::ffff:172.18.0.2".parse().unwrap();
+        assert!(one.contains(ip("172.18.0.2")));
+        assert!("::ffff:0.0.0.0/95".parse::<Cidr>().is_err());
     }
 
     #[test]
