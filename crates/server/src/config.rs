@@ -775,6 +775,30 @@ mod tests {
     }
 
     #[test]
+    fn every_variable_is_documented() {
+        let source = include_str!("config.rs");
+        let declared: Vec<&str> = source
+            .lines()
+            .filter_map(|line| line.strip_prefix("const VAR_"))
+            .filter_map(|rest| rest.split('"').nth(1))
+            .collect();
+        assert!(!declared.is_empty());
+        for name in &declared {
+            assert!(ALL_VARS.contains(name), "{name} is missing from ALL_VARS");
+        }
+        assert_eq!(declared.len(), ALL_VARS.len());
+        let docs = include_str!("../../../docs/configuration.md");
+        let example = include_str!("../../../.env.example");
+        for name in ALL_VARS {
+            assert!(
+                docs.contains(name),
+                "{name} is not in docs/configuration.md"
+            );
+            assert!(example.contains(name), "{name} is not in .env.example");
+        }
+    }
+
+    #[test]
     fn debug_output_does_not_contain_secret() {
         let cfg = Config::from_lookup(lookup(&valid())).unwrap();
         assert!(!format!("{cfg:?}").contains("s3cret"));

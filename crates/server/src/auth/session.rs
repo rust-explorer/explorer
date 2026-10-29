@@ -205,10 +205,11 @@ fn uses_session(path: &str) -> bool {
 }
 
 /// Deletes expired sessions every hour; a failed sweep is logged and retried at the next tick.
+/// The task is watched: if it ends or panics, that is logged at error.
 #[must_use = "dropping the handle detaches the task"]
 pub fn spawn_expired_cleanup(db: SqlitePool) -> tokio::task::JoinHandle<()> {
     let store = SqliteStore::new(db);
-    tokio::spawn(async move {
+    let cleanup = tokio::spawn(async move {
         loop {
             if let Err(err) = store
                 .clone()
@@ -217,6 +218,17 @@ pub fn spawn_expired_cleanup(db: SqlitePool) -> tokio::task::JoinHandle<()> {
             {
                 tracing::warn!(error = %err, "expired session cleanup failed");
             }
+        }
+    });
+    watch(cleanup)
+}
+
+/// Spawns a task that logs at error when `task` ends, which it should never do.
+fn watch(task: tokio::task::JoinHandle<()>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        match task.await {
+            Ok(()) => tracing::error!("expired session cleanup stopped"),
+            Err(err) => tracing::error!(error = %err, "expired session cleanup crashed"),
         }
     })
 }
@@ -303,5 +315,52 @@ mod tests {
         assert_eq!(lifetime.max, time::Duration::days(90));
         let lifetime = Lifetime::new(Duration::from_hours(24));
         assert_eq!(lifetime.max, time::Duration::days(30));
+    }
+
+    #[derive(Clone, Default)]
+    struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
+        type Writer = Captured;
+
+        fn make_writer(&'a self) -> Captured {
+            self.clone()
+        }
+    }
+
+    async fn logged_when(task: tokio::task::JoinHandle<()>) -> String {
+        let captured = Captured::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(captured.clone())
+            .with_ansi(false)
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        watch(task).await.unwrap();
+        String::from_utf8(captured.0.lock().unwrap().clone()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_panicking_cleanup_is_logged_at_error() {
+        let log = logged_when(tokio::spawn(async { panic!("boom") })).await;
+        assert!(log.contains("ERROR"), "{log}");
+        assert!(log.contains("crashed"), "{log}");
+    }
+
+    #[tokio::test]
+    async fn a_finished_cleanup_is_logged_at_error() {
+        let log = logged_when(tokio::spawn(async {})).await;
+        assert!(log.contains("ERROR"), "{log}");
+        assert!(log.contains("stopped"), "{log}");
     }
 }
