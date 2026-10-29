@@ -71,10 +71,7 @@ pub fn client_addr(peer: IpAddr, headers: &HeaderMap, trusted: &[Cidr]) -> IpAdd
         return client;
     }
     for value in headers.get_all(X_FORWARDED_FOR).iter().rev() {
-        let Ok(value) = value.to_str() else {
-            return client;
-        };
-        for hop in value.rsplit(',') {
+        for hop in value.as_bytes().rsplit(|b| *b == b',') {
             let Some(addr) = parse_hop(hop) else {
                 return client;
             };
@@ -87,8 +84,8 @@ pub fn client_addr(peer: IpAddr, headers: &HeaderMap, trusted: &[Cidr]) -> IpAdd
     client
 }
 
-fn parse_hop(hop: &str) -> Option<IpAddr> {
-    let hop = hop.trim();
+fn parse_hop(hop: &[u8]) -> Option<IpAddr> {
+    let hop = std::str::from_utf8(hop).ok()?.trim();
     hop.parse::<IpAddr>()
         .or_else(|_| hop.parse::<SocketAddr>().map(|addr| addr.ip()))
         .ok()
@@ -97,6 +94,8 @@ fn parse_hop(hop: &str) -> Option<IpAddr> {
 
 #[cfg(test)]
 mod tests {
+    use axum::http::HeaderValue;
+
     use super::*;
 
     fn cidrs(list: &[&str]) -> Vec<Cidr> {
@@ -183,5 +182,17 @@ mod tests {
         assert_eq!(client_addr(peer, &headers, &trusted), ip("10.0.0.1"));
         let headers = forwarded(&["1.1.1.1, garbage, 10.0.0.1"]);
         assert_eq!(client_addr(peer, &headers, &trusted), ip("10.0.0.1"));
+    }
+
+    #[test]
+    fn unreadable_bytes_left_of_the_appended_hop_do_not_hide_the_client() {
+        let trusted = cidrs(&["172.18.0.0/16"]);
+        let peer = ip("172.18.0.2");
+        let mut headers = HeaderMap::new();
+        headers.append(
+            X_FORWARDED_FOR,
+            HeaderValue::from_bytes(b"\xff\xfe garbage, 198.51.100.7").unwrap(),
+        );
+        assert_eq!(client_addr(peer, &headers, &trusted), ip("198.51.100.7"));
     }
 }
