@@ -12,6 +12,9 @@ use url::Url;
 use crate::http::client_addr::Cidr;
 
 const DEFAULT_SESSION_TTL: Duration = Duration::from_hours(7 * 24);
+/// Loopback and private networks: where a reverse proxy in front of Explorer usually is.
+const DEFAULT_TRUSTED_PROXIES: &str =
+    "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7";
 
 const VAR_PUBLIC_URL: &str = "EXPLORER_PUBLIC_URL";
 const VAR_ISSUER: &str = "EXPLORER_OIDC_ISSUER";
@@ -173,8 +176,10 @@ impl Config {
             None => Some(DEFAULT_SESSION_TTL),
             Some(v) => collect(&mut errors, parse_session_ttl(&v)),
         };
-        let trusted_proxies = match get(VAR_TRUSTED_PROXIES) {
-            None => Some(Vec::new()),
+        // Unlike other variables, an empty value is meaningful here: trust no proxy.
+        let trusted_proxies = match lookup(VAR_TRUSTED_PROXIES) {
+            None => collect(&mut errors, parse_trusted_proxies(DEFAULT_TRUSTED_PROXIES)),
+            Some(v) if v.trim().is_empty() => Some(Vec::new()),
             Some(v) => collect(&mut errors, parse_trusted_proxies(&v)),
         };
         let format = match get(VAR_LOG_FORMAT).as_deref() {
@@ -432,7 +437,18 @@ mod tests {
         assert_eq!(cfg.oidc.allowed_group, "explorer-users");
         assert_eq!(cfg.oidc.groups_claim, "groups");
         assert_eq!(cfg.session_ttl, Duration::from_hours(7 * 24));
-        assert!(cfg.trusted_proxies.is_empty());
+        let private: Vec<Cidr> = [
+            "127.0.0.0/8",
+            "::1/128",
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            "fc00::/7",
+        ]
+        .iter()
+        .map(|s| s.parse().unwrap())
+        .collect();
+        assert_eq!(cfg.trusted_proxies, private);
         assert_eq!(cfg.log.filter, "info");
         assert_eq!(cfg.log.format, LogFormat::Pretty);
         assert_eq!(cfg.data_dir, PathBuf::from("/data"));
@@ -682,6 +698,15 @@ mod tests {
             .map(|s| s.parse().unwrap())
             .collect();
         assert_eq!(cfg.trusted_proxies, expected);
+    }
+
+    #[test]
+    fn empty_trusted_proxies_trusts_none() {
+        for empty in ["", " "] {
+            let cfg =
+                Config::from_lookup(lookup(&with(&[("EXPLORER_TRUSTED_PROXIES", empty)]))).unwrap();
+            assert!(cfg.trusted_proxies.is_empty(), "{empty:?}");
+        }
     }
 
     #[test]

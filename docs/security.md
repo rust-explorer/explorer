@@ -103,10 +103,16 @@ rest of the API requires a session and is not limited this way.
 
 The client address is the TCP peer, unless the peer is in `EXPLORER_TRUSTED_PROXIES`: then
 it is the rightmost `X-Forwarded-For` entry that is not a trusted proxy, so a client cannot
-pick its own address by sending the header, through the proxy or directly. IPv6 clients are
-counted per /64, the block one subscriber usually gets. The limiter tracks at most 10 000
-addresses in memory; an address whose allowance has fully refilled is forgotten, and when
-all 10 000 are active the one closest to refilled is dropped.
+pick its own address by sending the header through the proxy. By default the trusted peers
+are the loopback and private networks, where the reverse proxy runs; a host on those
+networks talking to Explorer directly can therefore choose the address it is counted
+under, which only gives it a bucket of its own. On the Internet side, a request with an
+unreadable or forged header part is still counted under the address the proxy appended.
+When a peer outside the list sends `X-Forwarded-For`, the server logs it once at warn.
+
+IPv6 clients are counted per /64, the block one subscriber usually gets. The limiter tracks at most 10 000 addresses in memory; an address whose allowance has fully
+refilled is forgotten, and when all 10 000 are active the one closest to refilled is
+dropped.
 
 ## Groups gate
 

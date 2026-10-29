@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Response};
 
-use super::client_addr::{Cidr, client_addr};
+use super::client_addr::{Cidr, client_addr, untrusted_forwarder};
 use super::error::ApiError;
 use super::request_id::request_id;
 
@@ -79,6 +80,7 @@ impl RateLimiter {
 pub struct SignInLimit {
     limiter: Arc<RateLimiter>,
     trusted_proxies: Arc<[Cidr]>,
+    warned_untrusted_forwarder: Arc<AtomicBool>,
 }
 
 impl SignInLimit {
@@ -91,7 +93,28 @@ impl SignInLimit {
                 MAX_TRACKED,
             )),
             trusted_proxies: trusted_proxies.into(),
+            warned_untrusted_forwarder: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Logs once per process the first peer whose `X-Forwarded-For` is ignored: the usual
+    /// sign that the reverse proxy is missing from `EXPLORER_TRUSTED_PROXIES`.
+    fn warn_untrusted_forwarder(&self, peer: IpAddr, headers: &HeaderMap) -> bool {
+        let Some(peer) = untrusted_forwarder(peer, headers, &self.trusted_proxies) else {
+            return false;
+        };
+        if self
+            .warned_untrusted_forwarder
+            .swap(true, Ordering::Relaxed)
+        {
+            return false;
+        }
+        tracing::warn!(
+            peer = %peer,
+            "a sign-in request from an untrusted peer carries X-Forwarded-For, which is ignored; \
+             if this peer is the reverse proxy, add it to EXPLORER_TRUSTED_PROXIES"
+        );
+        true
     }
 }
 
@@ -117,6 +140,7 @@ pub async fn limit_sign_in(
     else {
         return next.run(request).await;
     };
+    limit.warn_untrusted_forwarder(peer.ip(), request.headers());
     let client = client_addr(peer.ip(), request.headers(), &limit.trusted_proxies);
     match limit.limiter.check(bucket_key(client), Instant::now()) {
         Ok(()) => next.run(request).await,
@@ -233,6 +257,17 @@ mod tests {
     fn an_ipv6_client_shares_one_bucket_per_64() {
         assert_eq!(bucket_key(ip("2001:db8:1:2:a::1")), ip("2001:db8:1:2::"));
         assert_eq!(bucket_key(ip("198.51.100.1")), ip("198.51.100.1"));
+    }
+
+    #[test]
+    fn warns_once_about_a_forwarding_peer_that_is_not_trusted() {
+        let limit = SignInLimit::new(&["172.18.0.0/16".parse().unwrap()]);
+        let mut headers = HeaderMap::new();
+        assert!(!limit.warn_untrusted_forwarder(ip("172.19.0.2"), &headers));
+        headers.insert("x-forwarded-for", HeaderValue::from_static("198.51.100.7"));
+        assert!(!limit.warn_untrusted_forwarder(ip("172.18.0.2"), &headers));
+        assert!(limit.warn_untrusted_forwarder(ip("172.19.0.2"), &headers));
+        assert!(!limit.warn_untrusted_forwarder(ip("172.19.0.3"), &headers));
     }
 
     #[test]

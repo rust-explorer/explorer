@@ -9,7 +9,8 @@ First public release. Image: `ghcr.io/rust-explorer/explorer:1.0.0` (`linux/amd6
 - **Sign-in**: OIDC authorization code flow with PKCE on the server (tokens never reach the
   browser), access limited to one group, sliding sessions, sign-out at the provider. The
   provider may use a private CA (`EXPLORER_OIDC_CA_FILE`). Sign-in requests are rate limited
-  per client address, with `EXPLORER_TRUSTED_PROXIES` for the reverse proxy.
+  per client address (per /64 for IPv6), taken from `X-Forwarded-For` when the peer is a
+  trusted proxy: by default the loopback and private networks (`EXPLORER_TRUSTED_PROXIES`).
 - **Browsing**: every folder mounted under `/data` is a volume, read-only when the container
   user cannot write to it. Sortable list and grid views with image thumbnails, favorite
   folders, search by name, refresh.

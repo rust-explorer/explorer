@@ -157,11 +157,19 @@ be read or contains no certificate.
 
 Sign-in requests are limited per client address (see
 [security.md](security.md#sign-in-rate-limit)). Behind a reverse proxy every request comes
-from the proxy, so all clients would share one limit. Tell Explorer which peers are proxies
-with `EXPLORER_TRUSTED_PROXIES`; it then takes the client from the `X-Forwarded-For` header
-they add, and ignores that header from anyone else.
+from the proxy, so Explorer takes the client from the `X-Forwarded-For` header the proxy
+adds, but only from the peers in `EXPLORER_TRUSTED_PROXIES`, and ignores that header from
+anyone else.
 
-With GoDoxy on the same Docker network as Explorer, trust that network's subnet:
+By default the loopback and private networks are trusted (`127.0.0.0/8`, `10.0.0.0/8`,
+`172.16.0.0/12`, `192.168.0.0/16` and their IPv6 counterparts), which covers GoDoxy on a
+Docker network, on the host network (it then reaches Explorer from the gateway of
+Explorer's network) or elsewhere on the LAN: nothing to set. A host on those networks can
+then choose the address its own sign-in requests are counted under; that only lets it pick
+its own bucket.
+
+To trust only the proxy, set its address or network, several separated by commas. With
+GoDoxy on the same Docker network as Explorer, that is the network's subnet:
 
 ```sh
 docker network inspect <network> --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}'
@@ -172,9 +180,16 @@ EXPLORER_TRUSTED_PROXIES=172.18.0.0/16
 ```
 
 Every container on that network can then claim any client address, so keep only the proxy
-and Explorer on it. If GoDoxy uses the host network instead, its requests come from the
-Docker bridge gateway (often `172.17.0.1`): trust that address alone. Several networks or
-addresses are separated by commas.
+and Explorer on it. With GoDoxy on the host network, trust the gateway of Explorer's network
+alone (`docker compose` names it `<project>_default`, e.g. `explorer_default`):
+
+```sh
+docker network inspect explorer_default --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'
+```
+
+If the proxy is not trusted, every user shares the proxy's limit and the server logs once,
+at warn, `a sign-in request from an untrusted peer carries X-Forwarded-For` with the peer
+to add.
 
 ## 5. First start
 
@@ -270,7 +285,7 @@ the details (look for `sign-in failed` with the same `reason`).
 | `invalid_token` | The ID token failed verification (signature, issuer, audience, expiry or nonce). | Check `EXPLORER_OIDC_ISSUER` matches the provider's issuer exactly, the client ID, and the clocks of both hosts. After a rotation of the provider's signing keys, Explorer fetches them again by itself, at most once a minute. |
 | Signing out stops on PocketID's own sign-out page | The logout callback URL does not match exactly. | Register `https://files.example.com` with no trailing slash (step 1). |
 | `missing_groups_claim` | The groups claim is absent or not an array of strings. | Make sure the `groups` scope is released to the client and, for another provider, set `EXPLORER_OIDC_GROUPS_CLAIM`. |
-| `too_many_requests` | This client address made too many sign-in requests (10 in a burst, then 20 a minute). The log line `too many sign-in requests` names the address. | Wait a minute. If the address is the proxy's for every user, set `EXPLORER_TRUSTED_PROXIES` (see [Client addresses behind the proxy](#client-addresses-behind-the-proxy)). |
+| `too_many_requests` | This client address made too many sign-in requests (10 in a burst, then 20 a minute). The log line `too many sign-in requests` names the address. | Wait a minute. If the address is the proxy's for every user, add the proxy to `EXPLORER_TRUSTED_PROXIES` (see [Client addresses behind the proxy](#client-addresses-behind-the-proxy)). |
 
 Signing in successfully but landing on `/access-denied` means the user is not in
 `EXPLORER_ALLOWED_GROUP`; the log line `access denied` lists the groups received.

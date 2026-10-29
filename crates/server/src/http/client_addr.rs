@@ -97,6 +97,15 @@ pub fn client_addr(peer: IpAddr, headers: &HeaderMap, trusted: &[Cidr]) -> IpAdd
     client
 }
 
+/// The peer, when it sends `X-Forwarded-For` without being a trusted proxy: the header is
+/// ignored, which is a misconfiguration if the peer is the reverse proxy.
+#[must_use]
+pub fn untrusted_forwarder(peer: IpAddr, headers: &HeaderMap, trusted: &[Cidr]) -> Option<IpAddr> {
+    let peer = peer.to_canonical();
+    (headers.contains_key(X_FORWARDED_FOR) && !trusted.iter().any(|cidr| cidr.contains(peer)))
+        .then_some(peer)
+}
+
 fn parse_hop(hop: &[u8]) -> Option<IpAddr> {
     let hop = std::str::from_utf8(hop).ok()?.trim();
     hop.parse::<IpAddr>()
@@ -182,6 +191,24 @@ mod tests {
         assert_eq!(
             client_addr(ip("203.0.113.9"), &headers, &trusted),
             ip("203.0.113.9")
+        );
+    }
+
+    #[test]
+    fn names_an_untrusted_peer_that_forwards() {
+        let trusted = cidrs(&["172.18.0.0/16"]);
+        let headers = forwarded(&["198.51.100.7"]);
+        assert_eq!(
+            untrusted_forwarder(ip("::ffff:172.19.0.2"), &headers, &trusted),
+            Some(ip("172.19.0.2"))
+        );
+        assert_eq!(
+            untrusted_forwarder(ip("172.18.0.2"), &headers, &trusted),
+            None
+        );
+        assert_eq!(
+            untrusted_forwarder(ip("172.19.0.2"), &HeaderMap::new(), &trusted),
+            None
         );
     }
 
