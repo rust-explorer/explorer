@@ -11,7 +11,9 @@
   # or: cargo binstall dioxus-cli@0.7.10
   ```
 
-  `dx` downloads Tailwind and `wasm-opt` on first build, so it needs network access.
+  `dx` downloads Tailwind and `wasm-opt` on first build, so it needs network access. It
+  also sends anonymous usage telemetry; set `DX_TELEMETRY_ENABLED=false` to turn it off
+  (the Dockerfile and CI do).
 - Docker, to build the image.
 
 ## Building the web app
@@ -96,7 +98,13 @@ affect Explorer are ignored in `.cargo/audit.toml`, each with its reason.
 
 GitHub Actions run the same checks (`cargo xtask ci --no-docker`) on pull requests and
 pushes to `main`, `audit.yml` runs `cargo audit` every Monday (new advisories appear
-without any code change), and `release.yml` publishes `ghcr.io/rust-explorer/explorer` on `v*` tags.
+without any code change), and `release.yml` publishes `ghcr.io/rust-explorer/explorer` on `v*` tags, after the same
+CI workflow has passed.
+
+CI installs `dx` and `cargo-audit` from their release archives, checked against SHA-256
+sums written in `ci.yml` (update them with the versions). The tools `dx` fetches itself
+during the build are not pinned in CI, which only checks the code; the released image
+uses the checksum-pinned ones (see below).
 
 - CI is informative. No required status checks are configured; run `cargo xtask ci`
   locally before opening a pull request.
