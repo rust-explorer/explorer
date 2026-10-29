@@ -2,7 +2,7 @@
 
 ## Toolchain
 
-- Rust, pinned by [`rust-toolchain.toml`](../rust-toolchain.toml) (1.93, with `rustfmt`,
+- Rust, pinned by [`rust-toolchain.toml`](../rust-toolchain.toml) (1.98, with `rustfmt`,
   `clippy` and the `wasm32-unknown-unknown` target). `rustup` installs it on first use.
 - [Dioxus CLI](https://dioxuslabs.com/learn/0.7/) 0.7.10, which builds the web app:
 

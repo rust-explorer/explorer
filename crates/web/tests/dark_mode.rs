@@ -136,10 +136,8 @@ fn family(class: &str) -> Option<&'static str> {
         ("bg-", (rest, LIGHT_BG))
     } else if let Some(rest) = class.strip_prefix("text-") {
         ("text-", (rest, LIGHT_TEXT))
-    } else if let Some(rest) = class.strip_prefix("border-") {
-        ("border-", (rest, LIGHT_BORDER))
     } else {
-        return None;
+        ("border-", (class.strip_prefix("border-")?, LIGHT_BORDER))
     };
     let (colour, light) = colours;
     let colour = colour.split('/').next().unwrap_or(colour);

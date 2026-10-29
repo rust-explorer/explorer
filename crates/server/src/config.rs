@@ -8,7 +8,7 @@ use std::time::Duration;
 use secrecy::SecretString;
 use url::Url;
 
-const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
+const DEFAULT_SESSION_TTL: Duration = Duration::from_hours(7 * 24);
 
 const VAR_PUBLIC_URL: &str = "EXPLORER_PUBLIC_URL";
 const VAR_ISSUER: &str = "EXPLORER_OIDC_ISSUER";
@@ -363,7 +363,7 @@ mod tests {
         assert_eq!(cfg.oidc.client_secret.expose_secret(), "s3cret");
         assert_eq!(cfg.oidc.allowed_group, "explorer-users");
         assert_eq!(cfg.oidc.groups_claim, "groups");
-        assert_eq!(cfg.session_ttl, Duration::from_secs(7 * 24 * 3600));
+        assert_eq!(cfg.session_ttl, Duration::from_hours(7 * 24));
         assert_eq!(cfg.log.filter, "info");
         assert_eq!(cfg.log.format, LogFormat::Pretty);
         assert_eq!(cfg.data_dir, PathBuf::from("/data"));
@@ -552,7 +552,7 @@ mod tests {
     #[test]
     fn parses_session_ttl() {
         let cfg = Config::from_lookup(lookup(&with(&[("EXPLORER_SESSION_TTL", "12h")]))).unwrap();
-        assert_eq!(cfg.session_ttl, Duration::from_secs(12 * 3600));
+        assert_eq!(cfg.session_ttl, Duration::from_hours(12));
     }
 
     #[test]

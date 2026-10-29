@@ -21,10 +21,10 @@ const CLEANUP_INTERVAL: Duration = Duration::from_secs(600);
 /// create one, so it must not stay in the database for the full TTL.
 const PENDING_TTL: Duration = Duration::from_secs(600);
 /// Browsers cap cookie lifetimes at 400 days, so a longer TTL buys nothing.
-const MAX_TTL: Duration = Duration::from_secs(400 * 24 * 3600);
+const MAX_TTL: Duration = Duration::from_hours(400 * 24);
 /// However active, a session ends this long after sign-in (or after the TTL, if longer), so that
 /// a change of groups at the provider is eventually picked up.
-const MAX_LIFETIME: Duration = Duration::from_secs(30 * 24 * 3600);
+const MAX_LIFETIME: Duration = Duration::from_hours(30 * 24);
 /// Activity pushes the expiry back at most this often, to spare a database write per request.
 const MAX_TOUCH_INTERVAL: Duration = Duration::from_secs(3600);
 const STAMPS_KEY: &str = "lifetime";
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn ttl_is_kept_when_reasonable() {
-        let ttl = Duration::from_secs(7 * 24 * 3600);
+        let ttl = Duration::from_hours(7 * 24);
         assert_eq!(inactivity(ttl), time::Duration::days(7));
     }
 
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn activity_touches_at_most_hourly() {
-        let lifetime = Lifetime::new(Duration::from_secs(7 * 24 * 3600));
+        let lifetime = Lifetime::new(Duration::from_hours(7 * 24));
         let (fresh, now) = stamps(1, 59);
         assert_eq!(lifetime.verdict(fresh, now), Verdict::Keep);
         let (due, now) = stamps(1, 60);
@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn sessions_end_after_the_maximum_lifetime_however_active() {
-        let lifetime = Lifetime::new(Duration::from_secs(7 * 24 * 3600));
+        let lifetime = Lifetime::new(Duration::from_hours(7 * 24));
         let (active, now) = stamps(30, 0);
         assert_eq!(lifetime.verdict(active, now), Verdict::End);
         let (almost, now) = stamps(29, 0);
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn expiry_never_passes_the_maximum_lifetime() {
-        let lifetime = Lifetime::new(Duration::from_secs(7 * 24 * 3600));
+        let lifetime = Lifetime::new(Duration::from_hours(7 * 24));
         let (early, now) = stamps(1, 0);
         assert_eq!(lifetime.remaining(early, now), time::Duration::days(7));
         let (late, now) = stamps(28, 0);
@@ -299,9 +299,9 @@ mod tests {
 
     #[test]
     fn maximum_lifetime_is_at_least_the_ttl() {
-        let lifetime = Lifetime::new(Duration::from_secs(90 * 24 * 3600));
+        let lifetime = Lifetime::new(Duration::from_hours(90 * 24));
         assert_eq!(lifetime.max, time::Duration::days(90));
-        let lifetime = Lifetime::new(Duration::from_secs(24 * 3600));
+        let lifetime = Lifetime::new(Duration::from_hours(24));
         assert_eq!(lifetime.max, time::Duration::days(30));
     }
 }

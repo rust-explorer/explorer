@@ -23,12 +23,12 @@ pub const MAX_SOURCE_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_PIXELS_SIDE: u32 = 16_384;
 pub const MAX_DECODE_ALLOC: u64 = 512 * 1024 * 1024;
 pub const THUMB_CONCURRENCY: usize = 2;
-pub const THUMB_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 3600);
+pub const THUMB_MAX_AGE: Duration = Duration::from_hours(30 * 24);
 /// Part of the cache key: bump it when the rendering changes.
 pub const THUMB_VERSION: u32 = 1;
 /// Under the config directory.
 pub const CACHE_DIR: &str = "cache/thumbnails";
-pub const SWEEP_INTERVAL: Duration = Duration::from_secs(24 * 3600);
+pub const SWEEP_INTERVAL: Duration = Duration::from_hours(24);
 
 pub fn routes() -> Router<AppState> {
     Router::new().route("/thumbnail", get(routes::thumbnail))

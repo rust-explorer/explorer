@@ -13,7 +13,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use super::{THUMB_CONCURRENCY, THUMB_MAX_AGE, THUMB_VERSION, Thumbnail};
 
 /// A cached thumbnail used after this long gets its mtime refreshed, so that `sweep` keeps it.
-const TOUCH_AFTER: Duration = Duration::from_secs(7 * 24 * 3600);
+const TOUCH_AFTER: Duration = Duration::from_hours(7 * 24);
 const FORMATS: [(&str, &str); 2] = [("jpg", "image/jpeg"), ("png", "image/png")];
 
 /// The on-disk thumbnail cache, and the permits that bound concurrent renders.
