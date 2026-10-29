@@ -15,7 +15,6 @@ browser ──HTTPS──> reverse proxy ──HTTP──> explorer container
                                             └─ /config         state (SQLite, thumbnail cache)
 ```
 
-
 ## Crates
 
 | Crate | Path | Role |

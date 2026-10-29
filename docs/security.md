@@ -110,7 +110,10 @@ under, which only gives it a bucket of its own. On the Internet side, a request 
 unreadable or forged header part is still counted under the address the proxy appended.
 When a peer outside the list sends `X-Forwarded-For`, the server logs it once at warn.
 
-IPv6 clients are counted per /64, the block one subscriber usually gets. The limiter tracks at most 10 000 addresses in memory; an address whose allowance has fully
+IPv4 clients are counted per address and IPv6 clients per /64, the block one subscriber
+usually gets. A client controlling many addresses or /64s (an IPv6 /48 holds 65 536) gets a
+burst for each and can exceed the limit; the provider still authenticates every sign-in.
+The limiter tracks at most 10 000 addresses in memory; an address whose allowance has fully
 refilled is forgotten, and when all 10 000 are active the one closest to refilled is
 dropped.
 

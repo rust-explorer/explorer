@@ -14,8 +14,8 @@ See [`.env.example`](../.env.example) for a starting point.
 | `EXPLORER_OIDC_ISSUER` | yes | — | OIDC issuer URL, e.g. `https://id.example.com`. |
 | `EXPLORER_OIDC_CLIENT_ID` | yes | — | OIDC client ID. |
 | `EXPLORER_OIDC_CLIENT_SECRET` | yes¹ | — | OIDC client secret. |
-| `EXPLORER_OIDC_CA_FILE` | no | — | Path to a PEM file of CA certificates the OIDC provider's certificate may be signed by. Trusted in addition to the built-in public roots, for discovery, key and token requests. Startup fails if the file is unreadable or has no certificate. |
 | `EXPLORER_OIDC_CLIENT_SECRET_FILE` | yes¹ | — | Path to a file containing the client secret (e.g. a Docker secret under `/run/secrets/`). Trailing newlines are ignored. |
+| `EXPLORER_OIDC_CA_FILE` | no | — | Path to a PEM file of CA certificates the OIDC provider's certificate may be signed by. Trusted in addition to the built-in public roots, for discovery, key and token requests. Startup fails if the file is unreadable or has no certificate. |
 | `EXPLORER_ALLOWED_GROUP` | yes | — | Only members of this group may sign in. |
 | `EXPLORER_OIDC_GROUPS_CLAIM` | no | `groups` | ID token claim holding the user's group names. |
 | `EXPLORER_SESSION_TTL` | no | `7d` | Idle session lifetime, e.g. `12h`, `7d`, `30d`. Must be greater than zero; capped at 400 days. |
