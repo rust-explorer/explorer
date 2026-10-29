@@ -5,34 +5,44 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use openidconnect::reqwest::Certificate;
 use secrecy::SecretString;
 use url::Url;
 
-const DEFAULT_SESSION_TTL: Duration = Duration::from_secs(7 * 24 * 3600);
+use crate::http::client_addr::Cidr;
+
+const DEFAULT_SESSION_TTL: Duration = Duration::from_hours(7 * 24);
+/// Loopback and private networks: where a reverse proxy in front of Explorer usually is.
+const DEFAULT_TRUSTED_PROXIES: &str =
+    "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7";
 
 const VAR_PUBLIC_URL: &str = "EXPLORER_PUBLIC_URL";
 const VAR_ISSUER: &str = "EXPLORER_OIDC_ISSUER";
 const VAR_CLIENT_ID: &str = "EXPLORER_OIDC_CLIENT_ID";
 const VAR_CLIENT_SECRET: &str = "EXPLORER_OIDC_CLIENT_SECRET";
 const VAR_CLIENT_SECRET_FILE: &str = "EXPLORER_OIDC_CLIENT_SECRET_FILE";
+const VAR_CA_FILE: &str = "EXPLORER_OIDC_CA_FILE";
 const VAR_ALLOWED_GROUP: &str = "EXPLORER_ALLOWED_GROUP";
 const VAR_GROUPS_CLAIM: &str = "EXPLORER_OIDC_GROUPS_CLAIM";
 const VAR_SESSION_TTL: &str = "EXPLORER_SESSION_TTL";
+const VAR_TRUSTED_PROXIES: &str = "EXPLORER_TRUSTED_PROXIES";
 const VAR_LOG: &str = "EXPLORER_LOG";
 const VAR_LOG_FORMAT: &str = "EXPLORER_LOG_FORMAT";
 const VAR_DATA_DIR: &str = "EXPLORER_DATA_DIR";
 const VAR_CONFIG_DIR: &str = "EXPLORER_CONFIG_DIR";
 const VAR_WEB_DIR: &str = "EXPLORER_WEB_DIR";
 
-const ALL_VARS: [&str; 13] = [
+const ALL_VARS: [&str; 15] = [
     VAR_PUBLIC_URL,
     VAR_ISSUER,
     VAR_CLIENT_ID,
     VAR_CLIENT_SECRET,
     VAR_CLIENT_SECRET_FILE,
+    VAR_CA_FILE,
     VAR_ALLOWED_GROUP,
     VAR_GROUPS_CLAIM,
     VAR_SESSION_TTL,
+    VAR_TRUSTED_PROXIES,
     VAR_LOG,
     VAR_LOG_FORMAT,
     VAR_DATA_DIR,
@@ -46,6 +56,8 @@ pub struct Config {
     pub public_url: Url,
     pub oidc: OidcConfig,
     pub session_ttl: Duration,
+    /// Peers whose `X-Forwarded-For` names the client.
+    pub trusted_proxies: Vec<Cidr>,
     pub log: LogConfig,
     pub data_dir: PathBuf,
     pub config_dir: PathBuf,
@@ -58,6 +70,8 @@ pub struct OidcConfig {
     pub issuer: String,
     pub client_id: String,
     pub client_secret: SecretString,
+    /// Trusted in addition to the built-in roots when talking to the provider.
+    pub ca_certs: Vec<Certificate>,
     pub allowed_group: String,
     pub groups_claim: String,
 }
@@ -82,6 +96,8 @@ pub enum ConfigError {
     Invalid { var: &'static str, reason: String },
     #[error("cannot read secret file {}: {source}", path.display())]
     SecretFile { path: PathBuf, source: io::Error },
+    #[error("cannot read {VAR_CA_FILE} {}: {source}", path.display())]
+    CaFile { path: PathBuf, source: io::Error },
 }
 
 #[derive(Debug)]
@@ -154,10 +170,17 @@ impl Config {
         let public_url = public_url.and_then(|v| collect(&mut errors, parse_public_url(&v)));
         let issuer = issuer.and_then(|v| collect(&mut errors, parse_issuer(v)));
         let client_secret = collect(&mut errors, read_client_secret(&get));
+        let ca_certs = collect(&mut errors, read_ca_certs(&get));
 
         let session_ttl = match get(VAR_SESSION_TTL) {
             None => Some(DEFAULT_SESSION_TTL),
             Some(v) => collect(&mut errors, parse_session_ttl(&v)),
+        };
+        // Unlike other variables, an empty value is meaningful here: trust no proxy.
+        let trusted_proxies = match lookup(VAR_TRUSTED_PROXIES) {
+            None => collect(&mut errors, parse_trusted_proxies(DEFAULT_TRUSTED_PROXIES)),
+            Some(v) if v.trim().is_empty() => Some(Vec::new()),
+            Some(v) => collect(&mut errors, parse_trusted_proxies(&v)),
         };
         let format = match get(VAR_LOG_FORMAT).as_deref() {
             None | Some("pretty") => Some(LogFormat::Pretty),
@@ -183,8 +206,10 @@ impl Config {
             issuer,
             client_id,
             client_secret,
+            ca_certs,
             allowed_group,
             session_ttl,
+            trusted_proxies,
             format,
         ) {
             (
@@ -192,8 +217,10 @@ impl Config {
                 Some(issuer),
                 Some(client_id),
                 Some(client_secret),
+                Some(ca_certs),
                 Some(allowed_group),
                 Some(session_ttl),
+                Some(trusted_proxies),
                 Some(format),
             ) if errors.is_empty() => Ok(Self {
                 public_url,
@@ -201,10 +228,12 @@ impl Config {
                     issuer,
                     client_id,
                     client_secret,
+                    ca_certs,
                     allowed_group,
                     groups_claim: get(VAR_GROUPS_CLAIM).unwrap_or_else(|| "groups".to_owned()),
                 },
                 session_ttl,
+                trusted_proxies,
                 log: LogConfig {
                     filter: log_filter,
                     format,
@@ -289,6 +318,35 @@ fn parse_session_ttl(value: &str) -> Result<Duration, ConfigError> {
     Ok(ttl)
 }
 
+fn parse_trusted_proxies(value: &str) -> Result<Vec<Cidr>, ConfigError> {
+    value
+        .split(',')
+        .map(|entry| {
+            entry
+                .trim()
+                .parse()
+                .map_err(|e| invalid(VAR_TRUSTED_PROXIES, e))
+        })
+        .collect()
+}
+
+fn read_ca_certs(get: &impl Fn(&str) -> Option<String>) -> Result<Vec<Certificate>, ConfigError> {
+    let Some(file) = get(VAR_CA_FILE) else {
+        return Ok(Vec::new());
+    };
+    let path = PathBuf::from(file);
+    let pem = std::fs::read(&path).map_err(|source| ConfigError::CaFile {
+        path: path.clone(),
+        source,
+    })?;
+    let certs = Certificate::from_pem_bundle(&pem)
+        .map_err(|err| invalid(VAR_CA_FILE, format!("invalid PEM certificate: {err}")))?;
+    if certs.is_empty() {
+        return Err(invalid(VAR_CA_FILE, "no PEM certificate found in the file"));
+    }
+    Ok(certs)
+}
+
 fn read_client_secret(get: &impl Fn(&str) -> Option<String>) -> Result<SecretString, ConfigError> {
     match (get(VAR_CLIENT_SECRET), get(VAR_CLIENT_SECRET_FILE)) {
         (Some(_), Some(_)) => Err(invalid(
@@ -312,6 +370,21 @@ fn read_client_secret(get: &impl Fn(&str) -> Option<String>) -> Result<SecretStr
         (None, None) => Err(ConfigError::Missing(VAR_CLIENT_SECRET)),
     }
 }
+
+/// A self-signed CA certificate (valid until 2126) shared by the tests that load roots.
+#[cfg(test)]
+pub(crate) const TEST_CA_PEM: &str = "-----BEGIN CERTIFICATE-----
+MIIBjDCCATOgAwIBAgIUcresLwbbHwTh4r1aZRgkT3VG0kQwCgYIKoZIzj0EAwIw
+GzEZMBcGA1UEAwwQRXhwbG9yZXIgdGVzdCBDQTAgFw0yNjEwMjkyMTI1MDlaGA8y
+MTI2MTAwNTIxMjUwOVowGzEZMBcGA1UEAwwQRXhwbG9yZXIgdGVzdCBDQTBZMBMG
+ByqGSM49AgEGCCqGSM49AwEHA0IABBs7qSrkP/HwphnUN7HXyPKB0SLYvLGFxQCB
+GC6Lx08fosKJ6z11CivZZMgi4TbrZfLpqQcrdXIydivk5In+NoejUzBRMB0GA1Ud
+DgQWBBQfN2QleOQhxBAT9cUd0xtEwYhxQDAfBgNVHSMEGDAWgBQfN2QleOQhxBAT
+9cUd0xtEwYhxQDAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMCA0cAMEQCIBlA
+JCG0Ugig1/Xx1lN47S4+rR1LbDGhlsALlmfzA9vyAiAC1DMlNk/xfSVcwcKiaac3
+/yhabvF0HpLwEoNmTcQoAw==
+-----END CERTIFICATE-----
+";
 
 #[cfg(test)]
 mod tests {
@@ -363,7 +436,19 @@ mod tests {
         assert_eq!(cfg.oidc.client_secret.expose_secret(), "s3cret");
         assert_eq!(cfg.oidc.allowed_group, "explorer-users");
         assert_eq!(cfg.oidc.groups_claim, "groups");
-        assert_eq!(cfg.session_ttl, Duration::from_secs(7 * 24 * 3600));
+        assert_eq!(cfg.session_ttl, Duration::from_hours(7 * 24));
+        let private: Vec<Cidr> = [
+            "127.0.0.0/8",
+            "::1/128",
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            "fc00::/7",
+        ]
+        .iter()
+        .map(|s| s.parse().unwrap())
+        .collect();
+        assert_eq!(cfg.trusted_proxies, private);
         assert_eq!(cfg.log.filter, "info");
         assert_eq!(cfg.log.format, LogFormat::Pretty);
         assert_eq!(cfg.data_dir, PathBuf::from("/data"));
@@ -415,6 +500,52 @@ mod tests {
             .collect();
         let cfg = Config::from_lookup(lookup(&pairs)).unwrap();
         assert_eq!(cfg.oidc.client_secret.expose_secret(), "s3cret");
+    }
+
+    fn with_ca_file(content: &[u8]) -> Result<Config, Vec<ConfigError>> {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(content).unwrap();
+        let path = file.path().to_str().unwrap();
+        let pairs: Vec<_> = valid()
+            .into_iter()
+            .chain([("EXPLORER_OIDC_CA_FILE", path)])
+            .collect();
+        Config::from_lookup(lookup(&pairs)).map_err(|e| e.0)
+    }
+
+    #[test]
+    fn no_ca_file_means_no_extra_roots() {
+        let cfg = Config::from_lookup(lookup(&valid())).unwrap();
+        assert!(cfg.oidc.ca_certs.is_empty());
+    }
+
+    #[test]
+    fn loads_every_certificate_of_the_ca_file() {
+        let bundle = format!("{TEST_CA_PEM}\n{TEST_CA_PEM}");
+        let cfg = with_ca_file(bundle.as_bytes()).unwrap();
+        assert_eq!(cfg.oidc.ca_certs.len(), 2);
+    }
+
+    #[test]
+    fn rejects_ca_file_without_certificate() {
+        for content in [&b""[..], b"not a certificate\n"] {
+            let errs = with_ca_file(content).unwrap_err();
+            assert!(matches!(
+                errs.as_slice(),
+                [ConfigError::Invalid {
+                    var: "EXPLORER_OIDC_CA_FILE",
+                    ..
+                }]
+            ));
+        }
+    }
+
+    #[test]
+    fn reports_unreadable_ca_file() {
+        let pairs = with(&[("EXPLORER_OIDC_CA_FILE", "/nonexistent/ca.pem")]);
+        let errs = errors(&pairs);
+        assert!(matches!(errs.as_slice(), [ConfigError::CaFile { .. }]));
+        assert!(errs[0].to_string().contains("EXPLORER_OIDC_CA_FILE"));
     }
 
     #[test]
@@ -552,7 +683,47 @@ mod tests {
     #[test]
     fn parses_session_ttl() {
         let cfg = Config::from_lookup(lookup(&with(&[("EXPLORER_SESSION_TTL", "12h")]))).unwrap();
-        assert_eq!(cfg.session_ttl, Duration::from_secs(12 * 3600));
+        assert_eq!(cfg.session_ttl, Duration::from_hours(12));
+    }
+
+    #[test]
+    fn parses_trusted_proxies() {
+        let cfg = Config::from_lookup(lookup(&with(&[(
+            "EXPLORER_TRUSTED_PROXIES",
+            "172.18.0.0/16, 10.0.0.1,fd00::/8",
+        )])))
+        .unwrap();
+        let expected: Vec<Cidr> = ["172.18.0.0/16", "10.0.0.1", "fd00::/8"]
+            .iter()
+            .map(|s| s.parse().unwrap())
+            .collect();
+        assert_eq!(cfg.trusted_proxies, expected);
+    }
+
+    #[test]
+    fn empty_trusted_proxies_trusts_none() {
+        for empty in ["", " "] {
+            let cfg =
+                Config::from_lookup(lookup(&with(&[("EXPLORER_TRUSTED_PROXIES", empty)]))).unwrap();
+            assert!(cfg.trusted_proxies.is_empty(), "{empty:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_bad_trusted_proxies() {
+        for bad in ["172.18.0.0/40", "proxy", "10.0.0.1,,10.0.0.2", "10.0.0.1,"] {
+            let errs = errors(&with(&[("EXPLORER_TRUSTED_PROXIES", bad)]));
+            assert!(
+                matches!(
+                    errs.as_slice(),
+                    [ConfigError::Invalid {
+                        var: "EXPLORER_TRUSTED_PROXIES",
+                        ..
+                    }]
+                ),
+                "{bad} should be rejected"
+            );
+        }
     }
 
     #[test]
@@ -626,6 +797,30 @@ mod tests {
         .unwrap_err();
         assert_eq!(errs.0.len(), 2);
         assert_eq!(errs.to_string().lines().count(), 2);
+    }
+
+    #[test]
+    fn every_variable_is_documented() {
+        let source = include_str!("config.rs");
+        let declared: Vec<&str> = source
+            .lines()
+            .filter_map(|line| line.strip_prefix("const VAR_"))
+            .filter_map(|rest| rest.split('"').nth(1))
+            .collect();
+        assert!(!declared.is_empty());
+        for name in &declared {
+            assert!(ALL_VARS.contains(name), "{name} is missing from ALL_VARS");
+        }
+        assert_eq!(declared.len(), ALL_VARS.len());
+        let docs = include_str!("../../../docs/configuration.md");
+        let example = include_str!("../../../.env.example");
+        for name in ALL_VARS {
+            assert!(
+                docs.contains(name),
+                "{name} is not in docs/configuration.md"
+            );
+            assert!(example.contains(name), "{name} is not in .env.example");
+        }
     }
 
     #[test]

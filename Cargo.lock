@@ -1515,7 +1515,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-server"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "axum",
  "axum-extra",
@@ -1556,7 +1556,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-shared"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -1565,7 +1565,7 @@ dependencies = [
 
 [[package]]
 name = "explorer-web"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "dioxus",
  "dioxus-i18n",

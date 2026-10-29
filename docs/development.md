@@ -2,16 +2,17 @@
 
 ## Toolchain
 
-- Rust, pinned by [`rust-toolchain.toml`](../rust-toolchain.toml) (1.93, with `rustfmt`,
+- Rust, pinned by [`rust-toolchain.toml`](../rust-toolchain.toml) (1.98, with `rustfmt`,
   `clippy` and the `wasm32-unknown-unknown` target). `rustup` installs it on first use.
 - [Dioxus CLI](https://dioxuslabs.com/learn/0.7/) 0.7.10, which builds the web app:
 
   ```sh
   cargo install --locked dioxus-cli@0.7.10
-  # or: cargo binstall dioxus-cli@0.7.10
   ```
 
-  `dx` downloads Tailwind and `wasm-opt` on first build, so it needs network access.
+  `dx` downloads Tailwind and `wasm-opt` on first build, so it needs network access. It
+  also sends anonymous usage telemetry; set `DX_TELEMETRY_ENABLED=false` to turn it off
+  (the Dockerfile and CI do).
 - Docker, to build the image.
 
 ## Building the web app
@@ -87,7 +88,7 @@ skipped with a notice if `dx` is not installed, except when `CI=true`, where a m
 `wasm32` target, because it generates `tailwind.css`; the host-target checks above do not
 need it.
 
-`cargo audit` (`cargo binstall cargo-audit`) checks `Cargo.lock` against the RustSec
+`cargo audit` (`cargo install --locked cargo-audit`) checks `Cargo.lock` against the RustSec
 advisory database. It is skipped with a notice if not installed, except when `CI=true`.
 Offline, it falls back to the last fetched copy of the database. Advisories that cannot
 affect Explorer are ignored in `.cargo/audit.toml`, each with its reason.
@@ -96,12 +97,18 @@ affect Explorer are ignored in `.cargo/audit.toml`, each with its reason.
 
 GitHub Actions run the same checks (`cargo xtask ci --no-docker`) on pull requests and
 pushes to `main`, `audit.yml` runs `cargo audit` every Monday (new advisories appear
-without any code change), and `release.yml` publishes `ghcr.io/rust-explorer/explorer` on `v*` tags.
+without any code change), and `release.yml` publishes `ghcr.io/rust-explorer/explorer` on `v*` tags, after the same
+CI workflow has passed.
+
+CI installs `dx` and `cargo-audit` from their release archives, checked against SHA-256
+sums written in `ci.yml` (update them with the versions). The tools `dx` fetches itself
+during the build are not pinned in CI, which only checks the code; the released image
+uses the checksum-pinned ones (see below).
 
 - CI is informative. No required status checks are configured; run `cargo xtask ci`
   locally before opening a pull request.
-- Minutes budget: Actions are free for a public repository. While the repository is
-  private, the free quota applies and a $0 spending limit stops jobs once it is used up.
+- Minutes budget: Actions are free for a public repository. Keep the account's $0 spending
+  limit, so that nothing is billed if the repository ever turns private.
 - Never add a self-hosted runner. Pull requests from forks would execute their code on
   that machine.
 

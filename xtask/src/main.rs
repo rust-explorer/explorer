@@ -125,13 +125,13 @@ fn ci(docker: bool) -> ExitCode {
         }
     } else if env::var("CI").is_ok_and(|v| v == "true") {
         eprintln!(
-            "\n==> FAILED: {}: `dx` not found but CI=true (cargo binstall dioxus-cli@0.7.10)",
+            "\n==> FAILED: {}: `dx` not found but CI=true (cargo install --locked dioxus-cli@0.7.10)",
             WEB_BUILD.name
         );
         return ExitCode::FAILURE;
     } else {
         eprintln!(
-            "\n==> skipping {} and {}: `dx` not found (cargo binstall dioxus-cli@0.7.10)",
+            "\n==> skipping {} and {}: `dx` not found (cargo install --locked dioxus-cli@0.7.10)",
             WEB_BUILD.name, WEB_CLIPPY.name
         );
     }
@@ -153,13 +153,13 @@ fn audit() -> bool {
     if !command_exists_with("cargo", &["audit", "--version"]) {
         if ci {
             eprintln!(
-                "\n==> FAILED: {}: `cargo audit` not found but CI=true (cargo binstall cargo-audit)",
+                "\n==> FAILED: {}: `cargo audit` not found but CI=true (cargo install --locked cargo-audit)",
                 AUDIT.name
             );
             return false;
         }
         eprintln!(
-            "\n==> skipping {}: `cargo audit` not found (cargo binstall cargo-audit)",
+            "\n==> skipping {}: `cargo audit` not found (cargo install --locked cargo-audit)",
             AUDIT.name
         );
         return true;

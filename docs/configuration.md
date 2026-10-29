@@ -2,7 +2,7 @@
 
 Explorer is configured through environment variables only. Startup validates all of them
 and, if anything is wrong, exits with status 2 and prints one line per problem. Empty
-values count as unset.
+values count as unset, except for `EXPLORER_TRUSTED_PROXIES`.
 
 See [`.env.example`](../.env.example) for a starting point.
 
@@ -15,13 +15,21 @@ See [`.env.example`](../.env.example) for a starting point.
 | `EXPLORER_OIDC_CLIENT_ID` | yes | — | OIDC client ID. |
 | `EXPLORER_OIDC_CLIENT_SECRET` | yes¹ | — | OIDC client secret. |
 | `EXPLORER_OIDC_CLIENT_SECRET_FILE` | yes¹ | — | Path to a file containing the client secret (e.g. a Docker secret under `/run/secrets/`). Trailing newlines are ignored. |
+| `EXPLORER_OIDC_CA_FILE` | no | — | Path to a PEM file of CA certificates the OIDC provider's certificate may be signed by. Trusted in addition to the built-in public roots, for discovery, key and token requests. Startup fails if the file is unreadable or has no certificate. |
 | `EXPLORER_ALLOWED_GROUP` | yes | — | Only members of this group may sign in. |
 | `EXPLORER_OIDC_GROUPS_CLAIM` | no | `groups` | ID token claim holding the user's group names. |
 | `EXPLORER_SESSION_TTL` | no | `7d` | Idle session lifetime, e.g. `12h`, `7d`, `30d`. Must be greater than zero; capped at 400 days. |
+| `EXPLORER_TRUSTED_PROXIES` | no | loopback and private networks² | Comma-separated networks (`172.18.0.0/16`) or addresses of the reverse proxies in front of Explorer; an IPv4-mapped network such as `::ffff:10.0.0.0/104` means its IPv4 network (`10.0.0.0/8`). A request from one of them is attributed to the client named in `X-Forwarded-For` (the rightmost entry that is not itself a trusted proxy); any other request to its TCP peer. Used by the sign-in rate limit. A value replaces the default; an empty value trusts no peer. See [installation.md](installation.md#client-addresses-behind-the-proxy). |
 | `EXPLORER_LOG` | no | `info` | Log filter: a level (`off`, `error`, `warn`, `info`, `debug`, `trace`) and/or comma-separated `target=level` directives, e.g. `warn,explorer_server=debug`. |
 | `EXPLORER_LOG_FORMAT` | no | `pretty` | `pretty` (human-readable) or `json`. |
 
 ¹ Set exactly one of `EXPLORER_OIDC_CLIENT_SECRET` and `EXPLORER_OIDC_CLIENT_SECRET_FILE`.
+
+² `127.0.0.0/8, ::1/128, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, fc00::/7`: a reverse
+proxy on the same host, a Docker network or the LAN is trusted without configuration. Any
+host on those networks can then choose the address its own sign-in requests are counted
+under, which only lets it pick its own rate-limit bucket. Set the proxy's address alone to
+narrow it, or `EXPLORER_TRUSTED_PROXIES=` (empty) to trust no peer.
 
 Explorer requests the scopes `openid profile email groups`. The groups come from the
 claim named by `EXPLORER_OIDC_GROUPS_CLAIM` in the ID token, falling back to the userinfo

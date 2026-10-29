@@ -55,7 +55,8 @@ RUN case "$(uname -m)" in \
     && cd / && rm -rf "$tmp"
 COPY . .
 # NO_DOWNLOADS: dx takes its tools from PATH instead of fetching them.
-RUN NO_DOWNLOADS=1 dx build --release -p explorer-web --platform web \
+# DX_TELEMETRY_ENABLED: dx sends anonymous usage data unless told not to.
+RUN NO_DOWNLOADS=1 DX_TELEMETRY_ENABLED=false dx build --release -p explorer-web --platform web \
     && cp -r target/dx/explorer-web/release/web/public /out
 
 FROM chef AS server

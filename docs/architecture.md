@@ -15,14 +15,6 @@ browser ──HTTPS──> reverse proxy ──HTTP──> explorer container
                                             └─ /config         state (SQLite, thumbnail cache)
 ```
 
-Status: `/healthz`, the web bundle, sign-in (`/auth/*`, `/api/me`), browsing
-(`/api/volumes*`), downloads (`/files/download`, `/files/zip`) and resumable uploads
-(`/files/uploads*`, `/api/uploads`, `/api/volumes/{volume}/folders`) are implemented, and so
-are managing files: new folder, rename, multi-select and zip of several entries, and delete,
-copy and move as background tasks (`/api/volumes/{volume}/rename`, `/api/tasks*`). The polish
-milestone adds a refresh button, favorite folders, search by name, a grid view with image
-thumbnails, space usage, dark mode and a read-only notice.
-
 ## Crates
 
 | Crate | Path | Role |
@@ -38,7 +30,8 @@ server functions, so the API stays usable by other clients.
 
 1. Every request gets an `X-Request-Id` (kept if the client sent one), propagated to the
    response and recorded on the request's tracing span.
-2. Routing: `/healthz`, then `/api/*`, `/auth/*` and `/files/*` (JSON errors, never HTML),
+2. Routing: `/healthz`, then `/api/*`, `/auth/*` and `/files/*` (JSON errors, never HTML,
+   except the sign-in rate limit for a browser, below),
    then the static bundle. Unknown non-asset paths fall back to `index.html` for client-side
    routing; missing files under `/assets/` are real 404s.
 3. Errors use one JSON shape: `code`, `message`, optional `details`, and the request ID.
@@ -57,8 +50,13 @@ an opaque session cookie. See [security.md](security.md) for the guarantees.
 | `POST /auth/logout` | Flushes the session; returns JSON `{redirect_to}` (the provider's end-session URL, or `/`). |
 | `GET /api/me` | The signed-in user, or 401 `unauthenticated`. |
 
-The web app boots by calling `/api/me`; on 401 it shows a sign-in page that links to
-`/auth/login`. `/access-denied` and `/signin-error` are SPA pages.
+| Code | Status | Meaning |
+|---|---|---|
+| `too_many_requests` | 429 | `/auth/login` or `/auth/callback` was called more than 10 times in a burst, or 20 a minute, from this client address (see [security.md](security.md#sign-in-rate-limit)). `Retry-After` gives the seconds to wait. A request accepting `text/html` gets, with the same status, a page that redirects to `/signin-error?reason=too_many_requests`. |
+
+The web app boots by calling `/api/me`; on 401 it sends the browser to `/auth/login` with
+the current page as `return_to`. `/access-denied` and `/signin-error` are SPA pages; as they
+have no user menu, they show the language picker themselves.
 
 ## Volumes and browsing
 
@@ -385,13 +383,16 @@ The scan is logged at `info` (`action` = `usage`, with `files`, `dirs`, `bytes`,
 ## Web app
 
 Routes: `/` (opens the first volume, or says there is none), `/browse/<volume>/<path>`,
-`/access-denied`, `/signin-error` and a not-found page. The folder lives in the URL, so
+`/usage/<task>/<volume>/<path>`, `/access-denied`, `/signin-error` and a not-found page.
+The interface is in English, French or Spanish: the browser's preferred language at first,
+then the one picked in the user menu (or on the sign-in pages), kept in `localStorage`
+(`explorer.locale`). The folder lives in the URL, so
 links, reload and the back button work. The sidebar lists the volumes with their free
 space and a read-only marker. The folder is shown as a table sorted by name, size or date
 (folders first), rendered through a virtualised list so a folder with tens of thousands of
-entries keeps the DOM small. Sizes use SI units (1 kB = 1000 B). Each file row links to
-`/files/download` and each folder row to `/files/zip`; these are plain links, so the
-browser handles the download and shows any failure in its own download list.
+entries keeps the DOM small. Sizes use SI units (1 kB = 1000 B). A file row's
+download uses `/files/download` and a folder's `/files/zip`, started as a browser download
+(not fetched by the app), so the browser shows any failure in its own download list.
 
 Managing files: each row has a menu (Download, Rename, Move to, Copy to, Delete) and a checkbox;
 checking rows, with shift-click for a range, shows a bar to download them as a zip (the names are stored

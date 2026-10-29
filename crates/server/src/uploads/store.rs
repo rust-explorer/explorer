@@ -9,7 +9,7 @@ use sqlx::{Row as _, SqlitePool};
 use crate::storage::{RelPath, StagedId};
 
 /// An upload with no activity for this long is abandoned and swept.
-pub const UPLOAD_TTL: Duration = Duration::from_secs(24 * 3600);
+pub const UPLOAD_TTL: Duration = Duration::from_hours(24);
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UploadRecord {

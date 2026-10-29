@@ -19,7 +19,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 impl Oidc {
     pub async fn discover(cfg: &OidcConfig, public_url: &Url) -> Result<Self, OidcError> {
-        Self::discover_using(cfg, public_url, &http_client()?).await
+        Self::discover_using(cfg, public_url, &http_client(&cfg.ca_certs)?).await
     }
 
     /// Retries transient failures (provider or its proxy down or answering garbage), so Explorer
@@ -30,7 +30,7 @@ impl Oidc {
         attempts: u32,
         delay: Duration,
     ) -> Result<Self, OidcError> {
-        let http = http_client()?;
+        let http = http_client(&cfg.ca_certs)?;
         let attempts = attempts.max(1);
         let mut attempt = 1;
         loop {
@@ -112,8 +112,13 @@ pub(super) fn build_client(
     .set_redirect_uri(redirect.clone())
 }
 
-fn http_client() -> Result<reqwest::Client, OidcError> {
-    reqwest::Client::builder()
+/// `ca_certs` are trusted on top of the built-in roots, never instead of them.
+fn http_client(ca_certs: &[reqwest::Certificate]) -> Result<reqwest::Client, OidcError> {
+    let mut builder = reqwest::Client::builder();
+    for cert in ca_certs {
+        builder = builder.add_root_certificate(cert.clone());
+    }
+    builder
         // Following redirects would let a provider response steer requests elsewhere (SSRF).
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(CONNECT_TIMEOUT)
@@ -134,6 +139,14 @@ fn is_transient<E: StdError>(err: &DiscoveryError<E>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::TEST_CA_PEM;
+
+    #[test]
+    fn client_builds_with_and_without_extra_roots() {
+        assert!(http_client(&[]).is_ok());
+        let certs = reqwest::Certificate::from_pem_bundle(TEST_CA_PEM.as_bytes()).unwrap();
+        assert!(http_client(&certs).is_ok());
+    }
 
     #[test]
     fn everything_but_configuration_errors_is_transient() {

@@ -1,6 +1,7 @@
 mod conflict_prompt;
 mod error_panel;
 pub mod icons;
+mod language_picker;
 mod menu;
 mod modal;
 mod notice;
@@ -8,6 +9,7 @@ mod rows;
 
 pub use conflict_prompt::ConflictPrompt;
 pub use error_panel::{ErrorPanel, FailureNote, error_message};
+pub use language_picker::LanguagePicker;
 pub use menu::{Menu, MenuItem};
 pub use modal::{FocusTarget, Modal};
 pub use notice::Notice;

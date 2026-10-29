@@ -110,6 +110,7 @@ fn every_api_error_code_has_a_message() {
         "changed_during_move",
         "too_many_entries",
         "too_many_zips",
+        "too_many_requests",
         "selection_expired",
     ]
     .iter()

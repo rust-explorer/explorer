@@ -21,10 +21,10 @@ const CLEANUP_INTERVAL: Duration = Duration::from_secs(600);
 /// create one, so it must not stay in the database for the full TTL.
 const PENDING_TTL: Duration = Duration::from_secs(600);
 /// Browsers cap cookie lifetimes at 400 days, so a longer TTL buys nothing.
-const MAX_TTL: Duration = Duration::from_secs(400 * 24 * 3600);
+const MAX_TTL: Duration = Duration::from_hours(400 * 24);
 /// However active, a session ends this long after sign-in (or after the TTL, if longer), so that
 /// a change of groups at the provider is eventually picked up.
-const MAX_LIFETIME: Duration = Duration::from_secs(30 * 24 * 3600);
+const MAX_LIFETIME: Duration = Duration::from_hours(30 * 24);
 /// Activity pushes the expiry back at most this often, to spare a database write per request.
 const MAX_TOUCH_INTERVAL: Duration = Duration::from_secs(3600);
 const STAMPS_KEY: &str = "lifetime";
@@ -204,11 +204,12 @@ fn uses_session(path: &str) -> bool {
     })
 }
 
-/// Deletes expired sessions every hour; a failed sweep is logged and retried at the next tick.
+/// Deletes expired sessions every ten minutes; a failed sweep is logged and retried at the next tick.
+/// The task is watched: if it ends or panics, that is logged at error.
 #[must_use = "dropping the handle detaches the task"]
 pub fn spawn_expired_cleanup(db: SqlitePool) -> tokio::task::JoinHandle<()> {
     let store = SqliteStore::new(db);
-    tokio::spawn(async move {
+    let cleanup = tokio::spawn(async move {
         loop {
             if let Err(err) = store
                 .clone()
@@ -217,6 +218,17 @@ pub fn spawn_expired_cleanup(db: SqlitePool) -> tokio::task::JoinHandle<()> {
             {
                 tracing::warn!(error = %err, "expired session cleanup failed");
             }
+        }
+    });
+    watch(cleanup)
+}
+
+/// Spawns a task that logs at error when `task` ends, which it should never do.
+fn watch(task: tokio::task::JoinHandle<()>) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        match task.await {
+            Ok(()) => tracing::error!("expired session cleanup stopped"),
+            Err(err) => tracing::error!(error = %err, "expired session cleanup crashed"),
         }
     })
 }
@@ -244,7 +256,7 @@ mod tests {
 
     #[test]
     fn ttl_is_kept_when_reasonable() {
-        let ttl = Duration::from_secs(7 * 24 * 3600);
+        let ttl = Duration::from_hours(7 * 24);
         assert_eq!(inactivity(ttl), time::Duration::days(7));
     }
 
@@ -264,7 +276,7 @@ mod tests {
 
     #[test]
     fn activity_touches_at_most_hourly() {
-        let lifetime = Lifetime::new(Duration::from_secs(7 * 24 * 3600));
+        let lifetime = Lifetime::new(Duration::from_hours(7 * 24));
         let (fresh, now) = stamps(1, 59);
         assert_eq!(lifetime.verdict(fresh, now), Verdict::Keep);
         let (due, now) = stamps(1, 60);
@@ -279,7 +291,7 @@ mod tests {
 
     #[test]
     fn sessions_end_after_the_maximum_lifetime_however_active() {
-        let lifetime = Lifetime::new(Duration::from_secs(7 * 24 * 3600));
+        let lifetime = Lifetime::new(Duration::from_hours(7 * 24));
         let (active, now) = stamps(30, 0);
         assert_eq!(lifetime.verdict(active, now), Verdict::End);
         let (almost, now) = stamps(29, 0);
@@ -288,7 +300,7 @@ mod tests {
 
     #[test]
     fn expiry_never_passes_the_maximum_lifetime() {
-        let lifetime = Lifetime::new(Duration::from_secs(7 * 24 * 3600));
+        let lifetime = Lifetime::new(Duration::from_hours(7 * 24));
         let (early, now) = stamps(1, 0);
         assert_eq!(lifetime.remaining(early, now), time::Duration::days(7));
         let (late, now) = stamps(28, 0);
@@ -299,9 +311,56 @@ mod tests {
 
     #[test]
     fn maximum_lifetime_is_at_least_the_ttl() {
-        let lifetime = Lifetime::new(Duration::from_secs(90 * 24 * 3600));
+        let lifetime = Lifetime::new(Duration::from_hours(90 * 24));
         assert_eq!(lifetime.max, time::Duration::days(90));
-        let lifetime = Lifetime::new(Duration::from_secs(24 * 3600));
+        let lifetime = Lifetime::new(Duration::from_hours(24));
         assert_eq!(lifetime.max, time::Duration::days(30));
+    }
+
+    #[derive(Clone, Default)]
+    struct Captured(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Captured {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Captured {
+        type Writer = Captured;
+
+        fn make_writer(&'a self) -> Captured {
+            self.clone()
+        }
+    }
+
+    async fn logged_when(task: tokio::task::JoinHandle<()>) -> String {
+        let captured = Captured::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(captured.clone())
+            .with_ansi(false)
+            .finish();
+        let _guard = tracing::subscriber::set_default(subscriber);
+        watch(task).await.unwrap();
+        String::from_utf8(captured.0.lock().unwrap().clone()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_panicking_cleanup_is_logged_at_error() {
+        let log = logged_when(tokio::spawn(async { panic!("boom") })).await;
+        assert!(log.contains("ERROR"), "{log}");
+        assert!(log.contains("crashed"), "{log}");
+    }
+
+    #[tokio::test]
+    async fn a_finished_cleanup_is_logged_at_error() {
+        let log = logged_when(tokio::spawn(async {})).await;
+        assert!(log.contains("ERROR"), "{log}");
+        assert!(log.contains("stopped"), "{log}");
     }
 }

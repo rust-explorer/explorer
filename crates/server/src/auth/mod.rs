@@ -9,17 +9,21 @@ mod routes;
 pub mod session;
 
 use axum::Router;
+use axum::middleware;
 use axum::routing::{get, post};
 
 use crate::http::AppState;
+use crate::http::rate_limit::{SignInLimit, limit_sign_in};
 
 pub use current_user::CurrentUser;
 pub use policy::{Action, Policy};
 pub use routes::me;
 
-pub fn routes() -> Router<AppState> {
+/// Sign-in routes are open to anyone, so they are limited per client address.
+pub fn routes(sign_in_limit: SignInLimit) -> Router<AppState> {
+    let limited = middleware::from_fn_with_state(sign_in_limit, limit_sign_in);
     Router::new()
-        .route("/login", get(routes::login))
-        .route("/callback", get(routes::callback))
+        .route("/login", get(routes::login).layer(limited.clone()))
+        .route("/callback", get(routes::callback).layer(limited))
         .route("/logout", post(routes::logout))
 }

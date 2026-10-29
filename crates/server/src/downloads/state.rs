@@ -10,7 +10,7 @@ pub const ZIP_CONCURRENCY: usize = 4;
 /// Zips streaming at once for one user, so that one user cannot take every slot.
 pub const ZIP_CONCURRENCY_PER_USER: usize = 2;
 /// How long a stored selection can be zipped.
-pub const SELECTION_TTL: Duration = Duration::from_secs(10 * 60);
+pub const SELECTION_TTL: Duration = Duration::from_mins(10);
 /// Selections a user keeps; a new one beyond this drops the oldest.
 pub const MAX_SELECTIONS_PER_USER: usize = 16;
 

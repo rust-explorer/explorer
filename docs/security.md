@@ -1,8 +1,7 @@
 # Security
 
-This page describes what Explorer protects against as of the browsing, download,
-upload, file management and polish (favorites, search, thumbnails, space usage) milestone. To report a vulnerability, follow [SECURITY.md](../SECURITY.md); do not open a
-public issue.
+This page describes what Explorer protects against. To report a vulnerability, follow
+[SECURITY.md](../SECURITY.md); do not open a public issue.
 
 ## Scope
 
@@ -14,7 +13,7 @@ point outside a volume) and keeps the files it serves from running in the app's 
 It does not defend against a compromised provider, reverse proxy or host, nor against
 someone who can already write inside a volume on the host. Every signed-in user in the
 allowed group can read every volume and write to every volume that is not read-only;
-per-volume or per-folder permissions do not exist yet.
+there are no per-volume or per-folder permissions.
 
 ## Tokens stay on the server
 
@@ -92,6 +91,31 @@ browsers apply, and kept only if the result has the same origin and its path doe
 with `//`. So `//host`, `/\host` or `/..//host` cannot send the user to another site; they
 become `/`. The post-login redirect target is stored in the session, never taken from the
 callback.
+
+## Sign-in rate limit
+
+`/auth/login` and `/auth/callback` answer anyone, and each call costs a session write and,
+for the callback, requests to the provider. They share one limit per client address: a
+burst of 10 requests, then 20 a minute. Beyond it they answer 429 `too_many_requests` with
+`Retry-After` (a browser is sent to `/signin-error?reason=too_many_requests`), and the
+server logs `too many sign-in requests` at warn with the request id and the address. The
+rest of the API requires a session and is not limited this way.
+
+The client address is the TCP peer, unless the peer is in `EXPLORER_TRUSTED_PROXIES`: then
+it is the rightmost `X-Forwarded-For` entry that is not a trusted proxy, so a client cannot
+pick its own address by sending the header through the proxy. By default the trusted peers
+are the loopback and private networks, where the reverse proxy runs; a host on those
+networks talking to Explorer directly can therefore choose the address it is counted
+under, which only gives it a bucket of its own. On the Internet side, a request with an
+unreadable or forged header part is still counted under the address the proxy appended.
+When a peer outside the list sends `X-Forwarded-For`, the server logs it once at warn.
+
+IPv4 clients are counted per address and IPv6 clients per /64, the block one subscriber
+usually gets. A client controlling many addresses or /64s (an IPv6 /48 holds 65 536) gets a
+burst for each and can exceed the limit; the provider still authenticates every sign-in.
+The limiter tracks at most 10 000 addresses in memory; an address whose allowance has fully
+refilled is forgotten, and when all 10 000 are active the one closest to refilled is
+dropped.
 
 ## Groups gate
 
@@ -401,7 +425,7 @@ style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestor
 base-uri 'self'; form-action 'self'`, plus `X-Content-Type-Options` and `Referrer-Policy`.
 Download and zip responses replace that CSP with `Content-Security-Policy: sandbox` (see
 [Downloads](#downloads)); thumbnails send the sandbox policy too (see [Thumbnails](#thumbnails)). `img-src` allows `'self'`, so grid tiles load.
-Sign-in did not loosen it. The provider is reached by top-level redirects only.
+Sign-in needs no exception: the provider is reached by top-level redirects only.
 
 ## Secrets and logs
 

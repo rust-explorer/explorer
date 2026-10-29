@@ -1,12 +1,11 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use dioxus_i18n::prelude::i18n;
 use dioxus_i18n::t;
 use shared::api::auth::Me;
 
 use super::SignOutButton;
-use crate::i18n::{change_locale, native_name, supported};
+use crate::components::common::LanguagePicker;
 
 const LANGUAGE_SELECT_ID: &str = "user-menu-language";
 const PANEL_ID: &str = "user-menu-panel";
@@ -29,7 +28,6 @@ pub fn initials(name: &str) -> String {
 pub fn UserMenu(user: Me) -> Element {
     let mut open = use_signal(|| false);
     let mut avatar = use_signal(|| None::<Rc<MountedData>>);
-    let current = i18n().language();
 
     let mut close_and_refocus = move || {
         open.set(false);
@@ -78,28 +76,7 @@ pub fn UserMenu(user: Me) -> Element {
                         p { class: "truncate text-xs text-slate-500 dark:text-slate-400", {email.clone()} }
                     }
                     div { class: "mt-3 border-t border-slate-100 pt-3 dark:border-slate-800",
-                        label {
-                            r#for: LANGUAGE_SELECT_ID,
-                            class: "block text-xs font-medium text-slate-500 dark:text-slate-400",
-                            {t!("user-menu-language")}
-                        }
-                        select {
-                            id: LANGUAGE_SELECT_ID,
-                            class: "mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100",
-                            onchange: move |event| {
-                                if let Ok(locale) = event.value().parse() {
-                                    change_locale(i18n(), locale);
-                                }
-                            },
-                            for locale in supported() {
-                                option {
-                                    value: "{locale}",
-                                    lang: "{locale}",
-                                    selected: locale == current,
-                                    {native_name(&locale)}
-                                }
-                            }
-                        }
+                        LanguagePicker { id: LANGUAGE_SELECT_ID }
                     }
                     div { class: "mt-3 border-t border-slate-100 pt-3 dark:border-slate-800",
                         div { class: "-mx-2",
