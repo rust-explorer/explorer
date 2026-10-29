@@ -102,7 +102,7 @@ Every variable is described in [configuration.md](configuration.md). To keep the
 
 Edit `docker-compose.yml`:
 
-- `image:` — a release version (`ghcr.io/fabienlege/explorer:1.0.0`). `latest` follows the
+- `image:` — a release version (`ghcr.io/rust-explorer/explorer:1.0.0`). `latest` follows the
   newest stable release; pre-releases (`1.1.0-rc1`) are only published under their own
   version. To upgrade, change the version and run `docker compose up -d`.
 - `user:` — the UID:GID from step 2.

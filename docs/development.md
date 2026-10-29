@@ -96,7 +96,7 @@ affect Explorer are ignored in `.cargo/audit.toml`, each with its reason.
 
 GitHub Actions run the same checks (`cargo xtask ci --no-docker`) on pull requests and
 pushes to `main`, `audit.yml` runs `cargo audit` every Monday (new advisories appear
-without any code change), and `release.yml` publishes `ghcr.io/fabienlege/explorer` on `v*` tags.
+without any code change), and `release.yml` publishes `ghcr.io/rust-explorer/explorer` on `v*` tags.
 
 - CI is informative. No required status checks are configured; run `cargo xtask ci`
   locally before opening a pull request.
