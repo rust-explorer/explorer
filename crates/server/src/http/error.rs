@@ -171,6 +171,15 @@ impl ApiError {
     }
 
     #[must_use]
+    pub fn too_many_requests() -> Self {
+        Self::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "too_many_requests",
+            "Too many sign-in attempts from this address; try again in a moment",
+        )
+    }
+
+    #[must_use]
     pub fn selection_expired() -> Self {
         Self::new(
             StatusCode::NOT_FOUND,

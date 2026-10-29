@@ -82,6 +82,7 @@ error-upload_committed = This upload had already finished, so it could not be ca
 error-changed_during_move = { $path } changed while it was being moved, so it was kept in its old place as well as copied to the new one.
 error-too_many_entries = { $path } holds too many files and folders to copy or move at once (a million at most). Copy or move its sub-folders one at a time.
 error-too_many_zips = Too many zips are being downloaded right now. Try again in a moment.
+error-too_many_requests = Too many sign-in attempts from your network. Wait a minute, then try again.
 error-selection_expired = This download expired. Select the entries and download them again.
 upload = Upload
 upload-open = Upload files or a folder

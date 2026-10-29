@@ -13,12 +13,15 @@ use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
 pub mod access;
+pub mod client_addr;
 pub mod error;
+pub mod rate_limit;
 pub mod request_id;
 pub mod security_headers;
 pub mod static_files;
 
 use error::{ApiError, attach_request_id};
+use rate_limit::SignInLimit;
 use request_id::{drop_invalid_request_id, request_id};
 
 use crate::auth::oidc::Oidc;
@@ -71,6 +74,7 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
     let session = session::layer(state.db.clone()).await?;
     let keep_alive = session::KeepAlive::new(state.config.session_ttl, state.db.clone());
     let origin: Arc<str> = csrf::public_origin(&state.config.public_url).into();
+    let sign_in_limit = SignInLimit::new(&state.config.trusted_proxies);
 
     let router = extra
         .route("/healthz", get(healthz))
@@ -86,7 +90,7 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
                 .fallback(not_found)
                 .layer(middleware::from_fn(csrf::refuse_cross_site)),
         )
-        .nest("/auth", auth::routes().fallback(not_found))
+        .nest("/auth", auth::routes(sign_in_limit).fallback(not_found))
         .nest(
             "/files",
             downloads::routes()

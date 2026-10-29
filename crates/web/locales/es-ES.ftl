@@ -82,6 +82,7 @@ error-upload_committed = Esta subida ya había terminado, así que no se pudo ca
 error-changed_during_move = { $path } cambió mientras se movía, así que se conservó en su ubicación anterior además de copiarse en la nueva.
 error-too_many_entries = { $path } contiene demasiados archivos y carpetas para copiarlo o moverlo de una vez (un millón como máximo). Copia o mueve sus subcarpetas una a una.
 error-too_many_zips = Se están descargando demasiados zips en este momento. Inténtalo de nuevo en un momento.
+error-too_many_requests = Demasiados intentos de inicio de sesión desde tu red. Espera un minuto y vuelve a intentarlo.
 error-selection_expired = Esta descarga ha caducado. Vuelve a seleccionar los elementos y descárgalos.
 upload = Subir
 upload-open = Subir archivos o una carpeta

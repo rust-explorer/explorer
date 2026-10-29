@@ -11,6 +11,8 @@ pub fn message_key(reason: &str) -> &'static str {
         "exchange_failed" => "signin-error-exchange-failed",
         "invalid_token" => "signin-error-invalid-token",
         "missing_groups_claim" => "signin-error-missing-groups-claim",
+        // Sent by the server's rate limit, whose message the API error shares.
+        "too_many_requests" => "error-too_many_requests",
         _ => "signin-error-unknown",
     }
 }
@@ -50,6 +52,11 @@ mod tests {
                 format!("signin-error-{}", reason.replace('_', "-"))
             );
         }
+    }
+
+    #[test]
+    fn rate_limited_sign_in_shows_the_api_error_message() {
+        assert_eq!(message_key("too_many_requests"), "error-too_many_requests");
     }
 
     #[test]

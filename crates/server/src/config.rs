@@ -9,6 +9,8 @@ use openidconnect::reqwest::Certificate;
 use secrecy::SecretString;
 use url::Url;
 
+use crate::http::client_addr::Cidr;
+
 const DEFAULT_SESSION_TTL: Duration = Duration::from_hours(7 * 24);
 
 const VAR_PUBLIC_URL: &str = "EXPLORER_PUBLIC_URL";
@@ -20,13 +22,14 @@ const VAR_CA_FILE: &str = "EXPLORER_OIDC_CA_FILE";
 const VAR_ALLOWED_GROUP: &str = "EXPLORER_ALLOWED_GROUP";
 const VAR_GROUPS_CLAIM: &str = "EXPLORER_OIDC_GROUPS_CLAIM";
 const VAR_SESSION_TTL: &str = "EXPLORER_SESSION_TTL";
+const VAR_TRUSTED_PROXIES: &str = "EXPLORER_TRUSTED_PROXIES";
 const VAR_LOG: &str = "EXPLORER_LOG";
 const VAR_LOG_FORMAT: &str = "EXPLORER_LOG_FORMAT";
 const VAR_DATA_DIR: &str = "EXPLORER_DATA_DIR";
 const VAR_CONFIG_DIR: &str = "EXPLORER_CONFIG_DIR";
 const VAR_WEB_DIR: &str = "EXPLORER_WEB_DIR";
 
-const ALL_VARS: [&str; 14] = [
+const ALL_VARS: [&str; 15] = [
     VAR_PUBLIC_URL,
     VAR_ISSUER,
     VAR_CLIENT_ID,
@@ -36,6 +39,7 @@ const ALL_VARS: [&str; 14] = [
     VAR_ALLOWED_GROUP,
     VAR_GROUPS_CLAIM,
     VAR_SESSION_TTL,
+    VAR_TRUSTED_PROXIES,
     VAR_LOG,
     VAR_LOG_FORMAT,
     VAR_DATA_DIR,
@@ -49,6 +53,8 @@ pub struct Config {
     pub public_url: Url,
     pub oidc: OidcConfig,
     pub session_ttl: Duration,
+    /// Peers whose `X-Forwarded-For` names the client.
+    pub trusted_proxies: Vec<Cidr>,
     pub log: LogConfig,
     pub data_dir: PathBuf,
     pub config_dir: PathBuf,
@@ -167,6 +173,10 @@ impl Config {
             None => Some(DEFAULT_SESSION_TTL),
             Some(v) => collect(&mut errors, parse_session_ttl(&v)),
         };
+        let trusted_proxies = match get(VAR_TRUSTED_PROXIES) {
+            None => Some(Vec::new()),
+            Some(v) => collect(&mut errors, parse_trusted_proxies(&v)),
+        };
         let format = match get(VAR_LOG_FORMAT).as_deref() {
             None | Some("pretty") => Some(LogFormat::Pretty),
             Some("json") => Some(LogFormat::Json),
@@ -194,6 +204,7 @@ impl Config {
             ca_certs,
             allowed_group,
             session_ttl,
+            trusted_proxies,
             format,
         ) {
             (
@@ -204,6 +215,7 @@ impl Config {
                 Some(ca_certs),
                 Some(allowed_group),
                 Some(session_ttl),
+                Some(trusted_proxies),
                 Some(format),
             ) if errors.is_empty() => Ok(Self {
                 public_url,
@@ -216,6 +228,7 @@ impl Config {
                     groups_claim: get(VAR_GROUPS_CLAIM).unwrap_or_else(|| "groups".to_owned()),
                 },
                 session_ttl,
+                trusted_proxies,
                 log: LogConfig {
                     filter: log_filter,
                     format,
@@ -298,6 +311,18 @@ fn parse_session_ttl(value: &str) -> Result<Duration, ConfigError> {
         return Err(invalid(VAR_SESSION_TTL, "must be greater than zero"));
     }
     Ok(ttl)
+}
+
+fn parse_trusted_proxies(value: &str) -> Result<Vec<Cidr>, ConfigError> {
+    value
+        .split(',')
+        .map(|entry| {
+            entry
+                .trim()
+                .parse()
+                .map_err(|e| invalid(VAR_TRUSTED_PROXIES, e))
+        })
+        .collect()
 }
 
 fn read_ca_certs(get: &impl Fn(&str) -> Option<String>) -> Result<Vec<Certificate>, ConfigError> {
@@ -407,6 +432,7 @@ mod tests {
         assert_eq!(cfg.oidc.allowed_group, "explorer-users");
         assert_eq!(cfg.oidc.groups_claim, "groups");
         assert_eq!(cfg.session_ttl, Duration::from_hours(7 * 24));
+        assert!(cfg.trusted_proxies.is_empty());
         assert_eq!(cfg.log.filter, "info");
         assert_eq!(cfg.log.format, LogFormat::Pretty);
         assert_eq!(cfg.data_dir, PathBuf::from("/data"));
@@ -642,6 +668,37 @@ mod tests {
     fn parses_session_ttl() {
         let cfg = Config::from_lookup(lookup(&with(&[("EXPLORER_SESSION_TTL", "12h")]))).unwrap();
         assert_eq!(cfg.session_ttl, Duration::from_hours(12));
+    }
+
+    #[test]
+    fn parses_trusted_proxies() {
+        let cfg = Config::from_lookup(lookup(&with(&[(
+            "EXPLORER_TRUSTED_PROXIES",
+            "172.18.0.0/16, 10.0.0.1,fd00::/8",
+        )])))
+        .unwrap();
+        let expected: Vec<Cidr> = ["172.18.0.0/16", "10.0.0.1", "fd00::/8"]
+            .iter()
+            .map(|s| s.parse().unwrap())
+            .collect();
+        assert_eq!(cfg.trusted_proxies, expected);
+    }
+
+    #[test]
+    fn rejects_bad_trusted_proxies() {
+        for bad in ["172.18.0.0/40", "proxy", "10.0.0.1,,10.0.0.2", "10.0.0.1,"] {
+            let errs = errors(&with(&[("EXPLORER_TRUSTED_PROXIES", bad)]));
+            assert!(
+                matches!(
+                    errs.as_slice(),
+                    [ConfigError::Invalid {
+                        var: "EXPLORER_TRUSTED_PROXIES",
+                        ..
+                    }]
+                ),
+                "{bad} should be rejected"
+            );
+        }
     }
 
     #[test]

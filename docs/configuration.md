@@ -19,6 +19,7 @@ See [`.env.example`](../.env.example) for a starting point.
 | `EXPLORER_ALLOWED_GROUP` | yes | — | Only members of this group may sign in. |
 | `EXPLORER_OIDC_GROUPS_CLAIM` | no | `groups` | ID token claim holding the user's group names. |
 | `EXPLORER_SESSION_TTL` | no | `7d` | Idle session lifetime, e.g. `12h`, `7d`, `30d`. Must be greater than zero; capped at 400 days. |
+| `EXPLORER_TRUSTED_PROXIES` | no | — | Comma-separated networks (`172.18.0.0/16`) or addresses of the reverse proxies in front of Explorer. A request from one of them is attributed to the client named in `X-Forwarded-For` (the rightmost entry that is not itself a trusted proxy); any other request to its TCP peer. Used by the sign-in rate limit. See [installation.md](installation.md#client-addresses-behind-the-proxy). |
 | `EXPLORER_LOG` | no | `info` | Log filter: a level (`off`, `error`, `warn`, `info`, `debug`, `trace`) and/or comma-separated `target=level` directives, e.g. `warn,explorer_server=debug`. |
 | `EXPLORER_LOG_FORMAT` | no | `pretty` | `pretty` (human-readable) or `json`. |
 

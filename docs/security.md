@@ -93,6 +93,22 @@ with `//`. So `//host`, `/\host` or `/..//host` cannot send the user to another 
 become `/`. The post-login redirect target is stored in the session, never taken from the
 callback.
 
+## Sign-in rate limit
+
+`/auth/login` and `/auth/callback` answer anyone, and each call costs a session write and,
+for the callback, requests to the provider. They share one limit per client address: a
+burst of 10 requests, then 20 a minute. Beyond it they answer 429 `too_many_requests` with
+`Retry-After` (a browser is sent to `/signin-error?reason=too_many_requests`), and the
+server logs `too many sign-in requests` at warn with the request id and the address. The
+rest of the API requires a session and is not limited this way.
+
+The client address is the TCP peer, unless the peer is in `EXPLORER_TRUSTED_PROXIES`: then
+it is the rightmost `X-Forwarded-For` entry that is not a trusted proxy, so a client cannot
+pick its own address by sending the header, through the proxy or directly. IPv6 clients are
+counted per /64, the block one subscriber usually gets. The limiter tracks at most 10 000
+addresses in memory; an address whose allowance has fully refilled is forgotten, and when
+all 10 000 are active the one closest to refilled is dropped.
+
 ## Groups gate
 
 A user can sign in only if `EXPLORER_ALLOWED_GROUP` is in the groups claim

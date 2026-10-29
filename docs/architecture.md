@@ -38,7 +38,8 @@ server functions, so the API stays usable by other clients.
 
 1. Every request gets an `X-Request-Id` (kept if the client sent one), propagated to the
    response and recorded on the request's tracing span.
-2. Routing: `/healthz`, then `/api/*`, `/auth/*` and `/files/*` (JSON errors, never HTML),
+2. Routing: `/healthz`, then `/api/*`, `/auth/*` and `/files/*` (JSON errors, never HTML,
+   except the sign-in rate limit for a browser, below),
    then the static bundle. Unknown non-asset paths fall back to `index.html` for client-side
    routing; missing files under `/assets/` are real 404s.
 3. Errors use one JSON shape: `code`, `message`, optional `details`, and the request ID.
@@ -56,6 +57,10 @@ an opaque session cookie. See [security.md](security.md) for the guarantees.
 | `GET /auth/callback` | Provider redirect (query response mode). Verifies state, exchanges the code, verifies the ID token, checks the group, then redirects to `return_to` or to `/access-denied` or `/signin-error?reason=`. |
 | `POST /auth/logout` | Flushes the session; returns JSON `{redirect_to}` (the provider's end-session URL, or `/`). |
 | `GET /api/me` | The signed-in user, or 401 `unauthenticated`. |
+
+| Code | Status | Meaning |
+|---|---|---|
+| `too_many_requests` | 429 | `/auth/login` or `/auth/callback` was called more than 10 times in a burst, or 20 a minute, from this client address (see [security.md](security.md#sign-in-rate-limit)). `Retry-After` gives the seconds to wait. A request accepting `text/html` gets, with the same status, a page that redirects to `/signin-error?reason=too_many_requests`. |
 
 The web app boots by calling `/api/me`; on 401 it shows a sign-in page that links to
 `/auth/login`. `/access-denied` and `/signin-error` are SPA pages.

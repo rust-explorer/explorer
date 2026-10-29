@@ -156,6 +156,29 @@ These certificates are trusted in addition to the built-in public roots, for the
 Explorer makes to the provider only. Startup fails, naming the variable, if the file cannot
 be read or contains no certificate.
 
+### Client addresses behind the proxy
+
+Sign-in requests are limited per client address (see
+[security.md](security.md#sign-in-rate-limit)). Behind a reverse proxy every request comes
+from the proxy, so all clients would share one limit. Tell Explorer which peers are proxies
+with `EXPLORER_TRUSTED_PROXIES`; it then takes the client from the `X-Forwarded-For` header
+they add, and ignores that header from anyone else.
+
+With GoDoxy on the same Docker network as Explorer, trust that network's subnet:
+
+```sh
+docker network inspect <network> --format '{{range .IPAM.Config}}{{.Subnet}} {{end}}'
+```
+
+```sh
+EXPLORER_TRUSTED_PROXIES=172.18.0.0/16
+```
+
+Every container on that network can then claim any client address, so keep only the proxy
+and Explorer on it. If GoDoxy uses the host network instead, its requests come from the
+Docker bridge gateway (often `172.17.0.1`): trust that address alone. Several networks or
+addresses are separated by commas.
+
 ## 5. First start
 
 ```sh
@@ -250,6 +273,7 @@ the details (look for `sign-in failed` with the same `reason`).
 | `invalid_token` | The ID token failed verification (signature, issuer, audience, expiry or nonce). | Check `EXPLORER_OIDC_ISSUER` matches the provider's issuer exactly, the client ID, and the clocks of both hosts. After a rotation of the provider's signing keys, Explorer fetches them again by itself, at most once a minute. |
 | Signing out stops on PocketID's own sign-out page | The logout callback URL does not match exactly. | Register `https://files.example.com` with no trailing slash (step 1). |
 | `missing_groups_claim` | The groups claim is absent or not an array of strings. | Make sure the `groups` scope is released to the client and, for another provider, set `EXPLORER_OIDC_GROUPS_CLAIM`. |
+| `too_many_requests` | This client address made too many sign-in requests (10 in a burst, then 20 a minute). The log line `too many sign-in requests` names the address. | Wait a minute. If the address is the proxy's for every user, set `EXPLORER_TRUSTED_PROXIES` (see [Client addresses behind the proxy](#client-addresses-behind-the-proxy)). |
 
 Signing in successfully but landing on `/access-denied` means the user is not in
 `EXPLORER_ALLOWED_GROUP`; the log line `access denied` lists the groups received.

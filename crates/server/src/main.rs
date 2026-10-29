@@ -147,9 +147,12 @@ async fn run_healthcheck() -> ExitCode {
 async fn serve(app: Router) -> std::io::Result<()> {
     let listener = TcpListener::bind(LISTEN_ADDR).await?;
     tracing::info!(addr = LISTEN_ADDR, "listening");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
 }
 
 async fn shutdown_signal() {
