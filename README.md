@@ -12,7 +12,7 @@ favorite folders, search by name, a grid view with image thumbnails, a space usa
 
 ## Quick start
 
-> Images are published to `ghcr.io/fabienlege/explorer` from the first release (v1.0.0) on.
+> Images are published to `ghcr.io/rust-explorer/explorer` from the first release (v1.0.0) on.
 > Before it, build one locally as described in
 > [docs/development.md](docs/development.md#docker-image) and set `image:` to its tag.
 
@@ -21,8 +21,8 @@ proxy terminating TLS.
 
 ```sh
 mkdir -p explorer/config && cd explorer
-curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/fabienlege/explorer/main/docker-compose.example.yml
-curl -fsSLo .env https://raw.githubusercontent.com/fabienlege/explorer/main/.env.example
+curl -fsSLo docker-compose.yml https://raw.githubusercontent.com/rust-explorer/explorer/main/docker-compose.example.yml
+curl -fsSLo .env https://raw.githubusercontent.com/rust-explorer/explorer/main/.env.example
 # edit .env and docker-compose.yml, then:
 docker compose up -d
 ```

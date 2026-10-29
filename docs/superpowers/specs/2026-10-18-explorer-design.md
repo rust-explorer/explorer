@@ -26,7 +26,7 @@ conversation, never in the repository.
 - Secure login through OIDC with the owner's PocketID instance.
 - Ship as a single Docker image, easy to install, with no file-permission surprises.
 - Code, tickets (GitHub Issues), and documentation all live in
-  `git@github.com:fabienlege/explorer.git`.
+  `git@github.com:rust-explorer/explorer.git`.
 - The repository will be public: Explorer must be usable by other self-hosters, and
   publishing it must never expose the owner's private data or NAS layout (see §5.3).
 
@@ -322,7 +322,7 @@ supports the Docker healthcheck.
     While it is private, the free plan's default $0 spending limit means exhausted minutes
     stop jobs rather than incur charges. No self-hosted runner (see §5.2).
 - On a version tag: `linux/amd64` image published to GHCR
-  (`ghcr.io/fabienlege/explorer`). The owner's NAS is Intel; arm64 is not built (emulated
+  (`ghcr.io/rust-explorer/explorer`). The owner's NAS is Intel; arm64 is not built (emulated
   arm64 builds are very slow) but nothing should prevent adding it later.
 - Multi-stage Dockerfile: build web bundle with the Dioxus CLI, build the server, copy
   both into a minimal runtime image.

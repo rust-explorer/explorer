@@ -1,7 +1,7 @@
 # Copy to docker-compose.yml and adapt. See docs/installation.md.
 services:
   explorer:
-    image: ghcr.io/fabienlege/explorer:1.0.0
+    image: ghcr.io/rust-explorer/explorer:1.0.0
     container_name: explorer
     restart: unless-stopped
     # UID:GID that owns your files on the host (`id -u`, `id -g`)
