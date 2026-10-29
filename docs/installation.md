@@ -1,8 +1,5 @@
 # Installation
 
-> **Status: work in progress.** Sign-in, browsing, downloads, uploads and file operations
-> (new folder, rename, copy, move, delete) work.
-
 Explorer ships as a single Docker image (`linux/amd64`). You need:
 
 - Docker with Compose.
@@ -128,7 +125,7 @@ Edit `docker-compose.yml`:
   labels:
     proxy.aliases: files.example.com
     proxy.#1.port: "8080"
-    proxy.#1.healthcheck.path: /healthz
+    proxy.*.healthcheck.path: /healthz
   ```
 
   Label syntax: [GoDoxy — Configuring Routes](https://docs.godoxy.dev/docs/godoxy/getting-started/Configuring-Routes).

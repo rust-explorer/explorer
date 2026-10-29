@@ -16,4 +16,4 @@ services:
       # GoDoxy: https://docs.godoxy.dev/docs/godoxy/getting-started/Configuring-Routes
       proxy.aliases: files.example.com
       proxy.#1.port: "8080"
-      proxy.#1.healthcheck.path: /healthz
+      proxy.*.healthcheck.path: /healthz

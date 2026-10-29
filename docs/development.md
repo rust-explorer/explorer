@@ -8,7 +8,6 @@
 
   ```sh
   cargo install --locked dioxus-cli@0.7.10
-  # or: cargo binstall dioxus-cli@0.7.10
   ```
 
   `dx` downloads Tailwind and `wasm-opt` on first build, so it needs network access. It
@@ -89,7 +88,7 @@ skipped with a notice if `dx` is not installed, except when `CI=true`, where a m
 `wasm32` target, because it generates `tailwind.css`; the host-target checks above do not
 need it.
 
-`cargo audit` (`cargo binstall cargo-audit`) checks `Cargo.lock` against the RustSec
+`cargo audit` (`cargo install --locked cargo-audit`) checks `Cargo.lock` against the RustSec
 advisory database. It is skipped with a notice if not installed, except when `CI=true`.
 Offline, it falls back to the last fetched copy of the database. Advisories that cannot
 affect Explorer are ignored in `.cargo/audit.toml`, each with its reason.
@@ -108,8 +107,8 @@ uses the checksum-pinned ones (see below).
 
 - CI is informative. No required status checks are configured; run `cargo xtask ci`
   locally before opening a pull request.
-- Minutes budget: Actions are free for a public repository. While the repository is
-  private, the free quota applies and a $0 spending limit stops jobs once it is used up.
+- Minutes budget: Actions are free for a public repository. Keep the account's $0 spending
+  limit, so that nothing is billed if the repository ever turns private.
 - Never add a self-hosted runner. Pull requests from forks would execute their code on
   that machine.
 

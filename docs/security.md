@@ -1,8 +1,7 @@
 # Security
 
-This page describes what Explorer protects against as of the browsing, download,
-upload, file management and polish (favorites, search, thumbnails, space usage) milestone. To report a vulnerability, follow [SECURITY.md](../SECURITY.md); do not open a
-public issue.
+This page describes what Explorer protects against. To report a vulnerability, follow
+[SECURITY.md](../SECURITY.md); do not open a public issue.
 
 ## Scope
 
@@ -14,7 +13,7 @@ point outside a volume) and keeps the files it serves from running in the app's 
 It does not defend against a compromised provider, reverse proxy or host, nor against
 someone who can already write inside a volume on the host. Every signed-in user in the
 allowed group can read every volume and write to every volume that is not read-only;
-per-volume or per-folder permissions do not exist yet.
+there are no per-volume or per-folder permissions.
 
 ## Tokens stay on the server
 
@@ -417,7 +416,7 @@ style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestor
 base-uri 'self'; form-action 'self'`, plus `X-Content-Type-Options` and `Referrer-Policy`.
 Download and zip responses replace that CSP with `Content-Security-Policy: sandbox` (see
 [Downloads](#downloads)); thumbnails send the sandbox policy too (see [Thumbnails](#thumbnails)). `img-src` allows `'self'`, so grid tiles load.
-Sign-in did not loosen it. The provider is reached by top-level redirects only.
+Sign-in needs no exception: the provider is reached by top-level redirects only.
 
 ## Secrets and logs
 
