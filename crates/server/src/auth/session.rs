@@ -204,7 +204,7 @@ fn uses_session(path: &str) -> bool {
     })
 }
 
-/// Deletes expired sessions every hour; a failed sweep is logged and retried at the next tick.
+/// Deletes expired sessions every ten minutes; a failed sweep is logged and retried at the next tick.
 /// The task is watched: if it ends or panics, that is logged at error.
 #[must_use = "dropping the handle detaches the task"]
 pub fn spawn_expired_cleanup(db: SqlitePool) -> tokio::task::JoinHandle<()> {
