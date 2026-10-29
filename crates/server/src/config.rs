@@ -5,6 +5,7 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use openidconnect::reqwest::Certificate;
 use secrecy::SecretString;
 use url::Url;
 
@@ -15,6 +16,7 @@ const VAR_ISSUER: &str = "EXPLORER_OIDC_ISSUER";
 const VAR_CLIENT_ID: &str = "EXPLORER_OIDC_CLIENT_ID";
 const VAR_CLIENT_SECRET: &str = "EXPLORER_OIDC_CLIENT_SECRET";
 const VAR_CLIENT_SECRET_FILE: &str = "EXPLORER_OIDC_CLIENT_SECRET_FILE";
+const VAR_CA_FILE: &str = "EXPLORER_OIDC_CA_FILE";
 const VAR_ALLOWED_GROUP: &str = "EXPLORER_ALLOWED_GROUP";
 const VAR_GROUPS_CLAIM: &str = "EXPLORER_OIDC_GROUPS_CLAIM";
 const VAR_SESSION_TTL: &str = "EXPLORER_SESSION_TTL";
@@ -24,12 +26,13 @@ const VAR_DATA_DIR: &str = "EXPLORER_DATA_DIR";
 const VAR_CONFIG_DIR: &str = "EXPLORER_CONFIG_DIR";
 const VAR_WEB_DIR: &str = "EXPLORER_WEB_DIR";
 
-const ALL_VARS: [&str; 13] = [
+const ALL_VARS: [&str; 14] = [
     VAR_PUBLIC_URL,
     VAR_ISSUER,
     VAR_CLIENT_ID,
     VAR_CLIENT_SECRET,
     VAR_CLIENT_SECRET_FILE,
+    VAR_CA_FILE,
     VAR_ALLOWED_GROUP,
     VAR_GROUPS_CLAIM,
     VAR_SESSION_TTL,
@@ -58,6 +61,8 @@ pub struct OidcConfig {
     pub issuer: String,
     pub client_id: String,
     pub client_secret: SecretString,
+    /// Trusted in addition to the built-in roots when talking to the provider.
+    pub ca_certs: Vec<Certificate>,
     pub allowed_group: String,
     pub groups_claim: String,
 }
@@ -82,6 +87,8 @@ pub enum ConfigError {
     Invalid { var: &'static str, reason: String },
     #[error("cannot read secret file {}: {source}", path.display())]
     SecretFile { path: PathBuf, source: io::Error },
+    #[error("cannot read {VAR_CA_FILE} {}: {source}", path.display())]
+    CaFile { path: PathBuf, source: io::Error },
 }
 
 #[derive(Debug)]
@@ -154,6 +161,7 @@ impl Config {
         let public_url = public_url.and_then(|v| collect(&mut errors, parse_public_url(&v)));
         let issuer = issuer.and_then(|v| collect(&mut errors, parse_issuer(v)));
         let client_secret = collect(&mut errors, read_client_secret(&get));
+        let ca_certs = collect(&mut errors, read_ca_certs(&get));
 
         let session_ttl = match get(VAR_SESSION_TTL) {
             None => Some(DEFAULT_SESSION_TTL),
@@ -183,6 +191,7 @@ impl Config {
             issuer,
             client_id,
             client_secret,
+            ca_certs,
             allowed_group,
             session_ttl,
             format,
@@ -192,6 +201,7 @@ impl Config {
                 Some(issuer),
                 Some(client_id),
                 Some(client_secret),
+                Some(ca_certs),
                 Some(allowed_group),
                 Some(session_ttl),
                 Some(format),
@@ -201,6 +211,7 @@ impl Config {
                     issuer,
                     client_id,
                     client_secret,
+                    ca_certs,
                     allowed_group,
                     groups_claim: get(VAR_GROUPS_CLAIM).unwrap_or_else(|| "groups".to_owned()),
                 },
@@ -289,6 +300,23 @@ fn parse_session_ttl(value: &str) -> Result<Duration, ConfigError> {
     Ok(ttl)
 }
 
+fn read_ca_certs(get: &impl Fn(&str) -> Option<String>) -> Result<Vec<Certificate>, ConfigError> {
+    let Some(file) = get(VAR_CA_FILE) else {
+        return Ok(Vec::new());
+    };
+    let path = PathBuf::from(file);
+    let pem = std::fs::read(&path).map_err(|source| ConfigError::CaFile {
+        path: path.clone(),
+        source,
+    })?;
+    let certs = Certificate::from_pem_bundle(&pem)
+        .map_err(|err| invalid(VAR_CA_FILE, format!("invalid PEM certificate: {err}")))?;
+    if certs.is_empty() {
+        return Err(invalid(VAR_CA_FILE, "no PEM certificate found in the file"));
+    }
+    Ok(certs)
+}
+
 fn read_client_secret(get: &impl Fn(&str) -> Option<String>) -> Result<SecretString, ConfigError> {
     match (get(VAR_CLIENT_SECRET), get(VAR_CLIENT_SECRET_FILE)) {
         (Some(_), Some(_)) => Err(invalid(
@@ -312,6 +340,21 @@ fn read_client_secret(get: &impl Fn(&str) -> Option<String>) -> Result<SecretStr
         (None, None) => Err(ConfigError::Missing(VAR_CLIENT_SECRET)),
     }
 }
+
+/// A self-signed CA certificate (valid until 2126) shared by the tests that load roots.
+#[cfg(test)]
+pub(crate) const TEST_CA_PEM: &str = "-----BEGIN CERTIFICATE-----
+MIIBjDCCATOgAwIBAgIUcresLwbbHwTh4r1aZRgkT3VG0kQwCgYIKoZIzj0EAwIw
+GzEZMBcGA1UEAwwQRXhwbG9yZXIgdGVzdCBDQTAgFw0yNjEwMjkyMTI1MDlaGA8y
+MTI2MTAwNTIxMjUwOVowGzEZMBcGA1UEAwwQRXhwbG9yZXIgdGVzdCBDQTBZMBMG
+ByqGSM49AgEGCCqGSM49AwEHA0IABBs7qSrkP/HwphnUN7HXyPKB0SLYvLGFxQCB
+GC6Lx08fosKJ6z11CivZZMgi4TbrZfLpqQcrdXIydivk5In+NoejUzBRMB0GA1Ud
+DgQWBBQfN2QleOQhxBAT9cUd0xtEwYhxQDAfBgNVHSMEGDAWgBQfN2QleOQhxBAT
+9cUd0xtEwYhxQDAPBgNVHRMBAf8EBTADAQH/MAoGCCqGSM49BAMCA0cAMEQCIBlA
+JCG0Ugig1/Xx1lN47S4+rR1LbDGhlsALlmfzA9vyAiAC1DMlNk/xfSVcwcKiaac3
+/yhabvF0HpLwEoNmTcQoAw==
+-----END CERTIFICATE-----
+";
 
 #[cfg(test)]
 mod tests {
@@ -415,6 +458,52 @@ mod tests {
             .collect();
         let cfg = Config::from_lookup(lookup(&pairs)).unwrap();
         assert_eq!(cfg.oidc.client_secret.expose_secret(), "s3cret");
+    }
+
+    fn with_ca_file(content: &[u8]) -> Result<Config, Vec<ConfigError>> {
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        file.write_all(content).unwrap();
+        let path = file.path().to_str().unwrap();
+        let pairs: Vec<_> = valid()
+            .into_iter()
+            .chain([("EXPLORER_OIDC_CA_FILE", path)])
+            .collect();
+        Config::from_lookup(lookup(&pairs)).map_err(|e| e.0)
+    }
+
+    #[test]
+    fn no_ca_file_means_no_extra_roots() {
+        let cfg = Config::from_lookup(lookup(&valid())).unwrap();
+        assert!(cfg.oidc.ca_certs.is_empty());
+    }
+
+    #[test]
+    fn loads_every_certificate_of_the_ca_file() {
+        let bundle = format!("{TEST_CA_PEM}\n{TEST_CA_PEM}");
+        let cfg = with_ca_file(bundle.as_bytes()).unwrap();
+        assert_eq!(cfg.oidc.ca_certs.len(), 2);
+    }
+
+    #[test]
+    fn rejects_ca_file_without_certificate() {
+        for content in [&b""[..], b"not a certificate\n"] {
+            let errs = with_ca_file(content).unwrap_err();
+            assert!(matches!(
+                errs.as_slice(),
+                [ConfigError::Invalid {
+                    var: "EXPLORER_OIDC_CA_FILE",
+                    ..
+                }]
+            ));
+        }
+    }
+
+    #[test]
+    fn reports_unreadable_ca_file() {
+        let pairs = with(&[("EXPLORER_OIDC_CA_FILE", "/nonexistent/ca.pem")]);
+        let errs = errors(&pairs);
+        assert!(matches!(errs.as_slice(), [ConfigError::CaFile { .. }]));
+        assert!(errs[0].to_string().contains("EXPLORER_OIDC_CA_FILE"));
     }
 
     #[test]

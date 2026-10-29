@@ -8,8 +8,8 @@ Explorer ships as a single Docker image (`linux/amd64`). You need:
 - Docker with Compose.
 - An OIDC provider. [PocketID](https://pocket-id.org) is the documented and tested
   example; any compliant provider that can put group names in a claim works.
-  The provider's TLS certificate must be publicly trusted (private CAs are not supported
-  yet).
+  Its TLS certificate must be publicly trusted, or signed by a private CA you give to
+  Explorer with `EXPLORER_OIDC_CA_FILE` (see [Private CA](#private-ca-for-the-provider)).
 - A reverse proxy terminating TLS in front of the container. The example uses
   [GoDoxy](https://github.com/yusing/godoxy); any reverse proxy works.
 
@@ -136,6 +136,25 @@ Edit `docker-compose.yml`:
   reverse proxy, remove the labels and proxy `https://files.example.com` to the
   container's port 8080. Uploads need a few more things from the proxy, see
   [Reverse proxy and uploads](#reverse-proxy-and-uploads).
+
+### Private CA for the provider
+
+If the provider's certificate is signed by a CA that is not publicly trusted (a home or
+company CA), put the CA certificate in a PEM file (several certificates may be concatenated),
+mount it read-only and point `EXPLORER_OIDC_CA_FILE` at it:
+
+```yaml
+volumes:
+  - ./ca.pem:/run/secrets/oidc-ca.pem:ro
+```
+
+```sh
+EXPLORER_OIDC_CA_FILE=/run/secrets/oidc-ca.pem
+```
+
+These certificates are trusted in addition to the built-in public roots, for the requests
+Explorer makes to the provider only. Startup fails, naming the variable, if the file cannot
+be read or contains no certificate.
 
 ## 5. First start
 
