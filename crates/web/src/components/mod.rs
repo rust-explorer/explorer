@@ -11,7 +11,7 @@ pub(crate) mod usage;
 pub use browse::{
     DropZone, FileGrid, FileTable, ReadOnlyNotice, RefreshButton, ViewToggle, VirtualList,
 };
-pub use common::{ErrorPanel, Notice, error_message, file_name};
+pub use common::{ErrorPanel, LanguagePicker, Notice, error_message, file_name};
 pub use layout::{ActivityPanel, Breadcrumb, Shell, Sidebar, SignOutButton};
 pub use manage::{
     DeleteDialog, NewFolderButton, NewFolderDialog, RenameDialog, TransferDialog, TransferMode,

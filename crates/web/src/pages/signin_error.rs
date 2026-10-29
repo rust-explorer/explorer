@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_i18n::t;
 
-use crate::components::{Notice, Shell};
+use crate::components::{LanguagePicker, Notice, Shell};
 
 /// Maps the server's reason code to a message id; unknown codes never reach the UI verbatim.
 pub fn message_key(reason: &str) -> &'static str {
@@ -21,13 +21,18 @@ pub fn message_key(reason: &str) -> &'static str {
 pub fn SigninError(reason: String) -> Element {
     rsx! {
         Shell {
-            Notice {
-                title: t!("signin-error-title"),
-                message: t!(message_key(&reason)),
-                a {
-                    href: "/auth/login",
-                    class: "rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500",
-                    {t!("try-again")}
+            div { class: "flex w-full max-w-md flex-col gap-4",
+                Notice {
+                    title: t!("signin-error-title"),
+                    message: t!(message_key(&reason)),
+                    a {
+                        href: "/auth/login",
+                        class: "rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500",
+                        {t!("try-again")}
+                    }
+                }
+                div { class: "max-w-48",
+                    LanguagePicker { id: "signin-error-language" }
                 }
             }
         }
