@@ -36,7 +36,8 @@ server functions, so the API stays usable by other clients.
    routing; missing files under `/assets/` are real 404s.
 3. Errors use one JSON shape: `code`, `message`, optional `details`, and the request ID.
 4. Security headers (CSP suited to a WASM app, `X-Content-Type-Options`,
-   `Referrer-Policy`) are set on every response.
+   `Referrer-Policy`) are set on every response. `/api/*` responses also carry
+   `Cache-Control: no-store`: they are live state that must never be answered from a cache.
 
 ## Authentication
 
@@ -408,7 +409,8 @@ a file. Delete, Move and Copy become tasks that appear in the activity panel (wi
 with their progress, a cancel or dismiss button and, for a task that skipped entries, how many.
 One action shows at most 20 task rows there, then a count of the others (a delete of thousands
 of entries is one task per entry).
-The tab polls `GET /api/tasks` every second while one of its tasks is queued or running, and
+The tab polls `GET /api/tasks` every second while one of its tasks is queued or running (a
+poll with no answer after 10 seconds is abandoned and the next one goes), and
 refreshes the listing and the free space when one finishes. A tab shows the tasks it started;
 on load it also lists the user's queued and running tasks once and adopts them, so a reload
 keeps showing them until they finish (an adopted task never asks about a conflict, it is past
