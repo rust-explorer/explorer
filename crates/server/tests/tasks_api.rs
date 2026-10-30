@@ -124,11 +124,11 @@ async fn finished(client: &mut Client, id: &str) -> TaskInfo {
 
 #[tokio::test]
 async fn api_responses_are_never_cached() {
-    let Setup { mut client, .. } = setup().await;
-    let res = client.get("/api/tasks").await;
+    let mut s = setup().await;
+    let res = s.client.get("/api/tasks").await;
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
-    let res = client.get("/api/nothing-here").await;
+    let res = s.client.get("/api/nothing-here").await;
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
     assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
 
