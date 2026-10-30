@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use axum::http::Request;
+use axum::http::{HeaderValue, Request, header};
 use axum::middleware;
 use axum::routing::{any, get};
 use axum::{Json, Router};
@@ -9,6 +9,7 @@ use sqlx::SqlitePool;
 use tower::ServiceBuilder;
 use tower_http::LatencyUnit;
 use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
+use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
@@ -88,7 +89,12 @@ pub async fn router_with(state: AppState, extra: Router<AppState>) -> Result<Rou
                 .merge(favorites::routes())
                 .merge(search::routes())
                 .fallback(not_found)
-                .layer(middleware::from_fn(csrf::refuse_cross_site)),
+                .layer(middleware::from_fn(csrf::refuse_cross_site))
+                // Live state: a poll answered from a cache would never see a task end.
+                .layer(SetResponseHeaderLayer::if_not_present(
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static("no-store"),
+                )),
         )
         .nest("/auth", auth::routes(sign_in_limit).fallback(not_found))
         .nest(

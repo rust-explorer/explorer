@@ -1,4 +1,5 @@
 use gloo_net::http::Request;
+use gloo_timers::callback::Timeout;
 use shared::api::tasks::{TaskInfo, TaskSpec};
 use web_sys::RequestCredentials;
 
@@ -8,8 +9,14 @@ pub async fn create(spec: &TaskSpec) -> Result<TaskInfo, ApiFailure> {
     api::post_json_body(api::TASKS_URL, spec).await
 }
 
+/// A poll that gets no answer stops polling, so it fails after this long and the next one goes.
+const LIST_TIMEOUT_MS: u32 = 10_000;
+
 pub async fn list() -> Result<Vec<TaskInfo>, ApiFailure> {
-    api::get_json(api::TASKS_URL).await
+    let guard = api::AbortGuard::new();
+    let signal = guard.signal();
+    let _abort = Timeout::new(LIST_TIMEOUT_MS, move || drop(guard));
+    api::get_json_abortable(api::TASKS_URL, &signal).await
 }
 
 /// Cancels the task, or dismisses it once finished.
