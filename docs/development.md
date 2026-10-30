@@ -23,7 +23,12 @@ dx build --release -p explorer-web --platform web
 
 The bundle lands in `target/dx/explorer-web/release/web/public`. `dx` also generates
 `crates/web/assets/tailwind.css` (git-ignored); a plain `cargo build` of the web crate
-fails until `dx` has run once.
+fails until `dx` has run once. Files in `crates/web/public/` (the favicons) are copied to the
+bundle's root as they are.
+
+The logo's sources are `docs/images/logo.svg` (also `crates/web/public/favicon.svg` and the
+`Logo` component in `components/common/icons.rs`) and `docs/images/social-preview.svg`; the
+PNG and ICO files are renders of them (`rsvg-convert`), redone when the mark changes.
 
 ## Running locally
 

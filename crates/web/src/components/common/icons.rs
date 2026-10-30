@@ -296,3 +296,34 @@ pub fn WarningIcon(#[props(default = "size-4".to_owned())] class: String) -> Ele
         }
     }
 }
+
+/// The app's mark, a file tree drawing an E; colors inverted in dark mode. Also in
+/// `public/favicon.svg`.
+#[component]
+pub fn Logo(#[props(default = "size-6".to_owned())] class: String) -> Element {
+    rsx! {
+        svg { class, view_box: "0 0 64 64", "aria-hidden": "true",
+            rect {
+                class: "fill-slate-900 dark:fill-white",
+                x: "2",
+                y: "2",
+                width: "60",
+                height: "60",
+                rx: "14",
+            }
+            path {
+                class: "stroke-white dark:stroke-slate-900",
+                d: "M36 15H23a4.5 4.5 0 0 0-4.5 4.5V42a6 6 0 0 0 6 6H36M18.5 31.5H36",
+                fill: "none",
+                stroke_width: "5",
+                stroke_linecap: "round",
+                stroke_linejoin: "round",
+            }
+            g { class: "fill-indigo-400 dark:fill-indigo-600",
+                circle { cx: "44.5", cy: "15", r: "4.5" }
+                circle { cx: "44.5", cy: "31.5", r: "4.5" }
+                circle { cx: "44.5", cy: "48", r: "4.5" }
+            }
+        }
+    }
+}
