@@ -5,7 +5,7 @@ use dioxus_i18n::t;
 use shared::api::auth::Me;
 
 use super::user_menu::UserMenu;
-use crate::components::common::icons::MenuIcon;
+use crate::components::common::icons::{Logo, MenuIcon};
 use crate::routes::Route;
 
 const SIDEBAR_ID: &str = "sidebar";
@@ -92,7 +92,7 @@ pub fn Shell(
                         MenuIcon {}
                     }
                 }
-                span { class: "inline-block size-3 rounded-sm bg-indigo-600 dark:bg-indigo-400" }
+                Logo {}
                 span { class: "font-bold text-gray-900 dark:text-white", {t!("app-name")} }
                 div { class: "ml-auto flex items-center gap-1 sm:gap-3",
                     if let Some(search) = search {

@@ -1,3 +1,5 @@
+<img src="docs/images/logo.svg" alt="" width="72" height="72">
+
 # Explorer
 
 Self-hosted web file manager written in Rust (Axum server, Dioxus web UI).
