@@ -145,6 +145,7 @@ async fn send<T: DeserializeOwned>(
     request: gloo_net::http::RequestBuilder,
 ) -> Result<T, ApiFailure> {
     let response = request
+        .cache(web_sys::RequestCache::NoStore)
         .credentials(web_sys::RequestCredentials::SameOrigin)
         .header("accept", "application/json")
         .send()
