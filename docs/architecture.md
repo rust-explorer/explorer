@@ -38,6 +38,8 @@ server functions, so the API stays usable by other clients.
 4. Security headers (CSP suited to a WASM app, `X-Content-Type-Options`,
    `Referrer-Policy`) are set on every response. `/api/*` responses also carry
    `Cache-Control: no-store`: they are live state that must never be answered from a cache.
+   The web app also fetches them with `cache: "no-store"`, since a reverse proxy may replace
+   that header (GoDoxy sends `must-revalidate` with a one-hour `Expires`).
 
 ## Authentication
 

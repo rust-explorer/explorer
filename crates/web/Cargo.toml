@@ -51,6 +51,7 @@ web-sys = { workspace = true, features = [
     "Node",
     "NodeList",
     "ProgressEvent",
+    "RequestCache",
     "Storage",
     "Window",
     "XmlHttpRequest",
