@@ -3,7 +3,7 @@
 # Base images are pinned by digest; bump the tag and the digest together.
 ARG CARGO_CHEF_VERSION=0.1.78
 
-FROM rust:1.98-bookworm@sha256:93ce27a88655056a51dbdd8f5f2d7ddc071c7b0070fb288a37b5a285fc83971e AS chef
+FROM rust:1.99-bookworm@sha256:9181b56c2a21ab1d5e73cffe04fc762426d30aa7fac3c91141dd033f49a7fc8b AS chef
 ARG CARGO_CHEF_VERSION
 WORKDIR /src
 COPY rust-toolchain.toml ./
@@ -17,7 +17,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 # The bundle is platform-independent, so it is built natively. Trixie because the
 # prebuilt dx binary needs glibc >= 2.39. No cargo-chef here: dx builds with its own
 # injected profile, which a cooked cache would not match.
-FROM --platform=$BUILDPLATFORM rust:1.98-trixie@sha256:a8a5f0a1e5fe7dfe1d352591e4a1c7dd2c08fd70475cae872cf3458ba0df0546 AS web
+FROM --platform=$BUILDPLATFORM rust:1.99-trixie@sha256:09027f873d45b8ecd1dc86f1fa13b7a62b875c961f017a0e331267b350430137 AS web
 WORKDIR /src
 COPY rust-toolchain.toml ./
 RUN rustup toolchain install && rustup target add wasm32-unknown-unknown
